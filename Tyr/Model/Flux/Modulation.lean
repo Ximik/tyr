@@ -90,8 +90,8 @@ def applyModulation {batch seq hidden_size : Nat}
   -- Expand scale and shift to match sequence dimension
   let scale := Tensor.unsqueeze scale 1  -- [batch, 1, hidden_size]
   let shift := Tensor.unsqueeze shift 1  -- [batch, 1, hidden_size]
-  let scale := Tensor.expand scale #[batch, seq, hidden_size]
-  let shift := Tensor.expand shift #[batch, seq, hidden_size]
+  let scale := Tensor.broadcastTo scale #[batch, seq, hidden_size]
+  let shift := Tensor.broadcastTo shift #[batch, seq, hidden_size]
   -- Apply: (1 + scale) * x + shift
   let scale := Tensor.addScalar scale 1.0
   Tensor.add (Tensor.mul scale x) shift

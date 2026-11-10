@@ -34,13 +34,13 @@ local macro "vad_sizes" : tactic =>
 private def addBias2d {n d : Nat}
     (x : Tensor { device := device, shape := #[n, d], dtype := .Float32 }) (b : Tensor { device := device, shape := #[d], dtype := .Float32 })
     : Tensor { device := device, shape := #[n, d], dtype := .Float32 } :=
-  x + (b.reshape #[1, d]).expand #[n, d]
+  x + (b.reshape #[1, d]).broadcastTo #[n, d]
 
 private def addBias3d {batch channels frames : Nat}
     (x : Tensor { device := device, shape := #[batch, channels, frames], dtype := .Float32 })
     (b : Tensor { device := device, shape := #[channels], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, channels, frames], dtype := .Float32 } :=
-  x + (b.reshape #[1, channels, 1]).expand #[batch, channels, frames]
+  x + (b.reshape #[1, channels, 1]).broadcastTo #[batch, channels, frames]
 
 private def linear2d {batch inDim outDim : Nat}
     (x : Tensor { device := device, shape := #[batch, inDim], dtype := .Float32 })

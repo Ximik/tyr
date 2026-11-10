@@ -264,8 +264,8 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : Nat}
       let mix := Tensor.sigmoid valueMix
       let one : Tensor { shape := #[], dtype := .Float32, device := device } := (Tensor.ones (device := device) #[]).to mix.device
       let oneMinus := one - mix
-      let mixExpanded := Tensor.expand mix #[batch, seq, numHeads * headDim]
-      let oneMinusExpanded := Tensor.expand oneMinus #[batch, seq, numHeads * headDim]
+      let mixExpanded := Tensor.broadcastTo mix #[batch, seq, numHeads * headDim]
+      let oneMinusExpanded := Tensor.broadcastTo oneMinus #[batch, seq, numHeads * headDim]
       (vBase * oneMinusExpanded) + (ve * mixExpanded)
     | none =>
       vBase
@@ -276,8 +276,8 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : Nat}
   let v := Tensor.reshape v #[batch, seq, numHeads, headDim]
 
   -- Slice rotary embeddings to seq length (cos/sin are [rotaryLen, headDim])
-  let cos := Tensor.sliceChecked yarn.cos 0 0 seq #[seq, headDim / 2]
-  let sin := Tensor.sliceChecked yarn.sin 0 0 seq #[seq, headDim / 2]
+  let cos := Tensor.slice! yarn.cos 0 0 seq
+  let sin := Tensor.slice! yarn.sin 0 0 seq
 
   -- Apply rotary embeddings (uses half-dim rotation)
   let q := Tensor.applyRotary q cos sin
@@ -409,7 +409,7 @@ def Scalars.init (nLayer : Nat) (device : Device := .CPU) : IO (Scalars (device 
 
 /-- Extract scalar tensor at `idx` from a 1D tensor. -/
 private def scalarAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) : Tensor { shape := #[], dtype := .Float32, device := device } :=
-  let oneElem : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.sliceChecked values 0 idx 1 #[1]
+  let oneElem : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.slice! values 0 idx 1
   Tensor.reshape oneElem #[]
 
 /-- Extract scalar at `idx` and squash to (0, 1). -/
@@ -418,7 +418,7 @@ private def scalarSigmoidAt {n : Nat} (values : Tensor { shape := #[n], dtype :=
 
 /-- Scale a tensor by a scalar tensor, keeping gradient flow through the scalar. -/
 private def scaleByScalar {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (scalar : Tensor { shape := #[], dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } :=
-  let expanded := Tensor.expand scalar s
+  let expanded := Tensor.broadcastTo scalar s
   x * expanded
 
 /-- Blend two tensors with scalar weights. -/
@@ -522,9 +522,9 @@ def forward {cfg : Config} {batch seq : Nat}
     throw (IO.userError s!"ModdedGPT requires modelDim = nHead * headDim, got {cfg.modelDim} vs {cfg.nHead} * {cfg.headDim}")
   -- 1) Token embedding + lightweight smear-style modulation.
   let tokEmb := Tensor.embedding inputSeq params.embed
-  let smearIn : Tensor { shape := #[batch, seq, 12], dtype := .Float32, device := device } := Tensor.sliceChecked tokEmb 2 0 12 #[batch, seq, 12]
+  let smearIn : Tensor { shape := #[batch, seq, 12], dtype := .Float32, device := device } := Tensor.slice! tokEmb 2 0 12
   let smearGate := Tensor.sigmoid (params.smearGate.forward smearIn)
-  let smearGateExpanded := Tensor.expand smearGate #[batch, seq, cfg.modelDim]
+  let smearGateExpanded := Tensor.broadcastTo smearGate #[batch, seq, cfg.modelDim]
   let x0 := Tensor.rmsNorm (tokEmb + (tokEmb * smearGateExpanded))
 
   -- Precompute token value embeddings and global scalar controls.

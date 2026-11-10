@@ -1001,14 +1001,14 @@ def testQwen3ASRMaskedPositionsMatchTrimmedLeftPad : IO Unit := do
     (featureAttentionMask := (none : Option (Tensor { shape := #[batch, 1], dtype := .Int64, device := .CPU })))
     (attentionMask := some attnMask)
 
-  let idsTrim : Tensor { shape := #[batch, 4], dtype := .Int64, device := .CPU } := Tensor.sliceChecked ids 1 2 4 #[batch, 4]
+  let idsTrim : Tensor { shape := #[batch, 4], dtype := .Int64, device := .CPU } := Tensor.slice ids 1 2 4
   let logitsTrim ← model.forward
     idsTrim
     (inputFeatures := (none : Option (Tensor { dtype := .Float32, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, 1], device := .CPU })))
     (featureAttentionMask := (none : Option (Tensor { shape := #[batch, 1], dtype := .Int64, device := .CPU })))
     (attentionMask := (none : Option (Tensor { shape := #[batch, 4], dtype := .Int64, device := .CPU })))
 
-  let logitsMaskedValid : Tensor { dtype := .Float32, shape := #[batch, 4, ThinkerLmVocabSize cfg.thinkerConfig], device := .CPU } := Tensor.sliceChecked logitsMasked 1 2 4 #[batch, 4, ThinkerLmVocabSize cfg.thinkerConfig]
+  let logitsMaskedValid : Tensor { dtype := .Float32, shape := #[batch, 4, ThinkerLmVocabSize cfg.thinkerConfig], device := .CPU } := Tensor.slice logitsMasked 1 2 4
   let a ← Tensor.toFloatArray (logitsMaskedValid)
   let b ← Tensor.toFloatArray (logitsTrim)
   let mut maxErr : Float := 0.0
@@ -1071,10 +1071,10 @@ def testQwen3ASRAudioEncoderFeatureDType : IO Unit := do
       LeanTest.assertEqual error 0.0 "Automatic feature conversion equals an explicit model-dtype cast"
       LeanTest.assertTrue (Float.isFinite (Tensor.item (Tensor.sumAll (Tensor.toFloat32 audio))))
         "Varlen audio features are finite"
-      let empty : Tensor { dtype := modelDType, shape := #[1, 4, cfg.outputDim], device := .CPU } := Tensor.sliceChecked audio 0 2 1 #[1, 4, cfg.outputDim]
+      let empty : Tensor { dtype := modelDType, shape := #[1, 4, cfg.outputDim], device := .CPU } := Tensor.slice audio 0 2 1
       LeanTest.assertEqual (Tensor.item (Tensor.maxAll (Tensor.abs empty))) 0.0 "Zero-length sample stays zero"
-      let short : Tensor { dtype := modelDType, shape := #[1, 4, cfg.outputDim], device := .CPU } := Tensor.sliceChecked audio 0 1 1 #[1, 4, cfg.outputDim]
-      let padding : Tensor { dtype := modelDType, shape := #[1, 2, cfg.outputDim], device := .CPU } := Tensor.sliceChecked short 1 2 2 #[1, 2, cfg.outputDim]
+      let short : Tensor { dtype := modelDType, shape := #[1, 4, cfg.outputDim], device := .CPU } := Tensor.slice audio 0 1 1
+      let padding : Tensor { dtype := modelDType, shape := #[1, 2, cfg.outputDim], device := .CPU } := Tensor.slice short 1 2 2
       LeanTest.assertEqual (Tensor.item (Tensor.maxAll (Tensor.abs padding))) 0.0 "Short-sample output padding stays zero"
       let dense := encoder.forward mel (by decide)
       let denseExpected := encoder.forward expectedInput (by decide)
@@ -1113,7 +1113,7 @@ def testQwen3ASRBFloat16VariableLengthGeneration : IO Unit := do
   LeanTest.assertEqual (← Tensor.toUInt64Array generated.2)
     (← Tensor.toUInt64Array explicit.2)
     "Float32 frontend features produce the same tokens as an explicit BF16 cast"
-  let prefixIds : Tensor { shape := #[2, 6], dtype := .Int64, device := .CPU } := Tensor.sliceChecked generated.2 1 0 6 #[2, 6]
+  let prefixIds : Tensor { shape := #[2, 6], dtype := .Int64, device := .CPU } := Tensor.slice! generated.2 1 0 6
   LeanTest.assertEqual (← Tensor.toUInt64Array prefixIds)
     (← Tensor.toUInt64Array ids) "Generation preserves both prompts"
 

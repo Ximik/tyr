@@ -67,7 +67,7 @@ private def normalizeRows {n k : Nat} (Y : Tensor ⟨#[n, k], d, dev⟩) : Tenso
   let norms := Tensor.rowNorms Y
   let safeNorms := Tensor.addScalar norms 1e-12
   let normsCol : Tensor ⟨#[n, 1], d.realResult, dev⟩ := Tensor.reshape safeNorms #[n, 1] (by simp [TensorSpec.numelOfShape])
-  let expanded : Tensor ⟨#[n, k], d, dev⟩ := by simpa using Tensor.expand normsCol #[n, k]
+  let expanded : Tensor ⟨#[n, k], d, dev⟩ := by simpa using Tensor.broadcastTo normsCol #[n, k]
   by simpa using Tensor.div Y expanded
 
 /-- Project ambient matrix to row-normalized elliptope factor. -/
@@ -95,7 +95,7 @@ def smul (s : Float) (v : ElliptopeTangent n k d dev) : ElliptopeTangent n k d d
 def project (x : Elliptope n k d dev) (V : Tensor ⟨#[n, k], d, dev⟩) : ElliptopeTangent n k d dev :=
   let rowDotsCol : Tensor ⟨#[n, 1], d, dev⟩ :=
     by simpa using Tensor.sumDim (Tensor.mul x.factor V) 1 true
-  let rowDots : Tensor ⟨#[n, k], d, dev⟩ := Tensor.expand rowDotsCol #[n, k]
+  let rowDots : Tensor ⟨#[n, k], d, dev⟩ := Tensor.broadcastTo rowDotsCol #[n, k]
   ⟨Tensor.sub V (Tensor.mul x.factor rowDots)⟩
 
 end ElliptopeTangent

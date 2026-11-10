@@ -49,7 +49,7 @@ def MaskedDiffusionSchedule.addMasks {num_timesteps batch seq : Nat}
 
   -- Expand to [batch, seq] for comparison
   let maskProbExpanded := Tensor.unsqueeze maskProbPerSample 1  -- [batch, 1]
-  let maskProbBroadcast := Tensor.expand maskProbExpanded #[batch, seq]  -- [batch, seq]
+  let maskProbBroadcast := Tensor.broadcastTo maskProbExpanded #[batch, seq]  -- [batch, seq]
 
   -- Generate random values in [0, 1)
   let randTensor ← Tensor.uniformLike (Tensor.zeros #[batch, seq])
@@ -63,7 +63,7 @@ def MaskedDiffusionSchedule.addMasks {num_timesteps batch seq : Nat}
 
   -- Expand context mask to [batch, seq]
   let contextMask_unsq := Tensor.unsqueeze contextMask 0  -- [1, seq]
-  let contextMask_exp := Tensor.expand contextMask_unsq #[batch, seq]  -- [batch, seq]
+  let contextMask_exp := Tensor.broadcastTo contextMask_unsq #[batch, seq]  -- [batch, seq]
 
   -- Final mask: should mask AND not in context
   let notContext := Tensor.logicalNot contextMask_exp

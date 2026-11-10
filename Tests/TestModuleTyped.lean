@@ -41,7 +41,7 @@ private instance {inDim outDim batch : Nat} :
   forward m x :=
     let y := Tensor.linear x m.weight
     match m.bias with
-    | some b => Add.add y (Tensor.expand b #[batch, outDim])
+    | some b => Add.add y (Tensor.broadcastTo b #[batch, outDim])
     | none => y
 
 private structure MyDropout where

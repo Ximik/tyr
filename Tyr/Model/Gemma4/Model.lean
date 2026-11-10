@@ -49,8 +49,8 @@ def forward2d {n dim : Nat}
   let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
   let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
   let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var m.eps)
-  let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand inv #[n, dim]
-  let scale : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshape (floatDynamic m.weight.2) #[1, dim]) #[n, dim]
+  let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo inv #[n, dim]
+  let scale : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo (Tensor.reshape (floatDynamic m.weight.2) #[1, dim]) #[n, dim]
   Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) scale)
 
 def forward3d {batch seq dim : Nat}
@@ -82,7 +82,7 @@ private def rmsNormNoScale2d {n dim : Nat}
   let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
   let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
   let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var eps)
-  let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand inv #[n, dim]
+  let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo inv #[n, dim]
   Tensor.castLike x (Tensor.mul xf inv)
 
 private def rmsNormNoScale4d {a b c dim : Nat}
@@ -101,8 +101,8 @@ private def rmsNormWeighted4dSlice {a b c dim maxDim : Nat} {weightDType : DType
   let xf : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshape x #[a * b * c, dim]
   let var : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := Tensor.meanDim (Tensor.mul xf xf) 1 true
   let inv : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := rsqrtDynamic (Tensor.addScalar var eps)
-  let inv : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.expand inv #[a * b * c, dim]
-  let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshape (floatDynamic w) #[1, dim]) #[a * b * c, dim]
+  let inv : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.broadcastTo inv #[a * b * c, dim]
+  let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.broadcastTo (Tensor.reshape (floatDynamic w) #[1, dim]) #[a * b * c, dim]
   Tensor.castLike x (Tensor.reshape (Tensor.mul (floatDynamic (Tensor.mul xf inv)) scale) #[a, b, c, dim])
 
 private def rmsNormNoScale4dSlice {a b c dim : Nat}
@@ -149,15 +149,15 @@ def forward {tokens : Nat}
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := rmsNormNoScale2d hidden cfg.rms_norm_eps
   let scaleRoot := 1.0 / Float.sqrt cfg.hidden_size.toFloat
   let scale : Tensor ⟨#[tokens, cfg.hidden_size], .Float32, device⟩ :=
-    Tensor.expand (Tensor.reshape m.scale #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
+    Tensor.broadcastTo (Tensor.reshape m.scale #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } :=
     Tensor.mulScalar (Tensor.mul (floatDynamic normed) scale) scaleRoot
-  let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsumChecked "eh,th->te" m.proj normed
+  let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsum! "eh,th->te" m.proj normed
   let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.reshape logitsDyn #[tokens, cfg.num_experts]
   let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.softmax logits
   let (topValsRaw, topIdx) := Tensor.topKLast2d probs cfg.top_k_experts cfg.topKValid
   let denom : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := Tensor.sumDim topValsRaw 1 true
-  let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.expand denom #[tokens, cfg.top_k_experts]
+  let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.broadcastTo denom #[tokens, cfg.top_k_experts]
   let topVals : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.div topValsRaw denom
   let flatIdx : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Int64 } := Tensor.reshape topIdx #[tokens * cfg.top_k_experts]
   let scalesFlat : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Float32 } :=
@@ -812,7 +812,7 @@ private def applyLayerScalar {batch seq : Nat}
     (scale : Tensor { device := device, shape := #[1], dtype := dtype })
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
-  let s : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.expand (Tensor.reshape scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
+  let s : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.broadcastTo (Tensor.reshape scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
   Tensor.mul x s
 
 private def applyPerLayerInput {batch seq : Nat}

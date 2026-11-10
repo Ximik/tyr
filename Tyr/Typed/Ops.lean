@@ -683,6 +683,13 @@ def divB {σ₁ σ₂ : StaticSpec} {result : DType}
     Tensor (σ₁.division σ₂) :=
   divB! a b
 
+/-- Discharges `broadcastsTo` for shapes with symbolic dimensions. -/
+macro "broadcast_shape" : tactic => `(tactic| first
+  | (unfold TensorSpec.broadcastsTo; exact of_decide_eq_true rfl)
+  | (simp [TensorSpec.broadcastsTo, TensorSpec.broadcastShapes?, TensorSpec.broadcastShapes?.go,
+      List.range_succ] <;> (repeat' split) <;> simp_all <;> fail "shapes do not broadcast")
+  | rfl)
+
 def broadcastTo! {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
     Tensor (σ.withShape target) :=
   Tensor.ofRaw! "broadcastTo" (RawTensor.expand! t.raw target)
@@ -691,7 +698,7 @@ def broadcastTo! {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
     no copy). The fixed-side proof `broadcastsTo s target` rules out targets
     that would themselves be stretched. -/
 def broadcastTo {σ : StaticSpec} (t : Tensor σ) (target : Shape)
-    (_h : TensorSpec.broadcastsTo σ.shape target := by rfl) :
+    (_h : TensorSpec.broadcastsTo σ.shape target := by broadcast_shape) :
     Tensor (σ.withShape target) :=
   broadcastTo! t target
 
@@ -703,12 +710,6 @@ def expand? {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
   if TensorSpec.broadcastShapes? σ.shape target != some target then
     throw s!"Cannot expand shape {σ.shape} to {target}"
   pure (Tensor.ofRaw! "expand" (← RawTensor.expandChecked t.raw target))
-
-/-- Expand to `target` without a broadcast proof; an invalid expansion aborts.
-Use `broadcastTo` when the proof reduces, or `expand?` to handle the error. -/
-def expand {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
-    Tensor (σ.withShape target) :=
-  Tensor.ofRaw! "expand" (RawTensor.expand! t.raw target)
 
 /-! ## Reductions -/
 
@@ -763,11 +764,15 @@ def reshape {σ : StaticSpec} (t : Tensor σ) (shape' : Shape)
 
 /-- Slice an exact number of entries along a valid axis. Bounds are checked in
 natural arithmetic so `start + len` cannot wrap or silently truncate. -/
+def slice! {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat) :
+    Tensor (σ.withShape (σ.shape.set! dim len)) :=
+  Tensor.ofRaw! "slice" (RawTensor.slice t.raw dim start len)
+
 def slice {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
     (_axis : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
     (_bounds : start + len ≤ σ.shape[dim]'_axis := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor (σ.withShape (σ.shape.set! dim len)) :=
-  Tensor.ofRaw! "slice" (RawTensor.slice t.raw dim start len)
+  slice! t dim start len
 
 def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat)
     (_h : TensorSpec.isPermutation permutation σ.shape.size = true := by
@@ -824,11 +829,12 @@ def stack1d {cols : Nat} {d : DType} {dev : Device}
     Tensor ⟨#[tensors.size, cols], d, dev⟩ :=
   Tensor.ofRaw! "stack1d" (RawTensor.stack1d (tensors.map Tensor.toTensor) 0)
 
-/-- Slice `len` entries along `dim` at a runtime offset, validating the result
-    against the claimed spec and panicking on mismatch. -/
-def sliceChecked {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
+/-- Slice `len` entries along `dim`, admitting the result at the caller's
+    `shape'`; a wrong claim aborts. Prefer `slice` or `slice!`, whose result
+    shape is computed. -/
+def sliceAs! {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
     (shape' : Shape) : Tensor (σ.withShape shape') :=
-  (Tensor.ofRaw! "sliceChecked" (RawTensor.slice t.raw dim start len))
+  Tensor.ofRaw! "sliceAs" (RawTensor.slice t.raw dim start len)
 
 /-- Vector-Jacobian product, checked against `x`'s spec. Saved intermediates
 are released by default. As in PyTorch, omitted retention follows `createGraph`.
@@ -1070,12 +1076,6 @@ def layerNorm {batch seq n : Nat} {d : DType} {dev : Device}
     (bias : Tensor ⟨#[n], d, dev⟩) (eps : Float := 1e-5) :
     Tensor ⟨#[batch, seq, n], d, dev⟩ :=
   Tensor.ofRaw! "layerNorm" (RawTensor.layerNorm x.raw weight.raw bias.raw eps)
-
-/-- Discharges `broadcastsTo` for shapes with symbolic dimensions. -/
-macro "broadcast_shape" : tactic => `(tactic| first
-  | rfl
-  | (simp [TensorSpec.broadcastsTo, TensorSpec.broadcastShapes?, TensorSpec.broadcastShapes?.go,
-      List.range_succ] <;> (repeat' split) <;> simp_all <;> fail "shapes do not broadcast"))
 
 def rmsNormWeighted! {σ : StaticSpec} {w : Shape} {result : DType}
     [TensorSpec.Promotes ⟨σ.shape, .Float32⟩ ⟨w, σ.dtype⟩ result]

@@ -73,7 +73,7 @@ private def scaleColumns {rank dim : Nat} {d : DType} {dev : Device} [DType.Prom
     (scale : Tensor ⟨#[dim], d, dev⟩) : Tensor ⟨#[rank, dim], d, dev⟩ :=
   let scaleRow : Tensor ⟨#[1, dim], d, dev⟩ :=
     Tensor.reshape scale #[1, dim] (by simp [TensorSpec.numelOfShape])
-  let scaleFull : Tensor ⟨#[rank, dim], d, dev⟩ := Tensor.expand scaleRow #[rank, dim]
+  let scaleFull : Tensor ⟨#[rank, dim], d, dev⟩ := Tensor.broadcastTo scaleRow #[rank, dim]
   Tensor.mul matrix scaleFull
 
 private def vectorToColumn {n : Nat} {d : DType} {dev : Device}

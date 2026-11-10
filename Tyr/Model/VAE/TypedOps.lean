@@ -15,6 +15,6 @@ def upsample2 {b c h w : Nat} (x : Tensor { dtype := dtype, device := device, sh
   (Tensor.ofRaw! "upsample2" (RawTensor.interpolate x.raw #[h * 2, w * 2] "nearest" false))
 
 def bmm {b m k n : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, m, k] }) (y : Tensor { dtype := dtype, device := device, shape := #[b, k, n] }) : Tensor { dtype := dtype, device := device, shape := #[b, m, n] } :=
-  qwen35.einsumChecked "bmk,bkn->bmn" x y
+  qwen35.einsum! "bmk,bkn->bmn" x y
 
 end torch.vae

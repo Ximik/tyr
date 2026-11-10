@@ -71,11 +71,11 @@ structure SemigroupTimes (batch : Nat) where
   tauT : Tensor { device := device, shape := #[batch], dtype := .Float32 }
 
 private def expandBatch {batch seq : Nat} (x : Tensor { device := device, shape := #[batch], dtype := .Float32 }) : Tensor { device := device, shape := #[batch, seq], dtype := .Float32 } :=
-  Tensor.expand (Tensor.unsqueeze x 1) #[batch, seq]
+  Tensor.broadcastTo (Tensor.unsqueeze x 1) #[batch, seq]
 
 private def expandTime3 {batch seq vocab : Nat} (x : Tensor { device := device, shape := #[batch], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, seq, vocab], dtype := .Float32 } :=
-  Tensor.expand (Tensor.unsqueeze (Tensor.unsqueeze x 1) 2) #[batch, seq, vocab]
+  Tensor.broadcastTo (Tensor.unsqueeze (Tensor.unsqueeze x 1) 2) #[batch, seq, vocab]
 
 /-- Token ids to one-hot vectors using `eye` as the embedding table. -/
 def oneHot {batch seq vocab : Nat} (tokens : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })

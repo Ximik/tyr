@@ -54,13 +54,13 @@ private def addBias2d {batch dim : Nat}
     (x : Tensor { shape := #[batch, dim], dtype := .Float32, device := device })
     (b : Tensor { shape := #[dim], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, dim], dtype := .Float32, device := device } :=
-  x + Tensor.expand (Tensor.reshape b #[1, dim]) #[batch, dim]
+  x + Tensor.broadcastTo (Tensor.reshape b #[1, dim]) #[batch, dim]
 
 private def addBias3d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
     (b : Tensor { shape := #[channels], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } :=
-  let be : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.expand (Tensor.reshape b #[1, channels, 1]) #[batch, channels, frames]
+  let be : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.broadcastTo (Tensor.reshape b #[1, channels, 1]) #[batch, channels, frames]
   x + be
 
 private def seqToCF {batch seq channels : Nat}
@@ -96,23 +96,23 @@ private def instanceNormCF {batch channels frames : Nat}
     (eps : Float := 1e-5)
     : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } :=
   let mean : Tensor { shape := #[batch, channels, 1], dtype := .Float32, device := device } := Tensor.meanDim x 2 true
-  let meanE : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.expand mean #[batch, channels, frames]
+  let meanE : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.broadcastTo mean #[batch, channels, frames]
   let centered : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := x - meanE
   let var : Tensor { shape := #[batch, channels, 1], dtype := .Float32, device := device } := Tensor.meanDim (centered * centered) 2 true
   let invStd : Tensor { shape := #[batch, channels, 1], dtype := .Float32, device := device } := Tensor.rsqrt (var + eps)
-  let invStdE : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.expand invStd #[batch, channels, frames]
+  let invStdE : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.broadcastTo invStd #[batch, channels, frames]
   centered * invStdE
 
 private def styleExpand {batch dim frames : Nat}
     (style : Tensor { shape := #[batch, dim], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, dim, frames], dtype := .Float32, device := device } :=
-  Tensor.expand (Tensor.reshape style #[batch, dim, 1]) #[batch, dim, frames]
+  Tensor.broadcastTo (Tensor.reshape style #[batch, dim, 1]) #[batch, dim, frames]
 
 private def snake1d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
     (alpha : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } :=
-  let a : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.expand alpha #[batch, channels, frames]
+  let a : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.broadcastTo alpha #[batch, channels, frames]
   let inv : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.div (Tensor.ones #[batch, channels, frames] false x.device) a
   x + inv * Tensor.pow (Tensor.sin (x * a)) 2.0
 
@@ -271,7 +271,7 @@ def forward {batch frames channels kernel stride padding outputPadding dilation 
       Tensor.reshape (Tensor.convTranspose1d! xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
         (by simp [outFrames])
     parts := parts.push (Tensor.packShape yc)
-  Tensor.catManyChecked parts 1 #[batch, channels, outFrames]
+  Tensor.catMany! parts 1 #[batch, channels, outFrames]
 
 end DepthwiseTransConv1dParams
 
@@ -288,9 +288,9 @@ private def applyWeightNormConv1d {outC inC kernel : Nat}
     (weightG : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } :=
   let denom : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape (normDim0_3d weightV) #[outC, 1, 1]
-  let denomE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.expand denom #[outC, inC, kernel]
+  let denomE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.broadcastTo denom #[outC, inC, kernel]
   let gain : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape weightG #[outC, 1, 1]
-  let gainE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.expand gain #[outC, inC, kernel]
+  let gainE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.broadcastTo gain #[outC, inC, kernel]
   Tensor.div (weightV * gainE) denomE
 
 private def applyWeightNormTransConv1d {inC outC kernel : Nat}
@@ -298,9 +298,9 @@ private def applyWeightNormTransConv1d {inC outC kernel : Nat}
     (weightG : Tensor { shape := #[inC], dtype := .Float32, device := device })
     : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device } :=
   let denom : Tensor { shape := #[inC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape (normDim0_3d weightV) #[inC, 1, 1]
-  let denomE : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device } := Tensor.expand denom #[inC, outC, kernel]
+  let denomE : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device } := Tensor.broadcastTo denom #[inC, outC, kernel]
   let gain : Tensor { shape := #[inC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape weightG #[inC, 1, 1]
-  let gainE : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device } := Tensor.expand gain #[inC, outC, kernel]
+  let gainE : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device } := Tensor.broadcastTo gain #[inC, outC, kernel]
   Tensor.div (weightV * gainE) denomE
 
 structure WNConv1dParams
@@ -412,7 +412,7 @@ def forward {batch frames channels kernel stride padding outputPadding dilation 
       Tensor.reshape (Tensor.convTranspose1d! xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
         (by simp [outFrames])
     parts := parts.push (Tensor.packShape yc)
-  Tensor.catManyChecked parts 1 #[batch, channels, outFrames]
+  Tensor.catMany! parts 1 #[batch, channels, outFrames]
 
 end WNDepthwiseTransConv1dParams
 
@@ -494,7 +494,7 @@ private def runDirection {seq input hidden : Nat}
     let pushed : Tensor { shape := #[1, 1, hidden], dtype := .Float32, device := device } := Tensor.reshape hNext #[1, 1, hidden]
     outs := outs.push (Tensor.packShape pushed)
   let ordered := if reverse then outs.reverse else outs
-  Tensor.catManyChecked ordered 1 #[1, seq, hidden]
+  Tensor.catMany! ordered 1 #[1, seq, hidden]
 
 def forward {seq input hidden : Nat}
     (m : BiLSTM (device := device) input hidden)
@@ -772,8 +772,8 @@ def forward {batch frames styleDim channels : Nat}
   let beta : Tensor { shape := #[batch, 1, channels], dtype := .Float32, device := device } := Tensor.reshape (sliceTensor h 1 channels channels) #[batch, 1, channels]
   let xSeq : Tensor { shape := #[batch, frames, channels], dtype := .Float32, device := device } := cfToSeq x
   let normed : Tensor { shape := #[batch, frames, channels], dtype := .Float32, device := device } := Tensor.layerNorm xSeq (Tensor.ones #[channels] false x.device) (Tensor.zeros #[channels] false x.device) 1e-5
-  let g : Tensor { shape := #[batch, frames, channels], dtype := .Float32, device := device } := Tensor.expand gamma #[batch, frames, channels]
-  let b : Tensor { shape := #[batch, frames, channels], dtype := .Float32, device := device } := Tensor.expand beta #[batch, frames, channels]
+  let g : Tensor { shape := #[batch, frames, channels], dtype := .Float32, device := device } := Tensor.broadcastTo gamma #[batch, frames, channels]
+  let b : Tensor { shape := #[batch, frames, channels], dtype := .Float32, device := device } := Tensor.broadcastTo beta #[batch, frames, channels]
   seqToCF (affineShift normed g b)
 
 end AdaLayerNorm
@@ -801,11 +801,11 @@ def forward {frames styleDim channels : Nat}
   let gamma : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device } := Tensor.reshape (sliceTensor h 1 0 channels) #[1, channels, 1]
   let beta : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device } := Tensor.reshape (sliceTensor h 1 channels channels) #[1, channels, 1]
   let baseNorm := instanceNormCF x
-  let normW : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.expand (Tensor.reshape m.normWeight #[1, channels, 1]) #[1, channels, frames]
-  let normB : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.expand (Tensor.reshape m.normBias #[1, channels, 1]) #[1, channels, frames]
+  let normW : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.broadcastTo (Tensor.reshape m.normWeight #[1, channels, 1]) #[1, channels, frames]
+  let normB : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.broadcastTo (Tensor.reshape m.normBias #[1, channels, 1]) #[1, channels, frames]
   let normed : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := baseNorm * normW + normB
-  let g : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.expand gamma #[1, channels, frames]
-  let b : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.expand beta #[1, channels, frames]
+  let g : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.broadcastTo gamma #[1, channels, frames]
+  let b : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.broadcastTo beta #[1, channels, frames]
   affineShift normed g b
 
 end AdaIN1d
@@ -1044,7 +1044,7 @@ private def reflectPadLeft1 {channels frames : Nat}
       sliceTensor x 2 0 1
     else
       sliceTensor x 2 1 1
-  Tensor.catManyChecked #[Tensor.packShape pad, Tensor.packShape x] 2 #[1, channels, frames + 1]
+  Tensor.catMany! #[Tensor.packShape pad, Tensor.packShape x] 2 #[1, channels, frames + 1]
 
 private def harmonicMultipliers (harmonicCount : Nat) : Tensor { shape := #[harmonicCount + 1], dtype := .Float32, device := device } :=
   let vals : Array Float := Array.ofFn (n := harmonicCount + 1) fun i => i.val.toFloat + 1.0
@@ -1298,8 +1298,8 @@ def forward {baseFrames : Nat}
   have _hWave : 1 ≤ waveFrames := cfg.generator.waveSamples_pos hb
   let harmonics := cfg.generator.harmonicCount + 1
   let mult : Tensor { shape := #[1, 1, harmonics], dtype := .Float32, device := device } := Tensor.reshape (harmonicMultipliers cfg.generator.harmonicCount) #[1, 1, harmonics]
-  let multE : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.expand mult #[1, waveFrames, harmonics]
-  let f0E : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.expand f0 #[1, waveFrames, harmonics]
+  let multE : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.broadcastTo mult #[1, waveFrames, harmonics]
+  let f0E : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.broadcastTo! f0 #[1, waveFrames, harmonics]
   let rad0 : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := (f0E * multE) / cfg.sampleRate.toFloat
   let radBase : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := rad0 - floorTensor rad0
 
@@ -1323,7 +1323,7 @@ def forward {baseFrames : Nat}
 
   let threshold : Tensor { shape := #[1, waveFrames, 1], dtype := .Float32, device := device } := Tensor.full #[1, waveFrames, 1] voicedThreshold false f0.device
   let uv : Tensor { shape := #[1, waveFrames, 1], dtype := .Float32, device := device } := Tensor.toFloat32 (Tensor.lt threshold f0)
-  let uvE : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.expand uv #[1, waveFrames, harmonics]
+  let uvE : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.broadcastTo uv #[1, waveFrames, harmonics]
   let noiseAmp : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } :=
     uvE * noiseStd + (Tensor.onesLike uvE - uvE) * (sineAmp / 3.0)
   let noise : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } ← Tensor.randn #[1, waveFrames, harmonics] false f0.device
@@ -1588,7 +1588,7 @@ def debugForward {baseFrames : Nat}
   let im3 : Tensor { shape := #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 1], dtype := .Float32, device := device } :=
     Tensor.reshape im #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 1]
   let packed : Tensor { shape := #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 2], dtype := .Float32, device := device } :=
-    Tensor.catManyChecked #[Tensor.packShape re3, Tensor.packShape im3] 2
+    Tensor.catMany! #[Tensor.packShape re3, Tensor.packShape im3] 2
       #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 2]
   let window : Tensor { shape := #[cfg.generator.genIstftNFft], dtype := .Float32, device := device } := m.window.to post.device
   let audio1d : Tensor { shape := #[GeneratorConfig.waveSamples cfg.generator baseFrames], dtype := .Float32, device := device } :=

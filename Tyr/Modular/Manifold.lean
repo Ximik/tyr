@@ -154,7 +154,7 @@ def forward2d [MatrixManifoldCarrier M device] {in_dim out_dim batch : Nat}
     (x : AmbientMatrix (device := device) batch in_dim) : AmbientMatrix (device := device) batch out_dim :=
   let y := Tensor.linear x (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
   match lin.bias with
-  | some b => Add.add y (Tensor.expand b #[batch, out_dim])
+  | some b => Add.add y (Tensor.broadcastTo b #[batch, out_dim])
   | none => y
 
 /-- Apply a manifold-native step to weights and an Euclidean step to bias. -/

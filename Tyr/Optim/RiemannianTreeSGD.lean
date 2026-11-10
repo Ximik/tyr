@@ -75,7 +75,7 @@ def applyTranspose {Params : Type} [TensorStruct Params] [FloatingTensorStruct P
   Id.run do
     let mut acc := TensorStruct.map Tensor.zerosLike prototype
     for i in List.finRange rank do
-      let coeff1 := Tensor.sliceChecked coeffs 0 i.val 1 #[1]
+      let coeff1 := Tensor.slice coeffs 0 i.val 1
       let coeff := Tensor.item (Tensor.sumAll coeff1)
       let row := K.rowAt i
       acc := TensorStruct.add acc (TensorStruct.scale row coeff)
@@ -142,7 +142,7 @@ private def buildTreeFactorFromOutputFactor [TensorStruct Params] [FloatingTenso
   let rows :=
     ((List.range rank).toArray.map fun i =>
       let rowFlat : Tensor { shape := #[shapeNumel s], dtype := .Float32, device := device } :=
-        Tensor.reshape (Tensor.sliceChecked outputFactor.matrix 0 i 1 #[1, shapeNumel s])
+        Tensor.reshape (Tensor.slice! outputFactor.matrix 0 i 1)
           #[shapeNumel s]
       Tensor.reshape rowFlat s (by simp))
   buildTreeFactorFromCotangentRows output params rows (by simp [rows])

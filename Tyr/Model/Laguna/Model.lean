@@ -81,8 +81,8 @@ private def rmsNormWeighted2d {n dim : Nat}
   let xf : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := floatDynamic x
   let var : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := Tensor.meanDim (Tensor.mul xf xf) 1 true
   let inv : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := rsqrtDynamic (Tensor.addScalar var eps)
-  let inv : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.expand inv #[n, dim]
-  let w : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.expand (Tensor.reshape (floatDynamic weight.2) #[1, dim]) #[n, dim]
+  let inv : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.broadcastTo inv #[n, dim]
+  let w : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.broadcastTo (Tensor.reshape (floatDynamic weight.2) #[1, dim]) #[n, dim]
   Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) w)
 
 /-- FP32 RMSNorm over the last dim of a 3D `[batch, seq, dim]` tensor. -/
@@ -231,7 +231,7 @@ private def gateAndOut {batch seq numHeads : Nat}
   let gateRaw : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads] } := Tensor.linear3d xn m.g_proj
   let gate : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads] } := Tensor.castLike xn (softplusDynamic (floatDynamic gateRaw))
   let gate4 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] } :=
-    Tensor.expand (Tensor.unsqueeze gate 3) #[batch, seq, numHeads, cfg.head_dim]
+    Tensor.broadcastTo (Tensor.unsqueeze gate 3) #[batch, seq, numHeads, cfg.head_dim]
   let gated : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads * cfg.head_dim] } :=
     Tensor.reshape (Tensor.mul attn gate4) #[batch, seq, numHeads * cfg.head_dim]
   Tensor.linear3d gated m.o_proj
@@ -957,7 +957,7 @@ private partial def decodeLoopCached {batch : Nat}
   | none => pure ()
 
   let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
-  let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.catManyChecked #[curIds.packShape, nextCol.packShape] 1 #[batch, curSeq + 1]
+  let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.catMany! #[curIds.packShape, nextCol.packShape] 1 #[batch, curSeq + 1]
 
   let stop :=
     if eosTokenIds.isEmpty then

@@ -266,7 +266,7 @@ def testTypedRuntimeShapeResults : IO Unit := do
   assertValid ((Tensor.full #[] 5).squeeze 0) "scalar squeeze axis 0"
   assertValid ((Tensor.full #[] 5).unsqueeze 0) "scalar unsqueeze axis 0"
   assertValid (matrix.sumDim 1) "runtime axis reduction"
-  assertValid ((Tensor.ones #[1, 3]).expand #[2, 3]) "runtime expansion"
+  assertValid ((Tensor.ones #[1, 3]).broadcastTo #[2, 3]) "runtime expansion"
   assertValid (matrix.argmax 1) "runtime argmax axis"
   LeanTest.assertTrue (Tensor.allclose matrix.softmax (matrix.softmax 1))
     "softmax defaults to the last axis"

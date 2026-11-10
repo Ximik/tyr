@@ -8,16 +8,16 @@ variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
 
 def typedSlice {s out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : Nat) : Tensor { device := device, shape := out, dtype := d } :=
-  x.sliceChecked dim start len out
+  x.sliceAs! dim start len out
 
 def typedCat {s t out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (y : Tensor { device := device, shape := t, dtype := d }) (dim : Nat) : Tensor { device := device, shape := out, dtype := d } :=
-  Tensor.catManyChecked #[x.packShape, y.packShape] dim out
+  Tensor.catMany! #[x.packShape, y.packShape] dim out
 
 def transposeSeq {batch seq dim : Nat} {d : DType} (x : Tensor { device := device, shape := #[batch, seq, dim], dtype := d }) :
     Tensor { device := device, shape := #[batch, dim, seq], dtype := d } := x.transpose 1 2
 
-def einsumChecked {s t out : Shape} (equation : String) (x : Tensor { device := device, shape := s, dtype := dtype }) (y : Tensor { device := device, shape := t, dtype := dtype }) : Tensor { device := device, shape := out, dtype := dtype } :=
-  Tensor.ofRaw! "einsumChecked" (RawTensor.einsum2 equation x.raw y.raw)
+def einsum! {s t out : Shape} (equation : String) (x : Tensor { device := device, shape := s, dtype := dtype }) (y : Tensor { device := device, shape := t, dtype := dtype }) : Tensor { device := device, shape := out, dtype := dtype } :=
+  Tensor.ofRaw! "einsum!" (RawTensor.einsum2 equation x.raw y.raw)
 
 def rsqrtDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
   Tensor.rsqrt x

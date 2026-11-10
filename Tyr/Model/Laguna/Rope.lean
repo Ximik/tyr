@@ -174,7 +174,7 @@ def precomputeRotaryTables (cfg : Config) (maxLen : Nat) (device : Device)
     `sliceRotaryRows table position 1`. -/
 def sliceRotaryRows {half : Nat} (table : ShapePackedTensor .Float32 device)
     (start len : Nat) : Tensor { device := device, shape := #[len, half], dtype := .Float32 } :=
-  table.2.sliceChecked 0 start len #[len, half]
+  table.2.sliceAs! 0 start len #[len, half]
 
 /-- Slice rows `[start, start + len)` of a cos/sin table pair. -/
 def sliceRotaryRowsPair {half : Nat}
@@ -197,10 +197,10 @@ def applyRotaryPartial {batch seq n_head head_dim rotary_dim : Nat} {d dc : DTyp
     (cos : Tensor { device := device, shape := #[seq, rotary_dim / 2], dtype := dc })
     (sin : Tensor { device := device, shape := #[seq, rotary_dim / 2], dtype := dc })
     : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := d } :=
-  let xRot := x.sliceChecked 3 0 rotary_dim #[batch, seq, n_head, rotary_dim]
+  let xRot := x.slice! 3 0 rotary_dim
   let xRot := Tensor.applyRotary xRot cos sin
   let xPassLen : Nat := head_dim - rotary_dim
-  let xPass := x.sliceChecked 3 rotary_dim xPassLen #[batch, seq, n_head, xPassLen]
-  Tensor.catManyChecked #[xRot.packShape, xPass.packShape] 3 #[batch, seq, n_head, head_dim]
+  let xPass := x.slice! 3 rotary_dim xPassLen
+  Tensor.catMany! #[xRot.packShape, xPass.packShape] 3 #[batch, seq, n_head, head_dim]
 
 end torch.laguna
