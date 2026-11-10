@@ -189,7 +189,7 @@ def loss {cfg : Config} {batch seq : Nat}
     : Activation #[] :=
   let logitsFlat := Tensor.reshape logits #[batch * seq, cfg.vocab_size]
   let targetsFlat := Tensor.reshape targets #[batch * seq]
-  Tensor.crossEntropy logitsFlat targetsFlat
+  Tensor.crossEntropy! logitsFlat targetsFlat
 
 /-- Helper to get mask of positions that are still masked -/
 def getMaskedPositions' {batch seq : Nat}

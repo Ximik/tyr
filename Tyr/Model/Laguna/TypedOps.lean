@@ -27,7 +27,7 @@ def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := 
   x.slice! dim start len
 
 def randnDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Tensor { dtype := dtype, device := device, shape := shape }) := do
-  IO.ofExcept ((← Tensor.randn (device := device) shape).castDType? dtype)
+  pure ((← Tensor.randn (device := device) shape).castDType dtype)
 
 def hasGradFn {σ : StaticSpec} (x : Tensor σ) : Bool :=
   RawTensor.lagunaHasGradFn x.raw

@@ -519,7 +519,9 @@ def waveformToWhisperFeatures
       pure (wav0 + noise * cfg.dither)
 
   let window : Tensor { device := .CPU, shape := #[nFft], dtype := .Float32 } := Tensor.hannWindow nFft
-  let stftDyn ← Tensor.stft wav nFft hop window true false
+  let ⟨hStft⟩ ← if h : Tensor.StftValid targetSamples nFft hop nFft true then pure (PLift.up h) else
+    throw <| IO.userError s!"STFT parameters n_fft={nFft} hop_length={hop} do not fit {targetSamples} samples"
+  let stftDyn := Tensor.stft wav nFft hop window true false hStft
   let freqBins := nFft / 2 + 1
   let stftFrames := Tensor.stftFrames targetSamples nFft hop true
   let packed := 2
@@ -634,7 +636,9 @@ def waveformToWhisperFeaturesDynamic
     let windowCpu : Tensor { device := .CPU, shape := #[nFft], dtype := .Float32 } := Tensor.hannWindow nFft
     let window : Tensor { device := runDevice, shape := #[nFft], dtype := .Float32 } :=
       windowCpu.to runDevice
-    let stft ← Tensor.stft wav nFft hop window true false
+    let ⟨hStft⟩ ← if h : Tensor.StftValid targetSamples nFft hop nFft true then pure (PLift.up h) else
+      throw <| IO.userError s!"STFT parameters n_fft={nFft} hop_length={hop} do not fit {targetSamples} samples"
+    let stft := Tensor.stft wav nFft hop window true false hStft
     let freqBins := nFft / 2 + 1
     let stftFrames := Tensor.stftFrames targetSamples nFft hop true
     if stft.runtimeShape != #[freqBins, stftFrames, 2] then

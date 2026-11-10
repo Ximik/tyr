@@ -333,8 +333,8 @@ def forward2d {tokens : Nat}
         pure (seen.qsort (· < ·))
       for eU in hitExperts do
         let ⟨nE, pairsE⟩ := Tensor.maskedSelect pairIds (Tensor.eqScalar flatIdx eU.toInt64)
-        let tokE := Tensor.indexSelect tokIdsFlat pairsE
-        let wE := Tensor.indexSelect flatW pairsE
+        let tokE := Tensor.indexSelect! tokIdsFlat pairsE
+        let wE := Tensor.indexSelect! flatW pairsE
         let (gateW, upW, downW) ← expertWeights cfg m eU
         -- SwiGLU expert MLP in BF16.
         let xE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.embedding1d tokE x

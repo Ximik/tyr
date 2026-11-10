@@ -16,7 +16,7 @@ private def assertTreeEqual [TensorStruct α] [FloatingTensorStruct α] (actual 
     TensorStruct.fold (fun {_s} t acc => acc.push (t.runtimeShape, t.raw.dtype)) #[] value
   assertTrue (describe actual == describe expected) "checkpoint tensor traversal metadata"
   let errors := FloatingTensorStruct.zipWith (fun a b => (by simpa using Tensor.abs (Tensor.sub a b))) actual expected
-  let error := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 errors
+  let error := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item! (Tensor.sumAll t)) 0.0 errors
   assertTrue (error.isFinite && error < 1e-6) s!"checkpoint tensor difference {error}"
 
 private def markedMuon {s : Shape} (step : Nat) : Optim.NorMuon.ParamState ⟨s, .Float32, .CPU⟩ := {

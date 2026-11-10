@@ -45,11 +45,22 @@ static void run(const std::string& mode) {
     auto* closure = lean_alloc_closure(reinterpret_cast<void*>(callback), 2, 1);
     lean_inc(input.get());
     lean_closure_set(closure, 0, input.get());
+    if (mode == "setup-error" || mode == "result-error") {
+      // Contract violations throw out of the export; called from Lean they abort.
+      bool thrown = false;
+      try {
+        Object result(lean_torch_functional_grad(inputs.get(), closure), lean_dec);
+      } catch (const std::exception&) {
+        thrown = true;
+      }
+      require(thrown, "Setup/result failure did not throw");
+      require(liveTensors() == baseline, "Setup/result failure leaked tensors");
+      continue;
+    }
     Object result(lean_torch_functional_grad(inputs.get(), closure), lean_dec);
     require(mode != "callback-error", "Throwing callback returned instead of terminating");
-    if (mode == "success") {
-      require(lean_obj_tag(result.get()) == 1, "Valid callback did not produce Except.ok");
-      auto* gradients = lean_ctor_get(result.get(), 0);
+    {
+      auto* gradients = result.get();
       require(lean_array_size(gradients) == 1, "Wrong gradient leaf count");
       Object values(lean_torch_tensor_to_float_array_dynamic(
           lean_array_get_core(gradients, 0)), lean_dec);
@@ -58,8 +69,6 @@ static void run(const std::string& mode) {
       require(lean_array_size(array) == 2, "Wrong gradient size");
       for (size_t j = 0; j < 2; ++j)
         require(lean_unbox_float(lean_array_get_core(array, j)) == 1.0, "Wrong gradient value");
-    } else {
-      require(lean_obj_tag(result.get()) == 0, "Setup/result failure did not produce Except.error");
     }
     result.reset();
     require(liveTensors() == baseline, "Normal callback or setup/result failure leaked tensors");

@@ -184,7 +184,7 @@ def maskedCrossEntropy? {batch seq vocab : Nat} {d m result : DType} {dev : Devi
   let numValid := Tensor.sumAll maskFlat
   -- Divide by number of valid tokens to get mean loss
   -- Use scalar multiplication with the reciprocal to avoid tensor division
-  let numValidFloat ← Tensor.item? numValid
+  let numValidFloat := Tensor.item! numValid
   let epsFloat : Float := 1e-8
   let floating ← DType.realFloating? (DType.promote d m).sumResult
   let _ := floating.down

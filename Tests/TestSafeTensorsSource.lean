@@ -30,14 +30,14 @@ private def writeIndex (dir : System.FilePath) (weightMap : List (String × Stri
   let source := Tensor.fromFloatArray #[1.5, -2.0]
   for dtype in #[DType.BFloat16, .Float32] do
     let path := (dir / s!"{dtype.canonicalName}.safetensors").toString
-    let stored ← IO.ofExcept (source.castDType? dtype)
+    let stored := source.castDType dtype
     stored.saveSafeTensor path "weight"
     let packed ← (← Source.open path).load "weight" #[2]
     LeanTest.assertEqual packed.1 dtype
     LeanTest.assertEqual packed.2.dtype dtype
     LeanTest.assertEqual packed.2.raw.dtype dtype
     let converted : Tensor ⟨#[2], .Float32, .CPU⟩ ←
-      IO.ofExcept (packed.2.castDType? .Float32)
+      pure (packed.2.castDType .Float32)
     LeanTest.assertEqual (← converted.toFloatArray) #[1.5, -2.0]
     LeanTest.assertEqual packed.2.raw.dtype dtype
 

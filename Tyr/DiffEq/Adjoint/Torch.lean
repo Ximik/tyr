@@ -19,7 +19,7 @@ private def vjp
     (vf : Time → Y → Args → Y)
     (t : Time) (y : Y) (args : Args) (adjY : Y) : (Y × Y × Args) :=
   let adjDet := TensorStruct.detach adjY
-  let (gradY, gradArgs) := TensorStruct.functionalGrad
+  let (gradY, gradArgs) := TensorStruct.functionalGrad!
     (fun (y, args) => dotStruct (vf t y args) adjDet) (y, args)
   -- The primal is evaluated with detached inputs, so no private differentiation
   -- variables can escape through static fields or custom TensorStruct instances.
@@ -34,7 +34,7 @@ private def vjpFn
     (f : Y → Args → Y)
     (y : Y) (args : Args) (adjY : Y) : (Y × Args) :=
   let adjDet := TensorStruct.detach adjY
-  TensorStruct.functionalGrad (fun (y, args) => dotStruct (f y args) adjDet) (y, args)
+  TensorStruct.functionalGrad! (fun (y, args) => dotStruct (f y args) adjDet) (y, args)
 
 instance [TensorStruct Y] [FloatingTensorStruct Y] [TensorStruct Args] : AdjointFnBackend Y Args where
   vjpFn := vjpFn

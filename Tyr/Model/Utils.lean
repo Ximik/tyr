@@ -23,7 +23,7 @@ def initWeight (shape : Shape) (fanIn : Nat) (dtype : DType := .Float32) (device
   let std := Float.sqrt (2.0 / fanIn.toFloat)
   let w ← Tensor.randn shape (device := device)
   let w := Tensor.mulScalar w std
-  let w ← IO.ofExcept (w.castDType? dtype)
+  let w := w.castDType dtype
   Tensor.parameter w
 
 /-- Zero bias tensor with requires_grad=true. -/

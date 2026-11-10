@@ -80,14 +80,10 @@ def testSumDimAccumulatesSmallIntsAsInt64 : IO Unit := do
 @[test]
 def testExplicitConversionsCheckNativeResults : IO Unit := do
   let original := (Tensor.fromFloatArray #[1.25, 2.75, 3.5, 4.5]).reshape #[2, 2]
-  match original.castDType? .Int64 with
-  | .error message => LeanTest.fail message
-  | .ok converted =>
-      LeanTest.assertEqual (← converted.toFloatArray) #[1, 2, 3, 4]
-      LeanTest.assertEqual converted.runtimeShape #[2, 2]
-      LeanTest.assertEqual converted.raw.dtype .Int64
-  LeanTest.assertTrue ((original.castDType? .QInt8).toOption.isNone)
-    "A dtype without a native conversion must return an error"
+  let converted := original.castDType .Int64
+  LeanTest.assertEqual (← converted.toFloatArray) #[1, 2, 3, 4]
+  LeanTest.assertEqual converted.runtimeShape #[2, 2]
+  LeanTest.assertEqual converted.raw.dtype .Int64
   LeanTest.assertEqual (original.reshape #[4]).runtimeShape #[4]
   let pinned := Tensor.onesFor { shape := #[2], dtype := .Float32, device := .CPU }
   let converted ← TensorStruct.castTo (Tensor ⟨#[2], .BFloat16, .CPU⟩) pinned

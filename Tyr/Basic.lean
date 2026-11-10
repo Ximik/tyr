@@ -37,10 +37,6 @@ namespace RawTensor
 @[extern "lean_torch_cast_dtype"] opaque castDType (t : @& RawTensor)
     (dtype : DType) : RawTensor
 
-/-- Convert dtype with native validation/conversion failures carried explicitly. -/
-@[extern "lean_torch_cast_dtype_try"] opaque castDType? (shape : Shape)
-    (t : @& RawTensor) (dtype : DType) : Except String RawTensor
-
 -- Preserve the existing C ABI's shape argument without exposing a shape-indexed
 -- raw type. Metadata queries inspect the native tensor, never this argument.
 @[extern "lean_torch_to_string"] private opaque toStringImpl

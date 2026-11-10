@@ -92,15 +92,12 @@ def to {σ : StaticSpec} (t : Tensor σ) (device : Device) :
 def requiresGrad {σ : StaticSpec} (t : Tensor σ) : Bool :=
   RawTensor.requiresGrad t.raw
 
-/-- Read a scalar as a host Float. Nonscalar inputs do not typecheck. -/
-def item? {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Except String Float :=
-  RawTensor.item? t.raw
+def item! {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Float :=
+  RawTensor.item t.raw
 
-/-- Read a scalar as a host Float; use `item?` to recover conversion failures. -/
-def item {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Float :=
-  match item? t with
-  | .ok value => value
-  | .error message => panic! s!"Tensor.item: {message}"
+/-- Read a real or Boolean scalar as a host Float. -/
+def item {d : DType} {dev : Device} [DType.Ordered d] (t : Tensor ⟨#[], d, dev⟩) : Float :=
+  item! t
 
 /-- Euclidean norm of an indexed vector. -/
 def l2Norm! {n : Nat} {d : DType} {dev : Device}
@@ -891,14 +888,8 @@ def indexSelect! {n k : Nat} {d : DType} {dev : Device}
   Tensor.ofRaw! "indexSelect" (RawTensor.indexSelect! data.raw 0 indices.raw)
 
 /-- Select entries of a 1-D tensor by Int64 indices. Index values are runtime
-data: an out-of-range index aborts; `indexSelect?` returns it as an error. -/
-def indexSelect {n k : Nat} {d : DType} {dev : Device}
-    (data : Tensor ⟨#[n], d, dev⟩) (indices : Tensor ⟨#[k], .Int64, dev⟩) :
-    Tensor ⟨#[k], d, dev⟩ :=
-  indexSelect! data indices
-
-/-- `indexSelect` for untrusted index values, returning an out-of-range index
-as an error. Validation synchronizes one validity bit from the device. -/
+data, so there is no plain variant: an out-of-range index is returned as an
+error. Validation synchronizes one validity bit from the device. -/
 def indexSelect? {n k : Nat} {d : DType} {dev : Device}
     (data : Tensor ⟨#[n], d, dev⟩) (indices : Tensor ⟨#[k], .Int64, dev⟩) :
     Except String (Tensor ⟨#[k], d, dev⟩) := do
@@ -911,12 +902,6 @@ def crossEntropyNone! {n c : Nat} {d : DType} {dev : Device}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[n], d, dev⟩ :=
   Tensor.ofRaw! "crossEntropyNone" (RawTensor.crossEntropyNone! logits.raw targets.raw)
-
-/-- Per-element cross entropy over real floating logits and Int64 targets. -/
-def crossEntropyNone {n c : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
-    (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
-    Tensor ⟨#[n], d, dev⟩ :=
-  crossEntropyNone! logits targets
 
 /-- Extract an Int64 scalar. -/
 def itemInt {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Int64 :=
@@ -960,12 +945,6 @@ def crossEntropy! {n c : Nat} {d : DType} {dev : Device}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[], d, dev⟩ :=
   Tensor.ofRaw! "crossEntropy" (RawTensor.crossEntropy! logits.raw targets.raw)
-
-/-- Mean cross entropy over real floating logits and Int64 targets. -/
-def crossEntropy {n c : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
-    (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
-    Tensor ⟨#[], d, dev⟩ :=
-  crossEntropy! logits targets
 
 /-- Draw `numSamples` Int64 indices per row of a probability matrix. -/
 def multinomial {n v : Nat} {d : DType} {dev : Device}

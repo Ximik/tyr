@@ -233,14 +233,14 @@ def runMain (argv : List String) : IO UInt32 := do
     let imageFeatures? ←
       match imagePatches? with
       | some ⟨nPatches, patches⟩ =>
-        let feats ← model.getImageFeatures cfg (← IO.ofExcept (patches.castDType? visionDType.val))
+        let feats ← model.getImageFeatures cfg (patches.castDType visionDType.val)
         let nTok := VisionConfig.mergedTokenCount cfg.vision_config nPatches
         pure (some ⟨nTok, feats⟩)
       | none => pure none
     let videoFeatures? ←
       match videoPatches? with
       | some ⟨nPatches, patches⟩ =>
-        let feats ← model.getVideoFeatures cfg (← IO.ofExcept (patches.castDType? visionDType.val))
+        let feats ← model.getVideoFeatures cfg (patches.castDType visionDType.val)
         let nTok := VisionConfig.mergedTokenCount cfg.vision_config nPatches
         pure (some ⟨nTok, feats⟩)
       | none => pure none

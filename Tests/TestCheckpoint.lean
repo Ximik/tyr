@@ -107,7 +107,7 @@ def testDistAdamCheckpointing : IO Unit := do
 
   -- Verify map works
   let stateOnes := FloatingTensorStruct.map (fun t => Tensor.addScalar t 1.0) state
-  let sumOnes := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 stateOnes
+  let sumOnes := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item! (Tensor.sumAll t)) 0.0 stateOnes
   LeanTest.assertEqual sumOnes 200.0 "Mapped state should sum to 200"
 
 @[test]

@@ -15,8 +15,8 @@ def referenceTraining {rows : Nat}
       Tensor { shape := #[rows, 3072], dtype := .BFloat16, device := device }) := do
   let logits ← Tensor.parameter logitsBase
   let logitsF := logits.toFloat32
-  let losses := Tensor.crossEntropyNone logitsF targets
-  let mean := Tensor.crossEntropy logitsF targets
+  let losses := Tensor.crossEntropyNone! logitsF targets
+  let mean := Tensor.crossEntropy! logitsF targets
   let gradient ← Tensor.grad mean logits (Tensor.onesLike mean)
   return (losses, mean, gradient)
 

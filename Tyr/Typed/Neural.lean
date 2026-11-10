@@ -17,33 +17,22 @@ def copyInto {s : Shape} {d : DType} {dstDevice srcDevice : Device}
   let raw ← RawTensor.copyInto dst.raw src.raw
   pure (Tensor.ofRaw! "copyInto" raw)
 
-/-- Checked dtype conversion. Unsupported native conversions return errors;
-recognizing a dtype does not promise that a backend implements its conversion. -/
-def castDType? {σ : StaticSpec} (t : Tensor σ) (dtype : DType) :
-    Except String (Tensor (σ.withDType dtype)) := do
-  let raw ← RawTensor.castDType? σ.shape t.raw dtype
-  pure (Tensor.ofRaw! (σ := σ.withDType dtype) "castDType" raw)
+def castDType! {σ : StaticSpec} (t : Tensor σ) (dtype : DType) : Tensor (σ.withDType dtype) :=
+  Tensor.ofRaw! "castDType" (RawTensor.castDType t.raw dtype)
 
-/-- Cast to a concrete dtype; use `castDType?` to handle conversion failures. -/
+/-- Cast to `dtype`. A conversion the backend does not implement aborts; no value
+can make a supported conversion fail. -/
 def castDType {σ : StaticSpec} (t : Tensor σ) (dtype : DType) : Tensor (σ.withDType dtype) :=
-  match t.castDType? dtype with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.castDType: {message}"
+  castDType! t dtype
 
-/-- Match the reference's actual dtype and preserve input shape and placement. -/
-def castLike? {σ τ : StaticSpec} (reference : Tensor τ) (t : Tensor σ) :
-    Except String (Tensor (σ.withDType τ.dtype)) := do
-  let dtype := reference.raw.dtype
-  let raw ← if t.raw.dtype == dtype then pure t.raw else
-    RawTensor.castDType? σ.shape t.raw dtype
-  pure (Tensor.ofRaw! (σ := σ.withDType τ.dtype) "castLike" raw)
+def castLike! {σ τ : StaticSpec} (_reference : Tensor τ) (t : Tensor σ) :
+    Tensor (σ.withDType τ.dtype) :=
+  castDType! t τ.dtype
 
-/-- Match the reference's native dtype; use `castLike?` for recoverable errors. -/
+/-- Cast `t` to the reference's dtype, preserving its shape and placement. -/
 def castLike {σ τ : StaticSpec} (reference : Tensor τ) (t : Tensor σ) :
     Tensor (σ.withDType τ.dtype) :=
-  match castLike? reference t with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.castLike: {message}"
+  castLike! reference t
 
 /-- RMS normalization accumulated in Float32, with the output dtype indexed. -/
 def rmsNorm {σ : StaticSpec} (x : Tensor σ) (eps : Float := 1e-6) : Tensor (σ.withDType .Float32) :=
@@ -63,14 +52,12 @@ def rmsNormPreserving {σ : StaticSpec} {w : Shape}
 def packShape {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) :
     Sigma (fun shape => Tensor ⟨shape, d, dev⟩) := ⟨s, t⟩
 
-/-- Concatenate tensors with runtime-varying shapes, checking the requested result.
-Inputs retain their individual shape indices rather than pretending to be scalars. -/
+/-- Concatenate tensors whose shapes are known only at runtime. An empty array,
+an axis out of range, or sizes that differ off the axis are returned as errors;
+the result is admitted at the requested `shape`. -/
 def catMany? {d : DType} {dev : Device}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
     (dim : Nat) (shape : Shape) : Except String (Tensor ⟨shape, d, dev⟩) := do
-  let some first := tensors[0]? | throw "catMany requires at least one tensor"
-  for t in tensors do
-    Tensor.checkSameDevice first.2 t.2
   pure (Tensor.ofRaw! "catMany" (← RawTensor.catMany? (tensors.map fun t => t.2.raw) dim))
 
 /-- `catMany?` without its checks; invalid inputs abort natively. -/
@@ -371,14 +358,28 @@ def hannWindow (n : Nat) : Tensor { shape := #[n], dtype := .Float32, device := 
 def stftFrames (n nFft hopLength : Nat) (center : Bool) : Nat :=
   ((if center then n + 2 * (nFft / 2) else n) - nFft) / hopLength + 1
 
+/-- Parameters `torch.stft` accepts for `n` samples: a positive hop, a positive
+window no longer than the FFT, and enough samples for the reflect padding when
+`center` holds, or for one frame otherwise. -/
+def StftValid (n nFft hopLength winLength : Nat) (center : Bool) : Prop :=
+  0 < hopLength ∧ 0 < winLength ∧ winLength ≤ nFft ∧ (if center then nFft / 2 < n else nFft ≤ n)
+
+instance (n nFft hopLength winLength : Nat) (center : Bool) :
+    Decidable (StftValid n nFft hopLength winLength center) := by
+  unfold StftValid; infer_instance
+
+def stft! {n winLength : Nat} {dev : Device} (input : Tensor { shape := #[n], dtype := .Float32, device := dev }) (nFft hopLength : Nat)
+    (window : Tensor { shape := #[winLength], dtype := .Float32, device := dev }) (center : Bool := true) (normalized : Bool := false) :
+    Tensor { shape := #[nFft / 2 + 1, stftFrames n nFft hopLength center, 2], dtype := .Float32, device := dev } :=
+  Tensor.ofRaw! "stft" (RawTensor.stft input.raw nFft hopLength winLength window.raw center normalized)
+
 /-- One-sided STFT with real and imaginary parts packed in the last axis. -/
 def stft {n winLength : Nat} {dev : Device} (input : Tensor { shape := #[n], dtype := .Float32, device := dev }) (nFft hopLength : Nat)
-    (window : Tensor { shape := #[winLength], dtype := .Float32, device := dev }) (center : Bool := true) (normalized : Bool := false) :
-    IO (Tensor { shape := #[nFft / 2 + 1, stftFrames n nFft hopLength center, 2], dtype := .Float32, device := dev }) := do
-  let raw ← match RawTensor.stft? input.raw nFft hopLength winLength window.raw center normalized with
-    | .ok raw => pure raw
-    | .error message => throw <| IO.userError s!"Tensor.stft: {message}"
-  pure (Tensor.ofRaw! "stft" raw)
+    (window : Tensor { shape := #[winLength], dtype := .Float32, device := dev }) (center : Bool := true) (normalized : Bool := false)
+    (_valid : StftValid n nFft hopLength winLength center := by
+      first | exact of_decide_eq_true rfl | (simp only [StftValid] <;> omega)) :
+    Tensor { shape := #[nFft / 2 + 1, stftFrames n nFft hopLength center, 2], dtype := .Float32, device := dev } :=
+  stft! input nFft hopLength window center normalized
 
 def log10! {σ : StaticSpec} (input : Tensor σ) : Tensor σ :=
   Tensor.ofRaw! "log10" (RawTensor.log10! input.raw)

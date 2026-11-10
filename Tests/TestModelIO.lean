@@ -128,6 +128,6 @@ def testStateDictSimulation : IO Unit := do
   
   -- Verify loaded matches original
   let diff := FloatingTensorStruct.zipWith Tensor.sub params loadedParams
-  let totalDiff := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll (Tensor.abs t))) 0.0 diff
+  let totalDiff := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item! (Tensor.sumAll (Tensor.abs t))) 0.0 diff
   
   LeanTest.assertTrue (totalDiff < 1e-6) "Loaded parameters should match saved ones"

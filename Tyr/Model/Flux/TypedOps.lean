@@ -7,7 +7,7 @@ namespace torch.flux
 
 variable {device : Device} {dtype : DType}
 def randomWeight (s : Shape) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Tensor { dtype := dtype, device := device, shape := s }) := do
-  IO.ofExcept ((← Tensor.randn (device := device) s).castDType? dtype)
+  pure ((← Tensor.randn (device := device) s).castDType dtype)
 
 def zerosWeight (s : Shape) (device : Device := .CPU) (dtype : DType := .Float32)
     [DType.ConstantSupported dtype device] : Tensor { dtype := dtype, device := device, shape := s } :=

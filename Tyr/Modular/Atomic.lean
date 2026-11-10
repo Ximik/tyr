@@ -167,7 +167,7 @@ instance (vocabSize dim : Nat) [DType.FloatingOrComplex dtype] : NormedModule (E
   dualNorm m :=
     -- Sum of row norms
     let norms := torch.Tensor.rowNorms m.weight
-    torch.Tensor.item (torch.Tensor.sumAll norms)
+    torch.Tensor.item! (torch.Tensor.sumAll norms)
 
   nu m := torch.Tensor.maxRowNorm! m.weight
 
@@ -181,7 +181,7 @@ instance (vocabSize dim : Nat) [DType.FloatingOrComplex dtype] : NormedModule (E
   normalizeDual m :=
     -- Compute dual norm inline to avoid recursion
     let norms := torch.Tensor.rowNorms m.weight
-    let n := torch.Tensor.item (torch.Tensor.sumAll norms)
+    let n := torch.Tensor.item! (torch.Tensor.sumAll norms)
     if n == 0.0 then m else
     { weight := torch.Tensor.mulScalar m.weight (1.0 / n) }
 

@@ -279,7 +279,7 @@ namespace Qwen35VisionModel
 def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35VisionModel (dtype := dtype) (device := device) cfg) := do
   let patchEmbed ← Qwen35VisionPatchEmbed.init (dtype := dtype) (device := device) cfg
   let posRaw ← Tensor.randn (device := device) #[cfg.num_position_embeddings, cfg.hidden_size]
-  let posEmbed ← Tensor.parameter (← IO.ofExcept ((Tensor.mulScalar posRaw 0.02).castDType? dtype))
+  let posEmbed ← Tensor.parameter ((Tensor.mulScalar posRaw 0.02).castDType dtype)
 
   let mut blocks : Array (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := #[]
   for _ in [:cfg.depth] do

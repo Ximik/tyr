@@ -75,12 +75,12 @@ private def tinyConfig : Qwen3TTSConfig := {
     "Loading/initialization must not homogenize the Float32 speaker into the BF16 talker"
   let features ← Tensor.randn #[1, 8, cfg.speakerEncoderConfig.melDim]
   for inputDType in #[DType.Float32, .BFloat16] do
-    let mel ← IO.ofExcept (features.castDType? inputDType)
+    let mel := features.castDType inputDType
     let embedding : Tensor ⟨#[1, cfg.speakerEncoderConfig.encDim], .Float32, .CPU⟩ ←
       model.extractSpeakerEmbedding mel
     LeanTest.assertEqual embedding.raw.dtype .Float32
     LeanTest.assertEqual mel.raw.dtype inputDType "Feature conversion preserves the caller tensor"
-    let aligned ← IO.ofExcept (mel.castDType? .Float32)
+    let aligned := mel.castDType .Float32
     let expected := encoder.forward (by decide) aligned
     LeanTest.assertEqual (← embedding.toFloatArray) (← expected.toFloatArray)
       "The explicit preprocessing cast is the only cross-role dtype conversion"

@@ -945,7 +945,7 @@ namespace Qwen35Model
 
 def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35Model (dtype := dtype) (device := device) cfg) := do
   let embRaw ← Tensor.randn (device := device) #[cfg.vocab_size, cfg.hidden_size]
-  let embedTokens ← Tensor.parameter (← IO.ofExcept ((Tensor.mulScalar embRaw 0.02).castDType? dtype))
+  let embedTokens ← Tensor.parameter ((Tensor.mulScalar embRaw 0.02).castDType dtype)
 
   let layerTypes := cfg.layer_types
   let mut layers : Array (Qwen35Layer (dtype := dtype) (device := device) cfg) := #[]
