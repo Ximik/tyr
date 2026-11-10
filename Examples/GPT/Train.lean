@@ -57,7 +57,9 @@ def getBatch (trainData : Tokens (device := .CPU) #[n]) (batchSize blockSize : N
   let maxStart := n - totalTokens
   let startTensor ← Tensor.randint 0 (maxStart + 1).toInt64 #[]
   let start := startTensor.itemInt.toInt.toNat
-  let block := trainData.slice! 0 start totalTokens
+  let ⟨hStart⟩ ← if h : start + totalTokens ≤ n then pure (PLift.up h) else
+    throw <| IO.userError s!"GPT batch start {start} exceeds {maxStart}"
+  let block := trainData.slice 0 start totalTokens
   let reshaped := block.reshape #[batchSize, blockSize + 1]
   let x := reshaped.slice 1 0 blockSize
   let y := reshaped.slice 1 1 blockSize

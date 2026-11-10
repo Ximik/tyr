@@ -230,11 +230,11 @@ private def decodeGeneratedText
     (outSeq : Nat)
     (outIds : Tensor { device := device, shape := #[1, outSeq], dtype := .Int64 })
     : IO String := do
-  if outSeq <= seq then
+  if hOut : outSeq ≤ seq then
     pure ""
   else
     let newSeq := outSeq - seq
-    let newOnly : Tensor { device := device, shape := #[1, newSeq], dtype := .Int64 } := Tensor.slice! outIds 1 seq newSeq
+    let newOnly : Tensor { device := device, shape := #[1, newSeq], dtype := .Int64 } := Tensor.slice outIds 1 seq newSeq
     let flat : Tensor { device := device, shape := #[newSeq], dtype := .Int64 } := Tensor.reshape newOnly #[newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let ids := idsU64.map (fun x => x.toUInt32)
@@ -248,11 +248,11 @@ private def decodeGeneratedTextsBatch
     : IO (Array String) := do
   if batch == 0 then
     pure #[]
-  else if outSeq <= seq then
+  else if hOut : outSeq ≤ seq then
     pure (Array.replicate batch "")
   else
     let newSeq := outSeq - seq
-    let newOnly : Tensor { device := device, shape := #[batch, newSeq], dtype := .Int64 } := Tensor.slice! outIds 1 seq newSeq
+    let newOnly : Tensor { device := device, shape := #[batch, newSeq], dtype := .Int64 } := Tensor.slice outIds 1 seq newSeq
     let flat : Tensor { device := device, shape := #[batch * newSeq], dtype := .Int64 } := Tensor.reshape newOnly #[batch * newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let rowWidth := newSeq

@@ -252,6 +252,7 @@ def CausalSelfAttention.forward {batch seq dim half numHeads rotaryLen : Nat}
     (attn : CausalSelfAttention (device := device) dim (2 * half) numHeads)
     (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device })
     (yarn : YarnRotary (device := device) half rotaryLen)
+    (hrot : seq ≤ rotaryLen)
     (windowSize : Option Nat := none)
     (valueEmbed : Option (Tensor { shape := #[batch, seq, numHeads * (2 * half)], dtype := .Float32, device := device }) := none)
     (valueMix : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.zeros (device := device) #[])
@@ -279,8 +280,8 @@ def CausalSelfAttention.forward {batch seq dim half numHeads rotaryLen : Nat}
   let v := Tensor.reshape v #[batch, seq, numHeads, 2 * half]
 
   -- Slice rotary embeddings to seq length (cos/sin are [rotaryLen, headDim])
-  let cos := Tensor.slice! yarn.cos 0 0 seq
-  let sin := Tensor.slice! yarn.sin 0 0 seq
+  let cos := Tensor.slice yarn.cos 0 0 seq
+  let sin := Tensor.slice yarn.sin 0 0 seq
 
   -- Apply rotary embeddings (uses half-dim rotation)
   let q := Tensor.applyRotary q cos sin
@@ -411,13 +412,13 @@ def Scalars.init (nLayer : Nat) (device : Device := .CPU) : IO (Scalars (device 
 /-! ## Scalar/Value Helper Utilities -/
 
 /-- Extract scalar tensor at `idx` from a 1D tensor. -/
-private def scalarAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) : Tensor { shape := #[], dtype := .Float32, device := device } :=
-  let oneElem : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.slice! values 0 idx 1
+private def scalarAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) (h : idx < n) : Tensor { shape := #[], dtype := .Float32, device := device } :=
+  let oneElem : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.slice values 0 idx 1
   Tensor.reshape oneElem #[]
 
 /-- Extract scalar at `idx` and squash to (0, 1). -/
-private def scalarSigmoidAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) : Tensor { shape := #[], dtype := .Float32, device := device } :=
-  Tensor.sigmoid (scalarAt values idx)
+private def scalarSigmoidAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) (h : idx < n := by omega) : Tensor { shape := #[], dtype := .Float32, device := device } :=
+  Tensor.sigmoid (scalarAt values idx h)
 
 /-- Scale a tensor by a scalar tensor, keeping gradient flow through the scalar. -/
 private def scaleByScalar {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (scalar : Tensor { shape := #[], dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } :=
@@ -519,34 +520,35 @@ def forward {cfg : Config} {batch seq : Nat}
     (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (_training : Bool := true)
     : IO (Tensor { shape := #[batch, seq, cfg.vocabSize], dtype := .Float32, device := device }) := do
-  if cfg.modelDim < 12 then
+  let ⟨hDim⟩ ← if h : 12 ≤ cfg.modelDim then pure (PLift.up h) else
     throw (IO.userError "ModdedGPT requires modelDim >= 12 for the smear gate")
+  let ⟨hSeq⟩ ← if h : seq ≤ cfg.maxSeqLen then pure (PLift.up h) else
+    throw (IO.userError s!"ModdedGPT sequence {seq} exceeds maxSeqLen {cfg.maxSeqLen}")
   have hHeads : cfg.modelDim = cfg.nHead * cfg.headDim := rfl
   -- 1) Token embedding + lightweight smear-style modulation.
   let tokEmb := Tensor.embedding inputSeq params.embed
-  let smearIn : Tensor { shape := #[batch, seq, 12], dtype := .Float32, device := device } := Tensor.slice! tokEmb 2 0 12
+  let smearIn : Tensor { shape := #[batch, seq, 12], dtype := .Float32, device := device } := Tensor.slice tokEmb 2 0 12
   let smearGate := Tensor.sigmoid (params.smearGate.forward smearIn)
   let smearGateExpanded := Tensor.broadcastTo smearGate #[batch, seq, cfg.modelDim]
   let x0 := Tensor.rmsNorm (tokEmb + (tokEmb * smearGateExpanded))
 
   -- Precompute token value embeddings and global scalar controls.
   let valueEmbeds := params.valueEmbeds.map (Tensor.embedding inputSeq ·)
-  let scalarBaseGlobal := cfg.nLayer * 4
-  let valueMix := scalarSigmoidAt params.scalars.values scalarBaseGlobal
-  let skipMix := scalarSigmoidAt params.scalars.values (scalarBaseGlobal + 1)
-  let finalScale := scalarSigmoidAt params.scalars.values (scalarBaseGlobal + 2)
+  let valueMix := scalarSigmoidAt params.scalars.values (cfg.nLayer * 4)
+  let skipMix := scalarSigmoidAt params.scalars.values (cfg.nLayer * 4 + 1)
+  let finalScale := scalarSigmoidAt params.scalars.values (cfg.nLayer * 4 + 2)
 
   -- 2) Apply transformer blocks with value embeddings and scalar-gated residuals.
   let mut x := x0
   let mut skipConnection : Option (Tensor { shape := #[batch, seq, cfg.modelDim], dtype := .Float32, device := device }) := none
 
-  for i in [:cfg.nLayer] do
+  for hL : i in [:cfg.nLayer] do
+    have hi : i < cfg.nLayer := by have := hL.upper; simpa using this
     let block : Block (device := device) cfg.modelDim cfg.headDim cfg.nHead := params.blocks[i]!
-    let scalarBase := (i) * 4
-    let lamX := scalarSigmoidAt params.scalars.values scalarBase
-    let lamX0 := scalarSigmoidAt params.scalars.values (scalarBase + 1)
-    let lamAttn := scalarSigmoidAt params.scalars.values (scalarBase + 2)
-    let lamMlp := scalarSigmoidAt params.scalars.values (scalarBase + 3)
+    let lamX := scalarSigmoidAt params.scalars.values (i * 4)
+    let lamX0 := scalarSigmoidAt params.scalars.values (i * 4 + 1)
+    let lamAttn := scalarSigmoidAt params.scalars.values (i * 4 + 2)
+    let lamMlp := scalarSigmoidAt params.scalars.values (i * 4 + 3)
     let xIn := blendByScalars x x0 lamX lamX0
 
     -- Skip connection: save layer 3 output for layer 6
@@ -565,7 +567,7 @@ def forward {cfg : Config} {batch seq : Nat}
       let layerVE := (layerValueEmbed (cfg := cfg) valueEmbeds i).map
         (fun t => t.reshape #[batch, seq, cfg.nHead * cfg.headDim] (by simp [hHeads]))
       -- Apply attention with rotary embeddings/window and optional value embedding.
-      let attnOut := attn.forward xNormed yarn windowSize layerVE valueMix
+      let attnOut := attn.forward xNormed yarn hSeq windowSize layerVE valueMix
       -- Residual connection
       let x' := xIn + scaleByScalar attnOut lamAttn
       -- Pre-norm before MLP

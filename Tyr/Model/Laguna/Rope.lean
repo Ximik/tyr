@@ -170,14 +170,8 @@ def precomputeRotaryTables (cfg : Config) (maxLen : Nat) (device : Device)
     Prefill: `sliceRotaryRows table 0 seq`.  Decode step at `position`:
     `sliceRotaryRows table position 1`. -/
 def sliceRotaryRows {rows half : Nat} (table : Tensor { device := device, shape := #[rows, half], dtype := .Float32 })
-    (start len : Nat) : Tensor { device := device, shape := #[len, half], dtype := .Float32 } :=
-  table.slice! 0 start len
-
-/-- Slice rows `[start, start + len)` of a cos/sin table pair. -/
-def sliceRotaryRowsPair {rows half : Nat}
-    (cosTable sinTable : Tensor { device := device, shape := #[rows, half], dtype := .Float32 }) (start len : Nat)
-    : Tensor { device := device, shape := #[len, half], dtype := .Float32 } × Tensor { device := device, shape := #[len, half], dtype := .Float32 } :=
-  (sliceRotaryRows cosTable start len, sliceRotaryRows sinTable start len)
+    (start len : Nat) (h : start + len ≤ rows := by omega) : Tensor { device := device, shape := #[len, half], dtype := .Float32 } :=
+  table.slice 0 start len
 
 /-- Apply rotary embeddings to the first `rotary_dim` channels of `x`
     (partial rotary), passing the remaining channels through unchanged.

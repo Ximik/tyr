@@ -648,7 +648,7 @@ def waveformToWhisperFeaturesDynamic
     let ⟨framesPos⟩ ← if h : 0 < frames then pure (PLift.up h) else
       throw <| IO.userError s!"Audio too short for Whisper features: {targetSamples} samples yield no frames"
     let stftTrim : Tensor { device := runDevice, shape := #[freqBins, frames, 2], dtype := .Float32 } :=
-      Tensor.slice! stft 1 0 frames
+      Tensor.slice stft 1 0 frames (_bounds := by simp only [frames]; split <;> simp <;> omega)
     let re3 : Tensor { device := runDevice, shape := #[freqBins, frames, 1], dtype := .Float32 } :=
       Tensor.slice stftTrim 2 0 1
     let im3 : Tensor { device := runDevice, shape := #[freqBins, frames, 1], dtype := .Float32 } :=

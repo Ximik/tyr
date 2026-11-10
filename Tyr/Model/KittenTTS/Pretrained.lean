@@ -205,7 +205,8 @@ def loadVoiceStyle (bundle : PretrainedBundle) (voice : String) (phonemeCount : 
   let table : Tensor { shape := #[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device } ←
     (← safetensors.Source.open voicePath).loadAs "voice" ⟨#[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg], .Float32⟩ bundle.device
   let idx := voiceIndexOfPhonemeCount phonemeCount
-  let style : Tensor { shape := #[1, 1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device } := sliceTensor table 0 idx 1
+  let style : Tensor { shape := #[1, 1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device } :=
+    Tensor.slice table 0 idx 1 (_bounds := by simp [idx, voiceIndexOfPhonemeCount]; omega)
   pure (Tensor.reshape style #[1, KittenTTSConfig.fullStyleDim bundle.cfg])
 
 def synthesizePhonemes (bundle : PretrainedBundle) (phonemes : String) (voice : String) (speed : Float := 1.0)

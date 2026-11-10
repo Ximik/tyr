@@ -338,12 +338,12 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
     else
       pure none
 
-  let mut layers : Array (Gemma4Layer (dtype := dtype) (device := device) cfg) := #[]
-  for i in [:cfg.num_hidden_layers] do
+  let indices : Vector cfg.num_hidden_layers Nat := ⟨Array.range cfg.num_hidden_layers, Array.size_range⟩
+  let layers ← indices.mapM fun i => do
     let layer ← loadLayer src cfg i
-    layers := layers.push layer
     if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then
       log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers}"
+    pure layer
 
   let norm ← loadRMSNorm src "model.language_model.norm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
 

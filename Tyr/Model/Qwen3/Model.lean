@@ -254,13 +254,13 @@ private partial def greedyLoopUncached {batch : Nat}
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
-  if curSeq == 0 then
+  let ⟨hSeq⟩ ← if h : 0 < curSeq then pure (PLift.up h) else
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
 
   let logits := m.forward curIds none
   let lastPos := curSeq - 1
   let last3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 } :=
-    Tensor.reshape (Tensor.slice! logits 1 lastPos 1) #[batch, 1, cfg.vocab_size]
+    Tensor.reshape (Tensor.slice logits 1 lastPos 1) #[batch, 1, cfg.vocab_size]
   let last2 : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshape last3 #[batch, cfg.vocab_size]
   let indices := Tensor.argmax! last2 1
   let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } := indices.reshape #[batch]

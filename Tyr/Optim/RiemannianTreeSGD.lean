@@ -140,11 +140,11 @@ private def buildTreeFactorFromOutputFactor [TensorStruct Params] [FloatingTenso
     (params : Params)
     (outputFactor : MetricFactor rank (shapeNumel s) .Float32 device) : IO (TreeMetricFactor Params rank) := do
   let rows :=
-    ((List.range rank).toArray.map fun i =>
+    Array.ofFn (n := rank) fun i =>
       let rowFlat : Tensor { shape := #[shapeNumel s], dtype := .Float32, device := device } :=
-        Tensor.reshape (Tensor.slice! outputFactor.matrix 0 i 1)
+        Tensor.reshape (Tensor.slice outputFactor.matrix 0 i 1)
           #[shapeNumel s]
-      Tensor.reshape rowFlat s (by simp))
+      Tensor.reshape rowFlat s (by simp)
   buildTreeFactorFromCotangentRows output params rows (by simp [rows])
 
 private def finalizePreparedStepWithTreeFactor
