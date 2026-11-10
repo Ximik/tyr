@@ -91,12 +91,12 @@ private def rmsNormNoScale4d {a b c dim : Nat}
 private def apply2dRotaryEmb {nHead headDim : Nat}
     (patchRows patchCols : Nat)
     (x : Tensor { device := device, shape := #[1, patchRows * patchCols, nHead, headDim], dtype := dtype })
-    (ropeTheta : Float)
-    : Tensor { device := device, shape := #[1, tokens, nHead, headDim], dtype := dtype } :=
+    (ropeTheta : Float) (hEven : 2 ∣ headDim)
+    : Tensor { device := device, shape := #[1, patchRows * patchCols, nHead, headDim], dtype := dtype } :=
   let tokens := patchRows * patchCols
   let perDim := headDim / 2
-  let xPart : Tensor { device := device, shape := #[1, tokens, nHead, perDim], dtype := dtype } := sliceTyped x 3 0 perDim
-  let yPart : Tensor { device := device, shape := #[1, tokens, nHead, perDim], dtype := dtype } := sliceTyped x 3 perDim perDim
+  let xPart : Tensor { device := device, shape := #[1, tokens, nHead, perDim], dtype := dtype } := Tensor.slice x 3 0 perDim
+  let yPart : Tensor { device := device, shape := #[1, tokens, nHead, perDim], dtype := dtype } := Tensor.slice x 3 perDim perDim
   let (xIdsCpu, yIdsCpu) := positionIds patchRows patchCols
   let (xCosTable, xSinTable) := Tensor.rotaryFreqs patchCols perDim ropeTheta x.device
   let (yCosTable, ySinTable) := Tensor.rotaryFreqs patchRows perDim ropeTheta x.device
@@ -108,7 +108,8 @@ private def apply2dRotaryEmb {nHead headDim : Nat}
   let ySin : Tensor { device := device, shape := #[tokens, perDim / 2], dtype := .Float32 } := Tensor.embedding1d yIds ySinTable
   let xRot : Tensor { device := device, shape := #[1, tokens, nHead, perDim], dtype := dtype } := Tensor.applyRotary xPart xCos xSin
   let yRot : Tensor { device := device, shape := #[1, tokens, nHead, perDim], dtype := dtype } := Tensor.applyRotary yPart yCos ySin
-  typedCat xRot yRot 3
+  have hHalves : headDim / 2 + headDim / 2 = headDim := by omega
+  (Tensor.cat xRot yRot 3).reshape #[1, tokens, nHead, headDim] (by simp [perDim, hHalves])
 
 private def replaceTokenId {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -157,10 +158,10 @@ def forward {patchRows patchCols : Nat}
   let flat := Tensor.mulScalar (Tensor.addScalar flat (-0.5)) 2.0
   let hidden : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := dtype } := m.input_proj.forward2d flat
   let xTable : Tensor { device := device, shape := #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := .Float32 } :=
-    Tensor.reshape (sliceTyped m.position_embedding_table 0 0 1)
+    Tensor.reshape (Tensor.slice m.position_embedding_table 0 0 1)
       #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size]
   let yTable : Tensor { device := device, shape := #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := .Float32 } :=
-    Tensor.reshape (sliceTyped m.position_embedding_table 0 1 1)
+    Tensor.reshape (Tensor.slice m.position_embedding_table 0 1 1)
       #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size]
   let (xIdsCpu, yIdsCpu) := positionIds patchRows patchCols
   let xIds : Tensor { device := device, shape := #[tokens], dtype := .Int64 } := xIdsCpu.to hidden.device
@@ -222,10 +223,11 @@ def forward {patchRows patchCols : Nat}
   let k2 := m.k_norm.forward4d k1
   let v2 := rmsNormNoScale4d v1 cfg.rms_norm_eps
 
+  have hEven : 2 ∣ cfg.head_dim := Nat.dvd_trans ⟨2, rfl⟩ cfg.headDimValid.2
   let q3 : Tensor { device := device, shape := #[1, tokens, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } :=
-    apply2dRotaryEmb patchRows patchCols q2 cfg.rope_theta
+    apply2dRotaryEmb patchRows patchCols q2 cfg.rope_theta hEven
   let k3 : Tensor { device := device, shape := #[1, tokens, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } :=
-    apply2dRotaryEmb patchRows patchCols k2 cfg.rope_theta
+    apply2dRotaryEmb patchRows patchCols k2 cfg.rope_theta hEven
 
   let qh : Tensor { device := device, shape := #[1, cfg.num_attention_heads, tokens, cfg.head_dim], dtype := dtype } :=
     Tensor.mulScalar (transposeAttention q3) (Float.sqrt cfg.head_dim.toFloat)
@@ -370,7 +372,7 @@ def getImageFeaturesMany
         | none =>
           some ⟨nTok, feats⟩
         | some ⟨nPrev, prev⟩ =>
-          some ⟨nPrev + nTok, typedCat prev feats 0⟩
+          some ⟨nPrev + nTok, Tensor.cat prev feats 0⟩
   pure acc?
 
 def repeatFeaturesForBatch {batch tokens : Nat}
@@ -437,7 +439,7 @@ private def buildVisionBidirectionalPrefillMasks {batch seq : Nat}
   let mut fullFlat : Array Int64 := #[]
 
   for b in [:batch] do
-    let row2 : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := sliceTyped inputIds 0 b 1
+    let row2 : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.slice! inputIds 0 b 1
     let row1 : Tensor { device := device, shape := #[seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 row2) #[seq]
     let ids ← Tensor.toUInt64Array row1
     let mut groupIds : Array Int64 := Array.replicate ids.size (-1)

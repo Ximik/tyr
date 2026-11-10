@@ -201,24 +201,24 @@ def forward {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
   let (img, txt) := processDoubleBlocks model.double_blocks cfg.headDimEven img txt img_pe txt_pe mod_img mod_txt
 
   -- Concatenate for single-stream
-  let x : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, cfg.hidden_size] } := qwen35.typedCat txt img 1  -- [batch, txt_seq + img_seq, hidden_size]
+  let x : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, cfg.hidden_size] } := Tensor.cat txt img 1  -- [batch, txt_seq + img_seq, hidden_size]
 
   -- Compute combined RoPE for concatenated img+txt sequence
-  let combined_ids : Tensor { device := device, shape := #[batch, txt_seq + img_seq, 4], dtype := .Int64 } := qwen35.typedCat txt_ids img_ids 1
+  let combined_ids : Tensor { device := device, shape := #[batch, txt_seq + img_seq, 4], dtype := .Int64 } := Tensor.cat txt_ids img_ids 1
   let combined_pe := flux.ropeEmbed (head_dim := cfg.head_dim) combined_ids cfg.axes_dims cfg.axesValid cfg.theta cfg.thetaPos
 
   -- Single-stream blocks (using fold to avoid Id.run bug)
   let x := processSingleBlocks model.single_blocks cfg.headDimEven x combined_pe mod_single
 
   -- Extract image tokens
-  let img_slice := sliceTyped x 1 txt_seq img_seq
+  let img_slice := Tensor.slice x 1 txt_seq img_seq
   let img_out := Tensor.reshape img_slice #[batch, img_seq, cfg.hidden_size]
 
   -- Final layer with modulation
   let mod := Tensor.silu vec
   let mod2 := Tensor.linear mod model.final_layer.modulation  -- [batch, hidden_size * 2]
-  let shift_slice := sliceTyped mod2 1 0 cfg.hidden_size
-  let scale_slice := sliceTyped mod2 1 cfg.hidden_size cfg.hidden_size
+  let shift_slice := Tensor.slice mod2 1 0 cfg.hidden_size
+  let scale_slice := Tensor.slice mod2 1 cfg.hidden_size cfg.hidden_size
   let scale := Tensor.reshape scale_slice #[batch, cfg.hidden_size]
   let shift := Tensor.reshape shift_slice #[batch, cfg.hidden_size]
 

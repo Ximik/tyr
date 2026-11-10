@@ -200,24 +200,24 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
   for block in flux.double_blocks do
     if !saved_first then
       -- Split modulation into two triplets
-      let img_mod1 := sliceTyped mod_img 1 0 3
-      let img_mod2 := sliceTyped mod_img 1 3 3
-      let txt_mod1 := sliceTyped mod_txt 1 0 3
-      let txt_mod2 := sliceTyped mod_txt 1 3 3
+      let img_mod1 := Tensor.slice mod_img 1 0 3
+      let img_mod2 := Tensor.slice mod_img 1 3 3
+      let txt_mod1 := Tensor.slice mod_txt 1 0 3
+      let txt_mod2 := Tensor.slice mod_txt 1 3 3
 
-      let img_mod1_shift := Tensor.reshape (sliceTyped img_mod1 1 0 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let img_mod1_scale := Tensor.reshape (sliceTyped img_mod1 1 1 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let img_mod1_gate := Tensor.reshape (sliceTyped img_mod1 1 2 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let img_mod2_shift := Tensor.reshape (sliceTyped img_mod2 1 0 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let img_mod2_scale := Tensor.reshape (sliceTyped img_mod2 1 1 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let img_mod2_gate := Tensor.reshape (sliceTyped img_mod2 1 2 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let img_mod1_shift := Tensor.reshape (Tensor.slice img_mod1 1 0 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let img_mod1_scale := Tensor.reshape (Tensor.slice img_mod1 1 1 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let img_mod1_gate := Tensor.reshape (Tensor.slice img_mod1 1 2 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let img_mod2_shift := Tensor.reshape (Tensor.slice img_mod2 1 0 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let img_mod2_scale := Tensor.reshape (Tensor.slice img_mod2 1 1 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let img_mod2_gate := Tensor.reshape (Tensor.slice img_mod2 1 2 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
 
-      let txt_mod1_shift := Tensor.reshape (sliceTyped txt_mod1 1 0 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let txt_mod1_scale := Tensor.reshape (sliceTyped txt_mod1 1 1 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let txt_mod1_gate := Tensor.reshape (sliceTyped txt_mod1 1 2 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let txt_mod2_shift := Tensor.reshape (sliceTyped txt_mod2 1 0 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let txt_mod2_scale := Tensor.reshape (sliceTyped txt_mod2 1 1 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
-      let txt_mod2_gate := Tensor.reshape (sliceTyped txt_mod2 1 2 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let txt_mod1_shift := Tensor.reshape (Tensor.slice txt_mod1 1 0 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let txt_mod1_scale := Tensor.reshape (Tensor.slice txt_mod1 1 1 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let txt_mod1_gate := Tensor.reshape (Tensor.slice txt_mod1 1 2 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let txt_mod2_shift := Tensor.reshape (Tensor.slice txt_mod2 1 0 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let txt_mod2_scale := Tensor.reshape (Tensor.slice txt_mod2 1 1 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
+      let txt_mod2_gate := Tensor.reshape (Tensor.slice txt_mod2 1 2 1) #[1, fluxCfg.hidden_size] (by simp [Nat.mul_comm])
 
       -- Norm + modulation
       let img_norm := block.img_norm1.forward3d img_cur
@@ -232,13 +232,13 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let img_qkv := Tensor.reshape img_qkv #[1, imgSeq, 3, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
       let txt_qkv := Tensor.reshape txt_qkv #[1, txtSeq, 3, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [txtSeq, Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
 
-      let img_q := Tensor.reshape (sliceTyped img_qkv 2 0 1) #[1, imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
-      let img_k := Tensor.reshape (sliceTyped img_qkv 2 1 1) #[1, imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
-      let img_v := Tensor.reshape (sliceTyped img_qkv 2 2 1) #[1, imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
+      let img_q := Tensor.reshape (Tensor.slice img_qkv 2 0 1) #[1, imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
+      let img_k := Tensor.reshape (Tensor.slice img_qkv 2 1 1) #[1, imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
+      let img_v := Tensor.reshape (Tensor.slice img_qkv 2 2 1) #[1, imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
 
-      let txt_q := Tensor.reshape (sliceTyped txt_qkv 2 0 1) #[1, txtSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
-      let txt_k := Tensor.reshape (sliceTyped txt_qkv 2 1 1) #[1, txtSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
-      let txt_v := Tensor.reshape (sliceTyped txt_qkv 2 2 1) #[1, txtSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
+      let txt_q := Tensor.reshape (Tensor.slice txt_qkv 2 0 1) #[1, txtSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
+      let txt_k := Tensor.reshape (Tensor.slice txt_qkv 2 1 1) #[1, txtSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
+      let txt_v := Tensor.reshape (Tensor.slice txt_qkv 2 2 1) #[1, txtSeq, fluxCfg.num_heads, fluxCfg.head_dim] (by simp [Nat.mul_comm])
 
       -- QK normalization
       let (img_q_norm, img_k_norm) := block.img_attn.norm.forward img_q img_k
@@ -259,16 +259,16 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       saveDebug cfg.debugDir "txt_k_rope" txt_k_rope
 
       -- Joint attention
-      let q : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], dtype := .Float32, device := .CPU } := qwen35.typedCat txt_q_rope img_q_rope 1
-      let k : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], dtype := .Float32, device := .CPU } := qwen35.typedCat txt_k_rope img_k_rope 1
-      let v : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], dtype := .Float32, device := .CPU } := qwen35.typedCat txt_v img_v 1
+      let q : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], dtype := .Float32, device := .CPU } := Tensor.cat txt_q_rope img_q_rope 1
+      let k : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], dtype := .Float32, device := .CPU } := Tensor.cat txt_k_rope img_k_rope 1
+      let v : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], dtype := .Float32, device := .CPU } := Tensor.cat txt_v img_v 1
       let q := transposeAttention q
       let k := transposeAttention k
       let v := transposeAttention v
       let attn := Tensor.attentionGQA q k v false
       let attn := fromAttention attn
-      let txt_attn := sliceTyped attn 1 0 txtSeq
-      let img_attn := sliceTyped attn 1 txtSeq imgSeq
+      let txt_attn := Tensor.slice attn 1 0 txtSeq
+      let img_attn := Tensor.slice attn 1 txtSeq imgSeq
       let img_attn := Tensor.reshape img_attn #[1, imgSeq, fluxCfg.num_heads * fluxCfg.head_dim] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
       let txt_attn := Tensor.reshape txt_attn #[1, txtSeq, fluxCfg.num_heads * fluxCfg.head_dim] (by simp [Nat.mul_comm, Nat.mul_left_comm])
 
@@ -289,8 +289,8 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let img_mlp_in := applyModulation img_mlp_in img_mod2_scale img_mod2_shift
       let img_mlp_proj := Tensor.linear3d img_mlp_in block.img_mlp.w1
       let img_mlp_proj := Tensor.reshape img_mlp_proj #[1, imgSeq, 2, mlp_hidden] (by simp [mlp_hidden, Nat.mul_assoc, Nat.mul_comm])
-      let img_gate := Tensor.reshape (sliceTyped img_mlp_proj 2 0 1) #[1, imgSeq, mlp_hidden] (by simp [Nat.mul_comm])
-      let img_up := Tensor.reshape (sliceTyped img_mlp_proj 2 1 1) #[1, imgSeq, mlp_hidden] (by simp [Nat.mul_comm])
+      let img_gate := Tensor.reshape (Tensor.slice img_mlp_proj 2 0 1) #[1, imgSeq, mlp_hidden] (by simp [Nat.mul_comm])
+      let img_up := Tensor.reshape (Tensor.slice img_mlp_proj 2 1 1) #[1, imgSeq, mlp_hidden] (by simp [Nat.mul_comm])
       let img_mlp_out := Tensor.mul (Tensor.silu img_gate) img_up
       let img_mlp_out := Tensor.linear3d img_mlp_out block.img_mlp.w2
       saveDebug cfg.debugDir "img_mlp_out" img_mlp_out
@@ -299,8 +299,8 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let txt_mlp_in := applyModulation txt_mlp_in txt_mod2_scale txt_mod2_shift
       let txt_mlp_proj := Tensor.linear3d txt_mlp_in block.txt_mlp.w1
       let txt_mlp_proj := Tensor.reshape txt_mlp_proj #[1, txtSeq, 2, mlp_hidden] (by simp [txtSeq, mlp_hidden, Nat.mul_assoc, Nat.mul_comm])
-      let txt_gate := Tensor.reshape (sliceTyped txt_mlp_proj 2 0 1) #[1, txtSeq, mlp_hidden] (by simp [Nat.mul_comm])
-      let txt_up := Tensor.reshape (sliceTyped txt_mlp_proj 2 1 1) #[1, txtSeq, mlp_hidden] (by simp [Nat.mul_comm])
+      let txt_gate := Tensor.reshape (Tensor.slice txt_mlp_proj 2 0 1) #[1, txtSeq, mlp_hidden] (by simp [Nat.mul_comm])
+      let txt_up := Tensor.reshape (Tensor.slice txt_mlp_proj 2 1 1) #[1, txtSeq, mlp_hidden] (by simp [Nat.mul_comm])
       let txt_mlp_out := Tensor.mul (Tensor.silu txt_gate) txt_up
       let txt_mlp_out := Tensor.linear3d txt_mlp_out block.txt_mlp.w2
       saveDebug cfg.debugDir "txt_mlp_out" txt_mlp_out

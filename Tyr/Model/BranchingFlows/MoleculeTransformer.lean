@@ -538,13 +538,13 @@ private def clampUpper? (cap? : Option Float) (x : Float) : Float :=
 
 private def scalar3d {maxLen channels : Nat}
     (x : Tensor { dtype, device := device, shape := #[1, maxLen, channels] }) (j k : Nat) : Float :=
-  let row : Tensor { dtype, device := device, shape := #[1, 1, channels] } := sliceTyped x 1 j 1
-  let cell : Tensor { dtype, device := device, shape := #[1, 1, 1] } := sliceTyped row 2 k 1
+  let row : Tensor { dtype, device := device, shape := #[1, 1, channels] } := Tensor.slice! x 1 j 1
+  let cell : Tensor { dtype, device := device, shape := #[1, 1, 1] } := Tensor.slice! row 2 k 1
   Tensor.item (Tensor.reshape cell #[])
 
 private def scalar2d {maxLen : Nat}
     (x : Tensor { dtype, device := device, shape := #[1, maxLen] }) (j : Nat) : Float :=
-  let cell : Tensor { dtype, device := device, shape := #[1, 1] } := sliceTyped x 1 j 1
+  let cell : Tensor { dtype, device := device, shape := #[1, 1] } := Tensor.slice! x 1 j 1
   Tensor.item (Tensor.reshape cell #[])
 
 private def packMoleculeStateForTransformer {maxLen vocab : Nat}

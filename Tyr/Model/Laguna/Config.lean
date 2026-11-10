@@ -182,6 +182,10 @@ def rotaryDimFull (cfg : Config) : Nat := LagunaConfig.rotaryDimFull cfg
 
 def rotaryDimSliding (cfg : Config) : Nat := LagunaConfig.rotaryDimSliding cfg
 
+theorem rotaryDimFull_le (cfg : Config) : cfg.rotaryDimFull ≤ cfg.head_dim := cfg.rotaryValid.2.2.1
+
+theorem rotaryDimSliding_le (cfg : Config) : cfg.rotaryDimSliding ≤ cfg.head_dim := cfg.rotaryValid.2.2.2.2.2
+
 /-- Whether layer `i` uses full attention (otherwise sliding-window attention). -/
 def isFullAttentionLayer (cfg : Config) (i : Nat) : Bool :=
   match cfg.layerType i with

@@ -18,10 +18,6 @@ def addSame {s : Shape} (x y : Tensor { dtype := dtype, device := device, shape 
 def transposeAttention {b s h d : Nat} {dt : DType}
     (x : Tensor { device := device, shape := #[b, s, h, d], dtype := dt }) : Tensor { device := device, shape := #[b, h, s, d], dtype := dt } := x.transpose 1 2
 
-def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d })
-    (dim : Nat) (start len : Nat) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
-  x.slice! dim start len
-
 def randnDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Tensor { dtype := dtype, device := device, shape := shape }) := do
   pure ((← Tensor.randn (device := device) shape).castDType dtype)
 

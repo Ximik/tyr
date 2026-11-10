@@ -7,12 +7,6 @@ namespace torch.qwen35
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
 
-def typedSlice {s out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : Nat) : Tensor { device := device, shape := out, dtype := d } :=
-  x.sliceAs! dim start len out
-
-def typedCat {s t out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (y : Tensor { device := device, shape := t, dtype := d }) (dim : Nat) : Tensor { device := device, shape := out, dtype := d } :=
-  Tensor.catMany! #[x.packShape, y.packShape] dim out
-
 def transposeSeq {batch seq dim : Nat} {d : DType} (x : Tensor { device := device, shape := #[batch, seq, dim], dtype := d }) :
     Tensor { device := device, shape := #[batch, dim, seq], dtype := d } := x.transpose 1 2
 

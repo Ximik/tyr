@@ -230,7 +230,7 @@ private def sampleNextToken {cfg : Config}
     (topK : TopK)
     (context : Array UInt64)
     : IO UInt64 := do
-  if context.isEmpty then
+  let ⟨hContext⟩ ← if h : 0 < context.size then pure (PLift.up h) else
     throw <| IO.userError "Cannot decode from an empty prompt."
 
   let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
@@ -238,8 +238,7 @@ private def sampleNextToken {cfg : Config}
   let logits ← moddedGpt.forward params yarn inputReshaped false
 
   -- Keep the final time step, then view its logits as one sampling row.
-  let lastLogits := Tensor.sliceAs! logits 1 (context.size - 1) 1
-    #[1, 1, cfg.vocabSize]
+  let lastLogits := Tensor.slice logits 1 (context.size - 1) 1
   let rowLogits := lastLogits.reshape #[1, cfg.vocabSize]
   let scaled :=
     if temperature == 1.0 then rowLogits

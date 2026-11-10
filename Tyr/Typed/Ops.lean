@@ -818,13 +818,6 @@ def stack1d {cols : Nat} {d : DType} {dev : Device}
     Tensor ⟨#[tensors.size, cols], d, dev⟩ :=
   Tensor.ofRaw! "stack1d" (RawTensor.stack1d (tensors.map Tensor.toTensor) 0)
 
-/-- Slice `len` entries along `dim`, admitting the result at the caller's
-    `shape'`; a wrong claim aborts. Prefer `slice` or `slice!`, whose result
-    shape is computed. -/
-def sliceAs! {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
-    (shape' : Shape) : Tensor (σ.withShape shape') :=
-  Tensor.ofRaw! "sliceAs" (RawTensor.slice t.raw dim start len)
-
 /-- Vector-Jacobian product, checked against `x`'s spec. Saved intermediates
 are released by default. As in PyTorch, omitted retention follows `createGraph`.
 Unused inputs produce zero gradients; parameter gradient buffers are unchanged. -/

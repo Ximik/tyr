@@ -93,8 +93,7 @@ Selection has its own scalar relocation rule; see
 `reshape` takes a proof that the element counts are equal; its default tactic
 finds it for most shapes. When the counts only agree under a runtime condition,
 check it with `if h : … then t.reshape s h else throw …`. `#[]` means a scalar. `slice` computes
-its result shape and requires axis and bound proofs; `slice!` skips the proofs,
-and `sliceAs!` admits the result at a shape the caller claims. Other transforms include `transpose`,
+its result shape and requires axis and bound proofs; `slice!` skips the proofs. Other transforms include `transpose`,
 `permute`, `unsqueeze`, `squeeze`, and `unbind`.
 
 Use `Tensor.packShape` to package a runtime-dependent shape existentially.

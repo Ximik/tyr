@@ -167,9 +167,9 @@ private def expertWeights
     let up3 := de.upProj
     let down3 := de.downProj
     pure (
-      Tensor.reshape (sliceTyped gate3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
-      Tensor.reshape (sliceTyped up3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
-      Tensor.reshape (sliceTyped down3 0 e 1) #[cfg.hidden_size, cfg.moe_intermediate_size])
+      Tensor.reshape (Tensor.slice! gate3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
+      Tensor.reshape (Tensor.slice! up3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
+      Tensor.reshape (Tensor.slice! down3 0 e 1) #[cfg.hidden_size, cfg.moe_intermediate_size])
   | none =>
     let gateW : Tensor { dtype := .BFloat16, device := device, shape := #[cfg.moe_intermediate_size, cfg.hidden_size] } :=
       Tensor.reshape (← dequantExpertSlice (inFeatures := cfg.hidden_size) m.experts.gatePacked.2 m.experts.gateScale.2 m.experts.gateGlobal.2

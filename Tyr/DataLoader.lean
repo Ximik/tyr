@@ -158,8 +158,8 @@ def BOSFinder.take (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[
   if finder.currentPos > finder.dataLen then
     throw <| IO.userError "Data cursor position exceeds shard length"
   let count := min count (finder.dataLen - finder.currentPos)
-  if count == 0 then
-    return (tokens.sliceAs! 0 0 0 #[count], finder)
+  if h : count = 0 then
+    return (tokens.slice! 0 0 0 |>.reshape #[count] (by simp [h]), finder)
   let endPos := finder.currentPos + count
   if finder.orderedStarts.isEmpty then
     return (tokens.slice! 0 finder.currentPos count,

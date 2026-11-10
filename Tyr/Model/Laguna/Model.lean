@@ -196,6 +196,7 @@ def init (cfg : Config) (numHeads : Nat) (device : Device := .CPU) (dtype : DTyp
 private def qkvRope {batch seq rotaryDim numHeads : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
+    (hrot : rotaryDim ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
@@ -217,8 +218,8 @@ private def qkvRope {batch seq rotaryDim numHeads : Nat}
   -- GLM-style rotate-half RoPE; `applyRotaryPartial` passes the tail through
   -- untouched when `rotaryDim < cfg.head_dim` and degenerates to full-width
   -- rotary when `rotaryDim == cfg.head_dim` (sliding layers).
-  let q := applyRotaryPartial (rotary_dim := rotaryDim) q cos sin
-  let k := applyRotaryPartial (rotary_dim := rotaryDim) k cos sin
+  let q := applyRotaryPartial (rotary_dim := rotaryDim) q cos sin hrot
+  let k := applyRotaryPartial (rotary_dim := rotaryDim) k cos sin hrot
   (q, k, v)
 
 /-- Per-head softplus output gate + o_proj:
@@ -243,12 +244,13 @@ def forward {batch seq rotaryDim numHeads : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (hkv : cfg.num_key_value_heads ∣ numHeads)
+    (hrot : rotaryDim ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
     (window : Option Nat := none)
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } :=
-  let (q, k, v) := qkvRope cfg m x cos sin
+  let (q, k, v) := qkvRope cfg m hrot x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } := transposeAttention q
   let kh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k
   let vh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
@@ -265,6 +267,7 @@ def forwardWithCache {batch seq rotaryDim numHeads cap : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (hkv : cfg.num_key_value_heads ∣ numHeads)
+    (hrot : rotaryDim ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
@@ -272,7 +275,7 @@ def forwardWithCache {batch seq rotaryDim numHeads cap : Nat}
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
     (hfit : seq ≤ cap)
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap :=
-  let (q, k, v) := qkvRope cfg m x cos sin
+  let (q, k, v) := qkvRope cfg m hrot x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } := transposeAttention q
   let kh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k
   let vh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
@@ -302,6 +305,7 @@ def forwardStep {batch rotaryDim numHeads cap : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (hkv : cfg.num_key_value_heads ∣ numHeads)
+    (hrot : rotaryDim ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[1, rotaryDim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, rotaryDim / 2], dtype := .Float32 })
@@ -309,7 +313,7 @@ def forwardStep {batch rotaryDim numHeads cap : Nat}
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
     (pos : Nat) (hpos : pos < cap)
     : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap :=
-  let (q, k, v) := qkvRope cfg m x cos sin
+  let (q, k, v) := qkvRope cfg m hrot x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, 1, cfg.head_dim] } := transposeAttention q
   let kNew : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] } := transposeAttention k
   let vNew : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] } := transposeAttention v
@@ -349,12 +353,13 @@ irrelevant to single-query attention after RoPE has been applied. -/
 private def forwardOwned {batch seq rotaryDim numHeads cap : Nat}
     (cfg : Config) (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (hkv : cfg.num_key_value_heads ∣ numHeads)
+    (hrot : rotaryDim ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 }) (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
     (window : Option Nat) (prefill : Bool) (position : Nat) (hDecode : prefill = false → seq = 1)
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap) := do
-  let (q, k, v) := qkvRope cfg m x cos sin
+  let (q, k, v) := qkvRope cfg m hrot x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } := transposeAttention q
   let kh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k
   let vh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
@@ -369,11 +374,11 @@ private def forwardOwned {batch seq rotaryDim numHeads cap : Nat}
     let slot := sourceStart % cap
     have _hSlot : slot < cap := Nat.mod_lt _ cache.cap_pos
     let first := min retained (cap - slot)
-    kStore ← data.copySliceIO kStore 2 slot (sliceTyped kh 2 sourceStart first)
-    vStore ← data.copySliceIO vStore 2 slot (sliceTyped vh 2 sourceStart first)
+    kStore ← data.copySliceIO kStore 2 slot (Tensor.slice kh 2 sourceStart first)
+    vStore ← data.copySliceIO vStore 2 slot (Tensor.slice vh 2 sourceStart first)
     if first < retained then
-      kStore ← data.copySliceIO kStore 2 0 (sliceTyped kh 2 (sourceStart + first) (retained - first))
-      vStore ← data.copySliceIO vStore 2 0 (sliceTyped vh 2 (sourceStart + first) (retained - first))
+      kStore ← data.copySliceIO kStore 2 0 (Tensor.slice kh 2 (sourceStart + first) (retained - first))
+      vStore ← data.copySliceIO vStore 2 0 (Tensor.slice vh 2 (sourceStart + first) (retained - first))
   else
     let slot := position % cap
     have _hSlot : slot < cap := Nat.mod_lt _ cache.cap_pos
@@ -561,7 +566,7 @@ def forward {batch seq layerIdx : Nat}
     (cfg : Config)
     (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    (tables : (LagunaRotaryTables (device := device)))
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let mixed :=
@@ -569,11 +574,11 @@ def forward {batch seq layerIdx : Nat}
     | true, .full a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
-      a.forward (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none
+      a.forward (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none
     | false, .sliding a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
-      a.forward (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window)
+      a.forward (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window)
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← LagunaFfn.forward cfg layerIdx layer.ffn h3
@@ -585,7 +590,7 @@ def forwardWithCache {batch seq cap layerIdx : Nat}
     (cfg : Config)
     (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    (tables : (LagunaRotaryTables (device := device)))
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     (hfit : seq ≤ cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -599,11 +604,11 @@ def forwardWithCache {batch seq cap layerIdx : Nat}
         | true, .full a =>
           let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
           let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
-          a.forwardWithCache (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none kv hfit
+          a.forwardWithCache (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none kv hfit
         | false, .sliding a =>
           let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
           let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
-          a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window) kv hfit
+          a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window) kv hfit
       (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
@@ -615,7 +620,7 @@ def forwardStep {batch cap layerIdx : Nat}
     (cfg : Config)
     (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
-    (tables : (LagunaRotaryTables (device := device)))
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (position : Nat) (hpos : position < cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -629,11 +634,11 @@ def forwardStep {batch cap layerIdx : Nat}
         | true, .full a =>
           let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
           let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position 1
-          a.forwardStep (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none kv position hpos
+          a.forwardStep (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none kv position hpos
         | false, .sliding a =>
           let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position 1
           let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position 1
-          a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window) kv position hpos
+          a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window) kv position hpos
       (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
@@ -642,7 +647,7 @@ def forwardStep {batch cap layerIdx : Nat}
 
 private def forwardOwned {batch seq cap layerIdx : Nat}
     (cfg : Config) (layer : LagunaLayer (device := device) cfg dtype layerIdx)
-    (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) (tables : (LagunaRotaryTables (device := device)))
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (position : Nat) (prefill : Bool) (hDecode : prefill = false → seq = 1) (kv : LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
@@ -650,11 +655,11 @@ private def forwardOwned {batch seq cap layerIdx : Nat}
     | true, .full a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position seq
-      a.forwardOwned (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none prefill position hDecode kv
+      a.forwardOwned (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none prefill position hDecode kv
     | false, .sliding a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position seq
-      a.forwardOwned (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin
+      a.forwardOwned (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin
         (some cfg.sliding_window) prefill position hDecode kv
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
@@ -723,7 +728,7 @@ def forwardWithCache {batch seq cap : Nat}
     (cfg : Config)
     (m : LagunaModel (device := device) (dtype := dtype) cfg)
     (x0 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    (tables : (LagunaRotaryTables (device := device)))
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     (hfit : seq ≤ cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -735,7 +740,7 @@ def forwardStep {batch cap : Nat}
     (cfg : Config)
     (m : LagunaModel (device := device) (dtype := dtype) cfg)
     (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
-    (tables : (LagunaRotaryTables (device := device)))
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (position : Nat) (hpos : position < cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -770,7 +775,7 @@ def initCacheSession {batch : Nat} (cfg : Config) (_m : LagunaModel (device := d
 /-- Execute one serialized inference transition, invalidating on partial failure.
 Only fresh prefill and subsequent single-token steps are supported. -/
 private def forwardSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaModel (device := device) (dtype := dtype) cfg)
-    (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) (tables : (LagunaRotaryTables (device := device)))
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (position : Nat) (prefill : Bool) (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen)
     -- Ring writes cannot overflow; this keeps full layers from wrapping.
     (_hfit : 0 < seq ∧ position + seq ≤ maxLen)
@@ -778,13 +783,12 @@ private def forwardSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaMo
   let some cache ← get | throw <| IO.userError "Laguna cache session is invalid"
   if x.runtimeShape != #[batch, seq, cfg.hidden_size] then
     throw <| IO.userError "Laguna cache input shape mismatch"
-  for (table, dim) in #[(tables.fullCos, cfg.rotaryDimFull / 2),
-      (tables.fullSin, cfg.rotaryDimFull / 2), (tables.slidingCos, cfg.rotaryDimSliding / 2),
-      (tables.slidingSin, cfg.rotaryDimSliding / 2)] do
-    let shape := table.1
-    if shape.size != 2 || shape.getD 0 0 < position + seq || shape.getD 1 0 != dim ||
-        table.2.device != x.device then
-      throw <| IO.userError "Laguna cache rotary table shape, coverage or device mismatch"
+  if tableLen < position + seq then
+    throw <| IO.userError "Laguna cache rotary tables do not cover the requested positions"
+  for tableDevice in #[tables.fullCos.device, tables.fullSin.device, tables.slidingCos.device,
+      tables.slidingSin.device] do
+    if tableDevice != x.device then
+      throw <| IO.userError "Laguna cache rotary table device mismatch"
   if cache.kvCaches.size != cfg.num_hidden_layers then
     throw <| IO.userError "Laguna cache layer count mismatch"
   let ⟨hDecode⟩ ← if h : (prefill = true → position = 0) ∧ (prefill = false → seq = 1) then pure (PLift.up h.2) else
@@ -847,13 +851,13 @@ def forward {batch seq : Nat}
 def prefill {batch seq cap : Nat}
     (cfg : Config)
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
-    (tables : (LagunaRotaryTables (device := device)))
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (inputsEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     (hfit : seq ≤ cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
   let (hidden, cache') ← LagunaModel.forwardWithCache cfg m.model inputsEmbeds tables cache hfit
-  let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := sliceTyped hidden 1 (seq - 1) 1
+  let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := Tensor.slice! hidden 1 (seq - 1) 1
   let logits3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.vocab_size] } := Tensor.linear3d lastHidden m.lmHead
   pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
@@ -861,7 +865,7 @@ def prefill {batch seq cap : Nat}
 def decodeStep {batch cap : Nat}
     (cfg : Config)
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
-    (tables : (LagunaRotaryTables (device := device)))
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (position : Nat) (hpos : position < cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
@@ -875,15 +879,15 @@ private def capacityError : IO.Error :=
 
 /-- Inference-only prefill into an owned cache session. The session must be fresh. -/
 def prefillSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
-    (tables : (LagunaRotaryTables (device := device))) (inputsEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen) (inputsEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] }) := do
   let ⟨hfit⟩ ← if h : 0 < seq ∧ 0 + seq ≤ maxLen then pure (PLift.up h) else throw capacityError
   let hidden ← m.model.forwardSession cfg inputsEmbeds tables 0 true session hfit
-  let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := sliceTyped hidden 1 (seq - 1) 1
+  let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := Tensor.slice hidden 1 (seq - 1) 1
   return Tensor.reshape (Tensor.linear3d lastHidden m.lmHead.detach) #[batch, cfg.vocab_size]
 
 private def decodeSessionFit {batch maxLen : Nat} (cfg : Config) (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
-    (tables : (LagunaRotaryTables (device := device))) (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen) (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (position : Nat) (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen)
     (hfit : position + 1 ≤ maxLen)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] }) := do
@@ -892,7 +896,7 @@ private def decodeSessionFit {batch maxLen : Nat} (cfg : Config) (m : LagunaForC
 
 /-- Append one token at the next absolute position without copying cache buffers. -/
 def decodeSession {batch maxLen : Nat} (cfg : Config) (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
-    (tables : (LagunaRotaryTables (device := device))) (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen) (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (position : Nat) (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] }) := do
   let ⟨hfit⟩ ← if h : position + 1 ≤ maxLen then pure (PLift.up h) else throw capacityError
@@ -901,7 +905,7 @@ def decodeSession {batch maxLen : Nat} (cfg : Config) (m : LagunaForCausalLM (de
 private partial def decodeLoopCached {batch : Nat}
     (cfg : Config)
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
-    (tables : (LagunaRotaryTables (device := device)))
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (strategy : SamplingStrategy)
     (eosTokenIds : Array tokenizer.TokenId)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
@@ -935,7 +939,7 @@ private partial def decodeLoopCached {batch : Nat}
   | none => pure ()
 
   let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
-  let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.catMany! #[curIds.packShape, nextCol.packShape] 1 #[batch, curSeq + 1]
+  let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
 
   let stop :=
     if eosTokenIds.isEmpty then

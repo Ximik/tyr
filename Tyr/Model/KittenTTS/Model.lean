@@ -1044,7 +1044,7 @@ private def reflectPadLeft1 {channels frames : Nat}
       sliceTensor x 2 0 1
     else
       sliceTensor x 2 1 1
-  Tensor.catMany! #[Tensor.packShape pad, Tensor.packShape x] 2 #[1, channels, frames + 1]
+  (Tensor.cat pad x 2).reshape #[1, channels, frames + 1] (by simp [Nat.add_comm])
 
 private def harmonicMultipliers (harmonicCount : Nat) : Tensor { shape := #[harmonicCount + 1], dtype := .Float32, device := device } :=
   let vals : Array Float := Array.ofFn (n := harmonicCount + 1) fun i => i.val.toFloat + 1.0
@@ -1299,7 +1299,8 @@ def forward {baseFrames : Nat}
   let harmonics := cfg.generator.harmonicCount + 1
   let mult : Tensor { shape := #[1, 1, harmonics], dtype := .Float32, device := device } := Tensor.reshape (harmonicMultipliers cfg.generator.harmonicCount) #[1, 1, harmonics]
   let multE : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.broadcastTo mult #[1, waveFrames, harmonics]
-  let f0E : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.broadcastTo! f0 #[1, waveFrames, harmonics]
+  let f0E : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } :=
+    Tensor.broadcastTo f0 #[1, waveFrames, harmonics] (by simp only [waveFrames]; broadcast_shape)
   let rad0 : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := (f0E * multE) / cfg.sampleRate.toFloat
   let radBase : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := rad0 - floorTensor rad0
 
@@ -1588,8 +1589,7 @@ def debugForward {baseFrames : Nat}
   let im3 : Tensor { shape := #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 1], dtype := .Float32, device := device } :=
     Tensor.reshape im #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 1]
   let packed : Tensor { shape := #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 2], dtype := .Float32, device := device } :=
-    Tensor.catMany! #[Tensor.packShape re3, Tensor.packShape im3] 2
-      #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 2]
+    Tensor.cat re3 im3 2
   let window : Tensor { shape := #[cfg.generator.genIstftNFft], dtype := .Float32, device := device } := m.window.to post.device
   let audio1d : Tensor { shape := #[GeneratorConfig.waveSamples cfg.generator baseFrames], dtype := .Float32, device := device } :=
     Tensor.reshape

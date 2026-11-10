@@ -963,8 +963,8 @@ def testMoleculeMuonUpdatesMatrixAndVectorLeaves : IO Unit := do
 
 private def moleculeCoordCell {maxLen : Nat}
     (coord : Tensor { dtype := .Float32, shape := #[1, maxLen, 3], device := .CPU }) (j k : Nat) : Float :=
-  let row : Tensor { dtype := .Float32, shape := #[1, 1, 3], device := .CPU } := sliceTyped coord 1 j 1
-  let cell : Tensor { dtype := .Float32, shape := #[1, 1, 1], device := .CPU } := sliceTyped row 2 k 1
+  let row : Tensor { dtype := .Float32, shape := #[1, 1, 3], device := .CPU } := Tensor.slice! coord 1 j 1
+  let cell : Tensor { dtype := .Float32, shape := #[1, 1, 1], device := .CPU } := Tensor.slice! row 2 k 1
   Tensor.item (cell.reshape #[])
 
 @[test]

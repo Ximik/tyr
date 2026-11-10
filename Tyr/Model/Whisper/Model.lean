@@ -361,7 +361,7 @@ def encode {batch frames : Nat} {featureDType : DType}
             unfold Tensor.convExtent WhisperConfig.conv2OutputSeq; omega
           simp +zetaDelta [this])
   let x2t : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := (Tensor.permute x2 #[0, 2, 1]).reshape #[batch, outSeq, cfg.dModel]
-  let pos : Tensor { dtype := dtype, device := device, shape := #[outSeq, cfg.dModel] } := sliceTyped m.encoderPositionalEmbedding 0 0 outSeq
+  let pos : Tensor { dtype := dtype, device := device, shape := #[outSeq, cfg.dModel] } := Tensor.slice! m.encoderPositionalEmbedding 0 0 outSeq
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } :=
     Tensor.broadcastTo (Tensor.reshape pos #[1, outSeq, cfg.dModel]) #[batch, outSeq, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := Tensor.add x2t posB
@@ -378,7 +378,7 @@ def decode {batch seq encSeq : Nat}
     throw <| IO.userError
       s!"Whisper decoder sequence {seq} exceeds max_target_positions {cfg.maxTargetPositions}"
   let tokEmb : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } := Tensor.embedding inputIds m.decoderTokenEmbedding
-  let pos : Tensor { dtype := dtype, device := device, shape := #[seq, cfg.dModel] } := sliceTyped m.decoderPositionalEmbedding 0 0 seq
+  let pos : Tensor { dtype := dtype, device := device, shape := #[seq, cfg.dModel] } := Tensor.slice! m.decoderPositionalEmbedding 0 0 seq
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } :=
     Tensor.broadcastTo (Tensor.reshape pos #[1, seq, cfg.dModel]) #[batch, seq, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } := Tensor.add tokEmb posB
