@@ -123,7 +123,7 @@ private def rowTokenIds {seq : Nat}
     (tokens : Tensor { shape := #[2, seq], dtype := .Int64, device := .CPU })
     (row : Nat)
     : IO (Array UInt64) := do
-  let row2d : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := typedSlice tokens 0 row 1
+  let row2d : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := Tensor.slice! tokens 0 row 1
   let flat : Tensor { shape := #[seq], dtype := .Int64, device := .CPU } := Tensor.reshape (id row2d) #[seq]
   Tensor.toUInt64Array flat
 

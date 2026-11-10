@@ -73,7 +73,7 @@ private def dequantCore {pd sd : DType}
   let idx := (packed.reshape #[numPacked]).toInt64
   let lo := (Tensor.embedding1d idx lutLo).reshape #[numPacked, 1]
   let hi := (Tensor.embedding1d idx lutHi).reshape #[numPacked, 1]
-  let pairs := Tensor.catMany! #[lo.packShape, hi.packShape] 1 #[numPacked, 2]
+  let pairs := Tensor.cat lo hi 1
   let vals4 := pairs.reshape #[lead, outFeatures, numGroups, 16]
     (by simp +zetaDelta [Nat.mul_assoc, Nat.div_mul_cancel h2, Nat.div_mul_cancel h16])
   let scalesF := scales.toFloat32.reshape #[lead, outFeatures, numGroups, 1]

@@ -201,7 +201,7 @@ private def runFixture (device : Device) : IO Unit := do
   --    budget termination; the HF reference used its KV-cache path).
   let r ← model.generate cfg idsA 16 .greedy #[]
   check (r.1 == 23) s!"[{lbl}] generate produced 7 + 16 tokens (outSeq={r.1})"
-  let genGot ← Tensor.toUInt64Array ((sliceTyped r.2 1 7 16))
+  let genGot ← Tensor.toUInt64Array ((Tensor.slice! r.2 1 7 16))
   check (genGot == genRef) s!"[{lbl}] greedy gen ids EXACTLY match reference gen_ids"
 
   -- 5. Final-step logits: the logits that produced gen_ids[15] come from the
@@ -210,7 +210,7 @@ private def runFixture (device : Device) : IO Unit := do
   let idsFull := mkIds (promptA ++ (genRef.extract 0 15).map (fun t => Int64.ofNat t.toNat)) device
   let logitsFull ← model.forward cfg idsFull
   let lastLogits : Tensor { shape := #[1, cfg.vocab_size], device := device, dtype := .Float32 } :=
-    (sliceTyped logitsFull 1 21 1).reshape #[1, cfg.vocab_size]
+    (Tensor.slice! logitsFull 1 21 1).reshape #[1, cfg.vocab_size]
   checkLogits lbl "gen_logits_last" (lastLogits)
     ((genLastRef.reshape #[1, 1024]).to device) 0.05
 
@@ -228,7 +228,7 @@ private def runFixture (device : Device) : IO Unit := do
     ((logitsBRef.to device))
   IO.println s!"  [{lbl}] bf16 logits_b: maxAbs={bbAbs} maxRel={bbRel}"
   let rb ← modelB16.generate cfg idsA 16 .greedy #[]
-  let genB ← Tensor.toUInt64Array ((sliceTyped rb.2 1 7 16))
+  let genB ← Tensor.toUInt64Array ((Tensor.slice! rb.2 1 7 16))
   IO.println s!"  [{lbl}] bf16 greedy ids: {genB} (exact match vs fp32 ref: {genB == genRef})"
 
 /-- Real NVFP4-checkpoint smoke load: config + first `numLayers` layers via

@@ -1082,21 +1082,19 @@ def decodeStreamingChunkWithModelStateCached
         else
           match findSingleContiguousAudioSpanStart promptIds cfg.thinkerConfig.audioTokenId audioLen with
           | some spanStart =>
-            if spanStart + audioLen > seq then
+            if hSpan : spanStart + audioLen > seq then
               throw <| IO.userError
                 s!"decodeStreamingChunkWithModel placeholder span overflow: start={spanStart}, audio_len={audioLen}, seq={seq}"
             else do
+              have hle : spanStart + audioLen ≤ seq := by omega
               let prefixEmbeds : Tensor { dtype := dtype, device := device, shape := #[1, spanStart, cfg.thinkerConfig.textConfig.hiddenSize] } :=
                 Tensor.slice! inputsEmbeds0 1 0 spanStart
               let suffixStart := spanStart + audioLen
               let suffixLen := seq - suffixStart
               let suffixEmbeds : Tensor { dtype := dtype, device := device, shape := #[1, suffixLen, cfg.thinkerConfig.textConfig.hiddenSize] } :=
                 Tensor.slice! inputsEmbeds0 1 suffixStart suffixLen
-              let mergedDyn :=
-                Tensor.catMany!
-                  #[prefixEmbeds.packShape, audioEmbedsValid.packShape, suffixEmbeds.packShape]
-                  1 #[1, seq, cfg.thinkerConfig.textConfig.hiddenSize]
-              pure (Tensor.reshape mergedDyn #[1, seq, cfg.thinkerConfig.textConfig.hiddenSize])
+              pure ((Tensor.cat (Tensor.cat prefixEmbeds audioEmbedsValid 1) suffixEmbeds 1).reshape
+                #[1, seq, cfg.thinkerConfig.textConfig.hiddenSize] (by simp [suffixLen, suffixStart, Nat.add_sub_cancel' hle]))
           | none =>
             throw <| IO.userError
               s!"decodeStreamingChunkWithModel expected one contiguous audio-token span of length {audioLen}, but prompt ids were not span-compatible"

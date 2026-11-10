@@ -242,6 +242,8 @@ def rotaryDim (cfg : Config) : Nat := Qwen35Config.rotaryDim cfg
 
 def rotaryHalfDim (cfg : Config) : Nat := Qwen35Config.rotaryHalfDim cfg
 
+theorem rotaryDim_le (cfg : Config) : cfg.rotaryDim ≤ cfg.head_dim := cfg.rotaryValid.2.2
+
 @[simp] def linearKeyDim (cfg : Config) : Nat := Qwen35Config.linearKeyDim cfg
 
 @[simp] def linearValueDim (cfg : Config) : Nat := Qwen35Config.linearValueDim cfg

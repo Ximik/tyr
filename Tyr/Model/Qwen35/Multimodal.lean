@@ -156,9 +156,9 @@ def forward {tokens : Nat}
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
   let qkv : Tensor { device := device, shape := #[tokens, cfg.hidden_size * 3], dtype := dtype } := linear2d x m.qkv_weight m.qkv_bias
-  let q : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := typedSlice qkv 1 0 cfg.hidden_size
-  let k : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := typedSlice qkv 1 cfg.hidden_size cfg.hidden_size
-  let v : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := typedSlice qkv 1 (cfg.hidden_size * 2) cfg.hidden_size
+  let q : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.slice qkv 1 0 cfg.hidden_size
+  let k : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.slice qkv 1 cfg.hidden_size cfg.hidden_size
+  let v : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.slice qkv 1 (cfg.hidden_size * 2) cfg.hidden_size
 
   let q : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } :=
     Tensor.reshape q #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
@@ -558,13 +558,13 @@ partial def generateUncached {batch seq : Nat}
 
     let lastPos := curSeq - 1
     let last3 : Tensor { device := device, shape := #[batch, 1, cfg.text_config.vocab_size], dtype := dtype } :=
-      typedSlice logits 1 lastPos 1
+      Tensor.slice! logits 1 lastPos 1
     let last2 : Tensor { device := device, shape := #[batch, cfg.text_config.vocab_size], dtype := dtype } := Tensor.reshape last3 #[batch, cfg.text_config.vocab_size]
     let nextTok ← sampleFromLogits last2.toFloat32 strategy
 
     let nextVals ← Tensor.toUInt64Array nextTok
     let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
-    let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := typedCat cur nextCol 1
+    let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat cur nextCol 1
     let stop := eosTokenIds.size > 0 && allInSet nextVals eosTokenIds
     if stop then
       pure ⟨curSeq + 1, appended⟩

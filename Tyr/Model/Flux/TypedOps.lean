@@ -25,9 +25,6 @@ def initLayerNorm (dim : Nat) (eps : Float := 1e-5) (train : Bool := true) (devi
   else
     pure { weight, bias, eps := ⟨eps⟩ }
 
-def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : Nat) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
-  x.slice! dim start len
-
 def transposeAttention {b s h d : Nat} {dt : DType} (x : Tensor { device := device, shape := #[b, s, h, d], dtype := dt }) : Tensor { device := device, shape := #[b, h, s, d], dtype := dt } := x.transpose 1 2
 
 def fromAttention {b h s d : Nat} {dt : DType} (x : Tensor { device := device, shape := #[b, h, s, d], dtype := dt }) : Tensor { device := device, shape := #[b, s, h, d], dtype := dt } := x.transpose 1 2

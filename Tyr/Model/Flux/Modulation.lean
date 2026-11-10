@@ -78,6 +78,19 @@ def forward {batch hidden_size : Nat} (isDouble : Bool)
 
 end Modulation
 
+/-- Modulation vector `k` of a `[batch, n, hidden_size]` modulation tensor. -/
+def modChunk {batch n hidden_size : Nat}
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, n, hidden_size] })
+    (k : Nat) (hk : k < n := by omega)
+    : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_size] } :=
+  Tensor.reshape (Tensor.slice x 1 k 1) #[batch, hidden_size]
+
+/-- Repeat a per-sample `[batch, hidden_size]` vector at each of `seq` positions. -/
+def expandOverSeq {batch hidden_size : Nat} (seq : Nat)
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_size] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] } :=
+  Tensor.broadcastTo (Tensor.unsqueeze x 1) #[batch, seq, hidden_size]
+
 /-- Apply modulation to a tensor.
     x: [batch, seq, hidden_size]
     scale, shift: [batch, hidden_size]
@@ -87,11 +100,8 @@ def applyModulation {batch seq hidden_size : Nat}
     (scale : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_size] })
     (shift : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] } :=
-  -- Expand scale and shift to match sequence dimension
-  let scale := Tensor.unsqueeze scale 1  -- [batch, 1, hidden_size]
-  let shift := Tensor.unsqueeze shift 1  -- [batch, 1, hidden_size]
-  let scale := Tensor.broadcastTo scale #[batch, seq, hidden_size]
-  let shift := Tensor.broadcastTo shift #[batch, seq, hidden_size]
+  let scale := expandOverSeq seq scale
+  let shift := expandOverSeq seq shift
   -- Apply: (1 + scale) * x + shift
   let scale := Tensor.addScalar scale 1.0
   Tensor.add (Tensor.mul scale x) shift
