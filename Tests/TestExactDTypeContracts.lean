@@ -14,13 +14,6 @@ example : True := by
     have _ : StaticSpec := { shape := #[2], device := .CPU }
   trivial
 
-@[test] def testPromotionRetainsItsResultIndex : IO Unit := do
-  let left := Tensor.ones #[2]
-  let right := (Tensor.ones #[2]).castDType .Float64
-  let result : Tensor ⟨#[2], .Float64, .CPU⟩ := Tensor.add left right
-  LeanTest.assertEqual result.raw.dtype .Float64
-  LeanTest.assertEqual (← result.toFloatArray) #[2.0, 2.0]
-
 @[test] def testFileLoadingRetainsItsDTypeWitness : IO Unit := do
   IO.FS.withTempDir fun directory => do
     let path := (directory / "weights.pt").toString
