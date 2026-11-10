@@ -71,11 +71,11 @@ private def parseCodePredictorConfig (j : Json) (d : TalkerCodePredictorConfig :
     numHiddenLayers := ← fieldD? j "num_hidden_layers" d.numHiddenLayers
     numAttentionHeads := heads
     numKeyValueHeads := kvHeads
-    headDim
+    halfHeadDim := headDim / 2
     rmsNormEps
     ropeTheta
     headsValid := hHeads
-    headDimEven := hHeadDim
+    halfHeadDimPos := by omega
     ropeThetaPos := hTheta
     rmsNormEpsPos := hEps
   }
@@ -130,7 +130,7 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : Except Strin
     numHiddenLayers := ← fieldD? j "num_hidden_layers" d.numHiddenLayers
     numAttentionHeads := heads
     numKeyValueHeads := kvHeads
-    headDim
+    halfHeadDim := headDim / 2
     rmsNormEps
     ropeTheta
     numCodeGroups
@@ -142,7 +142,7 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : Except Strin
     codecLanguageId
     residualCodeGroups := hGroups
     headsValid := hHeads
-    headDimEven := hHeadDim
+    halfHeadDimPos := by omega
     ropeThetaPos := hTheta
     rmsNormEpsPos := hEps
     codecIdsInVocab := hCodec

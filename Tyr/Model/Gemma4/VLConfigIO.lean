@@ -41,7 +41,7 @@ def VisionConfig.parseJson (j : Json) (d : VisionConfig := {}) : Except String V
     num_hidden_layers := ← fieldD? j "num_hidden_layers" d.num_hidden_layers
     num_attention_heads
     num_key_value_heads
-    head_dim
+    quarter_head_dim := head_dim / 4
     patch_size
     pooling_kernel_size
     position_embedding_size := ← fieldD? j "position_embedding_size" d.position_embedding_size
@@ -49,10 +49,10 @@ def VisionConfig.parseJson (j : Json) (d : VisionConfig := {}) : Except String V
     rope_theta
     standardize := ← fieldD? j "standardize" d.standardize
     use_clipped_linears := ← fieldD? j "use_clipped_linears" d.use_clipped_linears
-    queryHeadsSplit := hQuery
-    keyValueHeadsSplit := hKV
+    queryHeadsSplit := by rw [Nat.mul_div_cancel' hHeadDim.2]; exact hQuery
+    keyValueHeadsSplit := by rw [Nat.mul_div_cancel' hHeadDim.2]; exact hKV
     kvHeadsDivide := hDivide
-    headDimValid := hHeadDim
+    headDimPos := by omega
     patchPoolPos := hPatch
     floatsPos := hFloats
   }

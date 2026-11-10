@@ -52,7 +52,7 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
       else throw s!"Invalid Qwen3.5 config: without head_dim, num_attention_heads={heads} must divide hidden_size={hidden}"
 
   let factor : Float := (← ropeField? textCfg "partial_rotary_factor").getD
-    (d.rotary_dim.toFloat / d.head_dim.toFloat)
+    (d.rotaryDim.toFloat / d.head_dim.toFloat)
   let rotaryDim := (headDim.toFloat * factor).round.toUInt64.toNat
   unless rotaryDim.toFloat == headDim.toFloat * factor do
     throw s!"Invalid Qwen3.5 config: partial_rotary_factor={factor} does not select a whole number of the {headDim} head channels"
@@ -105,7 +105,7 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
     num_key_value_heads := kvHeads
     head_dim := headDim
     rope_theta := ropeTheta
-    rotary_dim := rotaryDim
+    half_rotary_dim := rotaryDim / 2
     rms_norm_eps := eps
     linear_conv_kernel_dim := convKernel
     linear_key_head_dim := ← fieldD? textCfg "linear_key_head_dim" d.linear_key_head_dim
@@ -123,7 +123,7 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
     linearKeyHeadsDivide := hLinear
     kvHeadsDivide := hKV
     headsPos := hHeads
-    rotaryValid := hRotary
+    rotaryValid := by obtain ⟨_, _, _⟩ := hRotary; omega
     layerTypesSize := hLayers
     convKernelPos := hConv
     expertsValid := hExperts

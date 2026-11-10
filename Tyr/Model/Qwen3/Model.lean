@@ -81,7 +81,7 @@ def forwardEmbeds {batch seq : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) := none)
     : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 } :=
-  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.head_dim cfg.rope_theta device
+  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.half_head_dim cfg.rope_theta device
   let hidden :=
     match attnMask with
     | some mask =>
@@ -109,7 +109,7 @@ def forwardWithHiddenStates {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) := none)
     : CausalLMOutput (device := device) cfg batch seq :=
-  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.head_dim cfg.rope_theta device
+  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.half_head_dim cfg.rope_theta device
   let hiddenStates :=
     match attnMask with
     | some mask => m.model.forwardWithHiddenStatesMasked cfg inputIds cos sin mask
@@ -140,23 +140,23 @@ private def initLayerKVCaches {batch : Nat}
 private def precomputeDecodeRotary {maxLen : Nat}
     (_m : Qwen3ForCausalLM (device := device) cfg)
     (device : Device)
-    : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 } × Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 } :=
+    : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 } × Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 } :=
   qwen.computeFreqsOnDevice
     maxLen
-    cfg.head_dim
+    cfg.half_head_dim
     cfg.rope_theta
     device
 
 private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
-    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (tokenEmbed : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 })
     (position : Nat) (hpos : position < maxLen)
     (caches : Array (LayerKVCache (device := device) cfg batch maxLen))
     : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache (device := device) cfg batch maxLen)) := do
-  let cos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice cosAll 0 position 1
-  let sin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice sinAll 0 position 1
+  let cos : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice cosAll 0 position 1
+  let sin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice sinAll 0 position 1
 
   let mut hidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := tokenEmbed
   let mut nextCaches := caches
@@ -181,8 +181,8 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
 
 private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
-    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })
     (caches : Array (LayerKVCache (device := device) cfg batch maxLen))
     (position : Nat)
@@ -198,8 +198,8 @@ private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
 
 private partial def greedyLoopCached {batch maxLen : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
-    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (eosTokenIds : Array tokenizer.TokenId)
     (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)

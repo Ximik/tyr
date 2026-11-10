@@ -68,12 +68,13 @@ structure LagunaConfig where
 
   /-- RoPE base for sliding-window layers (plain rope). -/
   rope_theta_sliding : Float := 10000.0
-  /-- Leading head channels RoPE rotates on sliding-window layers (`head_dim * partial_rotary_factor`). -/
-  rotary_dim_sliding : Nat := 128
+  /-- Half the leading head channels RoPE rotates on sliding-window layers
+      (`head_dim * partial_rotary_factor / 2`). -/
+  half_rotary_dim_sliding : Nat := 64
   /-- RoPE base for full-attention layers (YaRN, partial rotary). -/
   rope_theta_full : Float := 500000.0
-  /-- Leading head channels RoPE rotates on full-attention layers. -/
-  rotary_dim_full : Nat := 64
+  /-- Half the leading head channels RoPE rotates on full-attention layers. -/
+  half_rotary_dim_full : Nat := 32
   yarn_factor : Float := 32.0
   yarn_original_max_position_embeddings : Nat := 8192
   yarn_beta_fast : Float := 32.0
@@ -100,9 +101,9 @@ structure LagunaConfig where
   kvHeadsDivideFull : num_key_value_heads ∣ num_attention_heads := by decide
   kvHeadsDivideSliding : num_key_value_heads ∣ num_attention_heads_sliding := by decide
   headsPos : 0 < num_attention_heads ∧ 0 < num_attention_heads_sliding ∧ 0 < num_key_value_heads := by decide
-  /-- Both layer kinds rotate a nonzero even prefix of each head; checked when the config is built. -/
-  rotaryValid : 0 < rotary_dim_full ∧ 2 ∣ rotary_dim_full ∧ rotary_dim_full ≤ head_dim ∧
-    0 < rotary_dim_sliding ∧ 2 ∣ rotary_dim_sliding ∧ rotary_dim_sliding ≤ head_dim := by decide
+  /-- Both layer kinds rotate a nonzero prefix of each head; checked when the config is built. -/
+  rotaryValid : 0 < half_rotary_dim_full ∧ 2 * half_rotary_dim_full ≤ head_dim ∧
+    0 < half_rotary_dim_sliding ∧ 2 * half_rotary_dim_sliding ≤ head_dim := by decide
   /-- One attention kind per layer; checked when the config is built. -/
   layerTypesSize : layer_types.size = num_hidden_layers := by simp
   /-- Dense-MLP layer indices name decoder layers; checked when the config is built. -/
@@ -151,11 +152,11 @@ def numHeadsPerKVGroupSliding (cfg : LagunaConfig) : Nat :=
 
 /-- Rotary dims on full-attention layers (64 for partial_rotary 0.5, head_dim 128). -/
 def rotaryDimFull (cfg : LagunaConfig) : Nat :=
-  cfg.rotary_dim_full
+  2 * cfg.half_rotary_dim_full
 
 /-- Rotary dims on sliding-window layers (128 for partial_rotary 1.0). -/
 def rotaryDimSliding (cfg : LagunaConfig) : Nat :=
-  cfg.rotary_dim_sliding
+  2 * cfg.half_rotary_dim_sliding
 
 end LagunaConfig
 
@@ -182,9 +183,9 @@ def rotaryDimFull (cfg : Config) : Nat := LagunaConfig.rotaryDimFull cfg
 
 def rotaryDimSliding (cfg : Config) : Nat := LagunaConfig.rotaryDimSliding cfg
 
-theorem rotaryDimFull_le (cfg : Config) : cfg.rotaryDimFull ≤ cfg.head_dim := cfg.rotaryValid.2.2.1
+theorem rotaryDimFull_le (cfg : Config) : 2 * cfg.half_rotary_dim_full ≤ cfg.head_dim := cfg.rotaryValid.2.1
 
-theorem rotaryDimSliding_le (cfg : Config) : cfg.rotaryDimSliding ≤ cfg.head_dim := cfg.rotaryValid.2.2.2.2.2
+theorem rotaryDimSliding_le (cfg : Config) : 2 * cfg.half_rotary_dim_sliding ≤ cfg.head_dim := cfg.rotaryValid.2.2.2
 
 /-- Whether layer `i` uses full attention (otherwise sliding-window attention). -/
 def isFullAttentionLayer (cfg : Config) (i : Nat) : Bool :=

@@ -63,8 +63,8 @@ def init (cfg : QwenConfig) (dtype : DType := .Float32) (device : Device := .CPU
 def forwardWithHiddenStates {batch seq : Nat} (cfg : QwenConfig)
     (model : Qwen3Model (device := device) cfg dtype)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     : Array (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype }) :=
   -- Embed tokens
   let hidden := Tensor.embedding input_ids model.embed_tokens
@@ -83,8 +83,8 @@ def forwardWithHiddenStatesMasked {batch seq : Nat} (cfg : QwenConfig)
     {maskDtype : DType}
     (model : Qwen3Model (device := device) cfg dtype)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, device⟩)
     : Array (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype }) :=
   -- Embed tokens
@@ -107,8 +107,8 @@ def forwardWithHiddenStatesMasked {batch seq : Nat} (cfg : QwenConfig)
 def forward {batch seq : Nat} (cfg : QwenConfig)
     (model : Qwen3Model (device := device) cfg dtype)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   -- Embed tokens
   let hidden := Tensor.embedding input_ids model.embed_tokens
@@ -123,8 +123,8 @@ def forwardMasked {batch seq : Nat} (cfg : QwenConfig)
     {maskDtype : DType}
     (model : Qwen3Model (device := device) cfg dtype)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, device⟩)
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   -- Embed tokens

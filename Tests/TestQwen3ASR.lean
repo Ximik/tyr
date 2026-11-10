@@ -23,7 +23,7 @@ private def tinyCfg : Qwen3ASRConfig :=
         numHiddenLayers := 2
         numAttentionHeads := 4
         numKeyValueHeads := 2
-        headDim := 4
+        halfHeadDim := 2
         ropeTheta := 10000.0
       }
       audioTokenId := 42
@@ -49,7 +49,7 @@ private def tinyForcedAlignerCfg : Qwen3ASRConfig :=
         numHiddenLayers := 2
         numAttentionHeads := 4
         numKeyValueHeads := 2
-        headDim := 4
+        halfHeadDim := 2
         ropeTheta := 10000.0
       }
       audioTokenId := 42
@@ -79,7 +79,7 @@ private def tinyChunkedCfg : Qwen3ASRConfig :=
         numHiddenLayers := 2
         numAttentionHeads := 4
         numKeyValueHeads := 2
-        headDim := 4
+        halfHeadDim := 2
         ropeTheta := 10000.0
       }
       audioTokenId := 42

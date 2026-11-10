@@ -7,10 +7,10 @@ open torch torch.flux
 namespace Tests.FluxTyped
 
 private def cfg : FluxConfig := {
-  hidden_size := 16, num_heads := 2, head_dim := 8,
+  hidden_size := 16, num_heads := 2, half_head_dim := 4,
   num_double_layers := 1, num_single_layers := 1,
   context_in_dim := 6, in_channels := 4, time_dim := 5,
-  mlp_hidden_dim := 32, axes_dims := #[2, 2, 2, 2] }
+  mlp_hidden_dim := 32, half_axes_dims := #[1, 1, 1, 1] }
 
 example (_model : FluxModel (device := .CPU) cfg .BFloat16)
     (_weight : Tensor ⟨#[cfg.hidden_size, cfg.in_channels], .Float32, .CPU⟩) : True := by
@@ -36,13 +36,13 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testFluxRotaryReferenceAndDType : IO Unit := do
   let ids := (Tensor.fromInt64Array #[1, 0, 0, 0]).reshape #[1, 1, 4]
-  let pe := ropeEmbed (head_dim := 8) ids #[2, 2, 2, 2] (by decide)
+  let pe := ropeEmbed (half_head_dim := 4) ids #[1, 1, 1, 1] (by decide)
   let c := Float.cos 1
   let s := Float.sin 1
   let expected := (Tensor.fromFloatArray #[c - s, s + c, 1, 1, 1, 1, 1, 1]).reshape #[1, 1, 1, 8]
-  close (applyRope ((Tensor.ones #[1, 1, 1, 8])) (by decide) pe) expected
+  close (applyRope (half := 4) ((Tensor.ones #[1, 1, 1, 8])) pe) expected
   let x := (Tensor.ones #[1, 1, 1, 8]).toBFloat16
-  let y := applyRope x (by decide) pe
+  let y := applyRope (half := 4) x pe
   LeanTest.assertEqual y.actualSpec.dtype .BFloat16
   close y expected.toBFloat16 0.0
 

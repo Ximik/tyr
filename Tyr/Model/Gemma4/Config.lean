@@ -63,15 +63,17 @@ structure Gemma4Config where
   num_attention_heads : Nat := 8
   num_key_value_heads : Nat := 2
   num_global_key_value_heads : Nat := 0
-  head_dim : Nat := 256
-  global_head_dim : Nat := 512
+  /-- Half the sliding-layer head dimension; those heads have `2 * half_head_dim` channels. -/
+  half_head_dim : Nat := 128
+  /-- Half the full-layer head dimension; `0` means the same as `half_head_dim`. -/
+  global_half_head_dim : Nat := 256
 
   sliding_window : Nat := 512
   sliding_rope_theta : Float := 10000.0
   full_rope_theta : Float := 1000000.0
-  /-- Leading channels of each full-attention head that RoPE rotates
-      (`full head dim * partial_rotary_factor`). -/
-  full_rotary_dim : Nat := 128
+  /-- Half the leading channels of each full-attention head that RoPE rotates
+      (`full head dim * partial_rotary_factor / 2`). -/
+  half_full_rotary_dim : Nat := 64
   rms_norm_eps : Float := 1e-6
 
   hidden_activation : String := "gelu_pytorch_tanh"
@@ -104,12 +106,11 @@ structure Gemma4Config where
     (if num_global_key_value_heads == 0 then num_key_value_heads else num_global_key_value_heads) ∣
       num_attention_heads := by decide
   headsPos : 0 < num_attention_heads ∧ 0 < num_key_value_heads := by decide
-  /-- Rotary embeddings rotate channel pairs of both head kinds; checked when the config is built. -/
-  headDimsEven : 0 < head_dim ∧ 2 ∣ head_dim ∧
-    2 ∣ (if global_head_dim == 0 then head_dim else global_head_dim) := by decide
-  /-- Full layers rotate a nonzero even prefix of each head; checked when the config is built. -/
-  fullRotaryValid : 0 < full_rotary_dim ∧ 2 ∣ full_rotary_dim ∧
-    full_rotary_dim ≤ (if global_head_dim == 0 then head_dim else global_head_dim) := by decide
+  /-- Sliding-layer heads are nonempty; checked when the config is built. -/
+  headDimPos : 0 < half_head_dim := by decide
+  /-- Full layers rotate a nonzero prefix of each head; checked when the config is built. -/
+  fullRotaryValid : 0 < half_full_rotary_dim ∧
+    half_full_rotary_dim ≤ (if global_half_head_dim == 0 then half_head_dim else global_half_head_dim) := by decide
   /-- Sliding layers attend over a nonempty window; checked when the config is built. -/
   slidingWindowPos : 0 < sliding_window := by decide
   /-- One attention kind per layer, the last one full; checked when the config is built. -/
@@ -145,8 +146,8 @@ def gemma4_E4B : Gemma4Config :=
     num_attention_heads := 8
     num_key_value_heads := 2
     num_global_key_value_heads := 0
-    head_dim := 256
-    global_head_dim := 512
+    half_head_dim := 128
+    global_half_head_dim := 256
     sliding_window := 512
     sliding_rope_theta := 10000.0
     full_rope_theta := 1000000.0
@@ -215,8 +216,8 @@ def gemma4_26B_A4B : Gemma4Config :=
     num_attention_heads := 16
     num_key_value_heads := 8
     num_global_key_value_heads := 2
-    head_dim := 256
-    global_head_dim := 512
+    half_head_dim := 128
+    global_half_head_dim := 256
     sliding_window := 1024
     sliding_rope_theta := 10000.0
     full_rope_theta := 1000000.0
@@ -280,8 +281,14 @@ def gemma4_31B : Gemma4Config :=
     moeValid := by decide
   }
 
+/-- Channels per sliding-layer head. -/
+def head_dim (cfg : Gemma4Config) : Nat := 2 * cfg.half_head_dim
+
+def fullHalfHeadDim (cfg : Gemma4Config) : Nat :=
+  if cfg.global_half_head_dim == 0 then cfg.half_head_dim else cfg.global_half_head_dim
+
 def fullHeadDim (cfg : Gemma4Config) : Nat :=
-  if cfg.global_head_dim == 0 then cfg.head_dim else cfg.global_head_dim
+  2 * fullHalfHeadDim cfg
 
 def maxHeadDim (cfg : Gemma4Config) : Nat :=
   if cfg.head_dim >= fullHeadDim cfg then cfg.head_dim else fullHeadDim cfg
@@ -299,10 +306,10 @@ def maxKVProjDim (cfg : Gemma4Config) : Nat :=
   maxKVHeads cfg * maxHeadDim cfg
 
 def fullRotaryDim (cfg : Gemma4Config) : Nat :=
-  cfg.full_rotary_dim
+  2 * cfg.half_full_rotary_dim
 
 def fullRotaryHalfDim (cfg : Gemma4Config) : Nat :=
-  (fullRotaryDim cfg) / 2
+  cfg.half_full_rotary_dim
 
 def maxIntermediateSize (cfg : Gemma4Config) : Nat :=
   if cfg.use_double_wide_mlp then
@@ -362,6 +369,7 @@ def gemma4_E4B : Config := Gemma4Config.gemma4_E4B
 def gemma4_26B_A4B : Config := Gemma4Config.gemma4_26B_A4B
 def gemma4_31B : Config := Gemma4Config.gemma4_31B
 
+def fullHalfHeadDim (cfg : Config) : Nat := Gemma4Config.fullHalfHeadDim cfg
 def fullHeadDim (cfg : Config) : Nat := Gemma4Config.fullHeadDim cfg
 def maxHeadDim (cfg : Config) : Nat := Gemma4Config.maxHeadDim cfg
 def fullNumKVHeads (cfg : Config) : Nat := Gemma4Config.fullNumKVHeads cfg

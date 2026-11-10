@@ -118,13 +118,12 @@ def init (hidden_size num_heads head_dim mlp_hidden : Nat)
     vec: [batch, hidden_size] - timestep embedding
     pe: RoPE embeddings
     Returns: (img_out, txt_out) -/
-def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : Nat}
-    (block : DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden)
-    (heven : 2 ∣ head_dim)
+def forward {batch img_seq txt_seq hidden_size num_heads half mlp_hidden : Nat}
+    (block : DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads (2 * half) mlp_hidden)
     (img : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] })
     (txt : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] })
-    (img_pe : Tensor { device := device, shape := #[batch, 1, img_seq, head_dim / 2, 2, 2], dtype := .Float32 })
-    (txt_pe : Tensor { device := device, shape := #[batch, 1, txt_seq, head_dim / 2, 2, 2], dtype := .Float32 })  -- RoPE for image and text
+    (img_pe : Tensor { device := device, shape := #[batch, 1, img_seq, half, 2, 2], dtype := .Float32 })
+    (txt_pe : Tensor { device := device, shape := #[batch, 1, txt_seq, half, 2, 2], dtype := .Float32 })  -- RoPE for image and text
     (mod_img : Tensor { dtype := dtype, device := device, shape := #[batch, 6, hidden_size] })
     (mod_txt : Tensor { dtype := dtype, device := device, shape := #[batch, 6, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] } × Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] } :=
@@ -156,32 +155,32 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : N
   let txt_qkv := Tensor.linear3d txt_mod block.txt_attn.qkv
 
   -- Reshape QKV
-  let img_qkv := Tensor.reshape img_qkv #[batch, img_seq, 3, num_heads, head_dim] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
-  let txt_qkv := Tensor.reshape txt_qkv #[batch, txt_seq, 3, num_heads, head_dim] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
+  let img_qkv := Tensor.reshape img_qkv #[batch, img_seq, 3, num_heads, 2 * half] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
+  let txt_qkv := Tensor.reshape txt_qkv #[batch, txt_seq, 3, num_heads, 2 * half] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
 
-  let img_q := Tensor.reshape (Tensor.slice img_qkv 2 0 1) #[batch, img_seq, num_heads, head_dim] (by simp [Nat.mul_comm])
-  let img_k := Tensor.reshape (Tensor.slice img_qkv 2 1 1) #[batch, img_seq, num_heads, head_dim] (by simp [Nat.mul_comm])
-  let img_v := Tensor.reshape (Tensor.slice img_qkv 2 2 1) #[batch, img_seq, num_heads, head_dim] (by simp [Nat.mul_comm])
+  let img_q := Tensor.reshape (Tensor.slice img_qkv 2 0 1) #[batch, img_seq, num_heads, 2 * half] (by simp [Nat.mul_comm])
+  let img_k := Tensor.reshape (Tensor.slice img_qkv 2 1 1) #[batch, img_seq, num_heads, 2 * half] (by simp [Nat.mul_comm])
+  let img_v := Tensor.reshape (Tensor.slice img_qkv 2 2 1) #[batch, img_seq, num_heads, 2 * half] (by simp [Nat.mul_comm])
 
-  let txt_q := Tensor.reshape (Tensor.slice txt_qkv 2 0 1) #[batch, txt_seq, num_heads, head_dim] (by simp [Nat.mul_comm])
-  let txt_k := Tensor.reshape (Tensor.slice txt_qkv 2 1 1) #[batch, txt_seq, num_heads, head_dim] (by simp [Nat.mul_comm])
-  let txt_v := Tensor.reshape (Tensor.slice txt_qkv 2 2 1) #[batch, txt_seq, num_heads, head_dim] (by simp [Nat.mul_comm])
+  let txt_q := Tensor.reshape (Tensor.slice txt_qkv 2 0 1) #[batch, txt_seq, num_heads, 2 * half] (by simp [Nat.mul_comm])
+  let txt_k := Tensor.reshape (Tensor.slice txt_qkv 2 1 1) #[batch, txt_seq, num_heads, 2 * half] (by simp [Nat.mul_comm])
+  let txt_v := Tensor.reshape (Tensor.slice txt_qkv 2 2 1) #[batch, txt_seq, num_heads, 2 * half] (by simp [Nat.mul_comm])
 
   -- QK normalization
   let (img_q, img_k) := block.img_attn.norm.forward img_q img_k
   let (txt_q, txt_k) := block.txt_attn.norm.forward txt_q txt_k
 
   -- Apply RoPE
-  let img_q := flux.applyRope img_q heven img_pe
-  let img_k := flux.applyRope img_k heven img_pe
-  let txt_q := flux.applyRope txt_q heven txt_pe
-  let txt_k := flux.applyRope txt_k heven txt_pe
+  let img_q := flux.applyRope img_q img_pe
+  let img_k := flux.applyRope img_k img_pe
+  let txt_q := flux.applyRope txt_q txt_pe
+  let txt_k := flux.applyRope txt_k txt_pe
 
   -- Concatenate for joint attention
   -- q: [batch, img_seq + txt_seq, num_heads, head_dim]
-  let q : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := Tensor.cat txt_q img_q 1
-  let k : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := Tensor.cat txt_k img_k 1
-  let v : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := Tensor.cat txt_v img_v 1
+  let q : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, 2 * half] } := Tensor.cat txt_q img_q 1
+  let k : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, 2 * half] } := Tensor.cat txt_k img_k 1
+  let v : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, 2 * half] } := Tensor.cat txt_v img_v 1
 
   -- Transpose for attention
   let q := transposeAttention q
@@ -196,8 +195,8 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : N
   -- Split back to img and txt
   let txt_attn := Tensor.slice attn 1 0 txt_seq
   let img_attn := Tensor.slice attn 1 txt_seq img_seq
-  let img_attn := Tensor.reshape img_attn #[batch, img_seq, num_heads * head_dim] (by simp [Nat.mul_comm, Nat.mul_left_comm])
-  let txt_attn := Tensor.reshape txt_attn #[batch, txt_seq, num_heads * head_dim] (by simp [Nat.mul_comm, Nat.mul_left_comm])
+  let img_attn := Tensor.reshape img_attn #[batch, img_seq, num_heads * (2 * half)] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
+  let txt_attn := Tensor.reshape txt_attn #[batch, txt_seq, num_heads * (2 * half)] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
 
   -- Output projections
   let img_attn := Tensor.linear3d img_attn block.img_attn.proj

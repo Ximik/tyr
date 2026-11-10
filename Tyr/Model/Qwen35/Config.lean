@@ -62,8 +62,8 @@ structure Qwen35Config where
   head_dim : Nat := 256
 
   rope_theta : Float := 1000000.0
-  /-- Leading channels of each head that RoPE rotates (`head_dim * partial_rotary_factor`). -/
-  rotary_dim : Nat := 64
+  /-- Half the leading channels of each head that RoPE rotates (`head_dim * partial_rotary_factor / 2`). -/
+  half_rotary_dim : Nat := 32
   rms_norm_eps : Float := 1e-6
 
   linear_conv_kernel_dim : Nat := 4
@@ -87,7 +87,7 @@ structure Qwen35Config where
   kvHeadsDivide : num_key_value_heads ∣ num_attention_heads := by decide
   headsPos : 0 < num_attention_heads ∧ 0 < num_key_value_heads ∧ 0 < linear_num_key_heads := by decide
   /-- RoPE rotates a nonzero even prefix of each head; checked when the config is built. -/
-  rotaryValid : 0 < rotary_dim ∧ 2 ∣ rotary_dim ∧ rotary_dim ≤ head_dim := by decide
+  rotaryValid : 0 < half_rotary_dim ∧ 2 * half_rotary_dim ≤ head_dim := by decide
   /-- One mixer kind per decoder layer; checked when the config is built. -/
   layerTypesSize : layer_types.size = num_hidden_layers := by simp
   /-- The causal depthwise conv has a kernel; checked when the config is built. -/
@@ -118,7 +118,7 @@ def qwen35_35B_A3B : Qwen35Config := {
   num_key_value_heads := 2
   head_dim := 256
   rope_theta := 1000000.0
-  rotary_dim := 64
+  half_rotary_dim := 32
   rms_norm_eps := 1e-6
   linear_conv_kernel_dim := 4
   linear_key_head_dim := 128
@@ -143,7 +143,7 @@ def qwen36_35B_A3B : Qwen35Config := {
   num_key_value_heads := 2
   head_dim := 256
   rope_theta := 10000000.0
-  rotary_dim := 64
+  half_rotary_dim := 32
   rms_norm_eps := 1e-6
   linear_conv_kernel_dim := 4
   linear_key_head_dim := 128
@@ -168,7 +168,7 @@ def qwen35_0_8B : Qwen35Config := {
   num_key_value_heads := 2
   head_dim := 256
   rope_theta := 10000000.0
-  rotary_dim := 64
+  half_rotary_dim := 32
   rms_norm_eps := 1e-6
   linear_conv_kernel_dim := 4
   linear_key_head_dim := 128
@@ -210,11 +210,11 @@ def isMoE (cfg : Qwen35Config) : Bool :=
 
 /-- Rotary dimension for partial RoPE. -/
 def rotaryDim (cfg : Qwen35Config) : Nat :=
-  cfg.rotary_dim
+  2 * cfg.half_rotary_dim
 
-/-- Number of rotary frequencies (`rotary_dim / 2`). -/
+/-- Number of rotary frequencies. -/
 def rotaryHalfDim (cfg : Qwen35Config) : Nat :=
-  (rotaryDim cfg) / 2
+  cfg.half_rotary_dim
 
 end Qwen35Config
 
@@ -242,7 +242,7 @@ def rotaryDim (cfg : Config) : Nat := Qwen35Config.rotaryDim cfg
 
 def rotaryHalfDim (cfg : Config) : Nat := Qwen35Config.rotaryHalfDim cfg
 
-theorem rotaryDim_le (cfg : Config) : cfg.rotaryDim ≤ cfg.head_dim := cfg.rotaryValid.2.2
+theorem rotaryDim_le (cfg : Config) : 2 * cfg.rotaryHalfDim ≤ cfg.head_dim := cfg.rotaryValid.2
 
 @[simp] def linearKeyDim (cfg : Config) : Nat := Qwen35Config.linearKeyDim cfg
 

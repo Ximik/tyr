@@ -79,7 +79,7 @@ private def assertClose (actual expected : Array Float) : IO Unit := do
 private def baseParentCfg : Qwen3ASRConfig :=
   { thinkerConfig := {
       audioConfig := cfg
-      textConfig := { vocabSize := 8, hiddenSize := 2, intermediateSize := 4, numHiddenLayers := 0, numAttentionHeads := 1, numKeyValueHeads := 1, headDim := 2 }
+      textConfig := { vocabSize := 8, hiddenSize := 2, intermediateSize := 4, numHiddenLayers := 0, numAttentionHeads := 1, numKeyValueHeads := 1, halfHeadDim := 1 }
       audioTokenId := 7 } }
 
 private def parentCfg (dropout : Float) : Qwen3ASRConfig :=

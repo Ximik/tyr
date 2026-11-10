@@ -18,7 +18,7 @@ private def tinyDenseCfg : Config := {
   num_key_value_heads := 2
   head_dim := 8
   rope_theta := 10000.0
-  rotary_dim := 8
+  half_rotary_dim := 4
   rms_norm_eps := 1e-6
   linear_conv_kernel_dim := 4
   linear_key_head_dim := 4
@@ -53,7 +53,7 @@ private def tinyBatchedEosCfg : Config := {
   num_key_value_heads := 1
   head_dim := 4
   rope_theta := 10000.0
-  rotary_dim := 4
+  half_rotary_dim := 2
   rms_norm_eps := 1e-6
   linear_conv_kernel_dim := 1
   linear_key_head_dim := 1
@@ -78,7 +78,7 @@ private def tinyAttentionCfg : Config := {
   num_key_value_heads := 2
   head_dim := 2
   rope_theta := 10000.0
-  rotary_dim := 2
+  half_rotary_dim := 1
   rms_norm_eps := 1e-6
   linear_conv_kernel_dim := 1
   linear_key_head_dim := 1
@@ -206,7 +206,7 @@ def testQwen35AttentionUsesPerHeadQGateLayout : IO Unit := do
   }
   let x : Tensor { shape := #[1, 1, cfg.hidden_size], device := .CPU, dtype := .Float32 } :=
     Tensor.reshape (floatArrayDynamic #[1.0, 2.0, 3.0, 4.0]) #[1, 1, cfg.hidden_size]
-  let (cos, sin) := Tensor.rotaryFreqs 1 (Config.rotaryDim cfg) cfg.rope_theta x.device
+  let (cos, sin) := Tensor.rotaryFreqs 1 (Config.rotaryHalfDim cfg) cfg.rope_theta x.device
   let out : Tensor { shape := #[1, 1, cfg.hidden_size], device := .CPU, dtype := .Float32 } := attn.forward cfg x cos sin true
   let vals ← Tensor.toFloatArray (id out)
   LeanTest.assertTrue (approxEq vals[0]! (1.0 / (1.0 + Float.exp (-10.0))) 1e-4)
@@ -395,7 +395,7 @@ def testQwen35ConfigLoadNestedTextConfig : IO Unit := do
   let model ← Qwen35ForCausalLM.init tinyDenseCfg false (dtype := .BFloat16)
   let ids := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshape #[1, 4]
   let embeds := model.embedTokens ids
-  let (cos, sin) := Tensor.rotaryFreqs 4 (Config.rotaryDim tinyDenseCfg) tinyDenseCfg.rope_theta
+  let (cos, sin) := Tensor.rotaryFreqs 4 (Config.rotaryHalfDim tinyDenseCfg) tinyDenseCfg.rope_theta
   let cache := Qwen35Model.initCache tinyDenseCfg model.model 8 .CPU
   let (hidden, cache) ← Qwen35Model.forwardWithCache tinyDenseCfg model.model embeds cos sin cache (by decide)
   LeanTest.assertEqual hidden.actualSpec.dtype DType.BFloat16

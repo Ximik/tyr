@@ -57,17 +57,21 @@ structure TalkerCodePredictorConfig where
   numHiddenLayers : Nat := 5
   numAttentionHeads : Nat := 16
   numKeyValueHeads : Nat := 8
-  headDim : Nat := 128
+  /-- Half the head dimension; each head has `2 * halfHeadDim` channels. -/
+  halfHeadDim : Nat := 64
   rmsNormEps : Float := 1e-6
   ropeTheta : Float := 10000.0
   /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
   headsValid : 0 < numAttentionHeads ∧ 0 < numKeyValueHeads ∧ numKeyValueHeads ∣ numAttentionHeads := by decide
-  /-- Rotary embeddings rotate `headDim / 2` pairs; checked when the config is built. -/
-  headDimEven : 0 < headDim ∧ 2 ∣ headDim := by decide
+  /-- Heads are nonempty; checked when the config is built. -/
+  halfHeadDimPos : 0 < halfHeadDim := by decide
   /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
   ropeThetaPos : 0 < ropeTheta := by native_decide
   rmsNormEpsPos : 0 < rmsNormEps := by native_decide
   deriving Repr
+
+/-- Channels per attention head. -/
+def TalkerCodePredictorConfig.headDim (cfg : TalkerCodePredictorConfig) : Nat := 2 * cfg.halfHeadDim
 
 /-- Main talker config (text-conditioned codec generator). -/
 structure TalkerConfig where
@@ -78,7 +82,8 @@ structure TalkerConfig where
   numHiddenLayers : Nat := 20
   numAttentionHeads : Nat := 16
   numKeyValueHeads : Nat := 2
-  headDim : Nat := 64
+  /-- Half the head dimension; each head has `2 * halfHeadDim` channels. -/
+  halfHeadDim : Nat := 32
   rmsNormEps : Float := 1e-6
   ropeTheta : Float := 10000.0
   numCodeGroups : Nat := 32
@@ -99,8 +104,8 @@ structure TalkerConfig where
   residualCodeGroups : 1 < numCodeGroups := by decide
   /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
   headsValid : 0 < numAttentionHeads ∧ 0 < numKeyValueHeads ∧ numKeyValueHeads ∣ numAttentionHeads := by decide
-  /-- Rotary embeddings rotate `headDim / 2` pairs; checked when the config is built. -/
-  headDimEven : 0 < headDim ∧ 2 ∣ headDim := by decide
+  /-- Heads are nonempty; checked when the config is built. -/
+  halfHeadDimPos : 0 < halfHeadDim := by decide
   /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
   ropeThetaPos : 0 < ropeTheta := by native_decide
   rmsNormEpsPos : 0 < rmsNormEps := by native_decide
@@ -112,6 +117,9 @@ structure TalkerConfig where
   speakerIdsInVocab : ∀ e ∈ spkId, e.2.toNat < vocabSize := by decide
   languageIdsInVocab : ∀ e ∈ codecLanguageId, e.2.toNat < vocabSize := by decide
   deriving Repr
+
+/-- Channels per attention head. -/
+def TalkerConfig.headDim (cfg : TalkerConfig) : Nat := 2 * cfg.halfHeadDim
 
 
 /-- Top-level Qwen3-TTS config. -/

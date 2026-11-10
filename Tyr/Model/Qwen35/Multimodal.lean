@@ -171,7 +171,7 @@ def forward {tokens : Nat}
       (by simp [Nat.mul_assoc, VisionConfig.heads_mul_headDim cfg])
 
   -- Qwen3.5-VL uses 2D rotary; this keeps a deterministic 1D rotary signal for now.
-  let (cos, sin) := Tensor.rotaryFreqs tokens (VisionConfig.headDim cfg) 10000.0 x.device
+  let (cos, sin) := Tensor.rotaryFreqs tokens cfg.half_head_dim 10000.0 x.device
   let q : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } := Tensor.applyRotary q cos sin
   let k : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } := Tensor.applyRotary k cos sin
 

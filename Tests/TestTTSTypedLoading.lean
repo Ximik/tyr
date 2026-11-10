@@ -11,12 +11,12 @@ private def cfg : Qwen3TTSConfig := {
   talkerConfig := {
     vocabSize := 8, textVocabSize := 8, textHiddenSize := 8,
     hiddenSize := 8, intermediateSize := 16, numHiddenLayers := 1,
-    numAttentionHeads := 2, numKeyValueHeads := 1, headDim := 4,
+    numAttentionHeads := 2, numKeyValueHeads := 1, halfHeadDim := 2,
     numCodeGroups := 2, codecBosId := 1, codecPadId := 0, codecEosTokenId := 7,
     codecThinkId := 2, codecNoThinkId := 3, codecThinkBosId := 4, codecThinkEosId := 5,
     codePredictorConfig := {
       vocabSize := 8, hiddenSize := 8, intermediateSize := 16,
-      numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1, headDim := 4
+      numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1, halfHeadDim := 2
     }
   }
 }

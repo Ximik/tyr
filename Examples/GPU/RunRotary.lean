@@ -33,12 +33,12 @@ def generateFixtures : IO Unit := do
   let device ← Device.cuda 0
   let x ← Tensor.uniformLike (Tensor.zeros #[64, 64] false device)
 
-  let (cosCpu, sinCpu) := Tensor.rotaryFreqs (64 : Nat) (64 : Nat) 10000.0
+  let (cosCpu, sinCpu) := Tensor.rotaryFreqs (64 : Nat) (32 : Nat) 10000.0
   let cos : Tensor { shape := #[64, 32], dtype := .Float32, device := device } := cosCpu.to device
   let sin : Tensor { shape := #[64, 32], dtype := .Float32, device := device } := sinCpu.to device
 
   let x4 : Tensor { shape := #[1, 64, 1, 64], dtype := .Float32, device := device } := Tensor.reshape x #[1, 64, 1, 64] (by simp)
-  let expected4 := Tensor.applyRotary x4 cos sin
+  let expected4 := Tensor.applyRotary (half := 32) x4 cos sin
   let expected : Tensor { shape := #[64, 64], dtype := .Float32, device := device } := Tensor.reshape expected4 #[64, 64] (by simp)
 
   Tensor.saveTensor x (fixtureFile "x").toString
@@ -118,8 +118,8 @@ def referenceTraining {device : Device} {batch seqLen qHeads kvHeads : Nat} {dty
     (gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype, device := device })
     (cos sin : Tensor { shape := #[seqLen, 32], dtype := .Float32, device := device }) :=
   let negSin := Tensor.mulScalar sin (-1.0)
-  (Tensor.applyRotary q cos sin, Tensor.applyRotary k cos sin,
-    Tensor.applyRotary gradQ cos negSin, Tensor.applyRotary gradK cos negSin)
+  (Tensor.applyRotary (half := 32) q cos sin, Tensor.applyRotary (half := 32) k cos sin,
+    Tensor.applyRotary (half := 32) gradQ cos negSin, Tensor.applyRotary (half := 32) gradK cos negSin)
 
 private def benchmarkTrainingShape (cfg : Benchmark.Config) (caseLabel : String)
     (batch seqLen qHeads kvHeads : Nat)
@@ -133,7 +133,7 @@ private def benchmarkTrainingShape (cfg : Benchmark.Config) (caseLabel : String)
   let k : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := .BFloat16, device := device } := kf.toBFloat16
   let gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := .BFloat16, device := device } := gradQf.toBFloat16
   let gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := .BFloat16, device := device } := gradKf.toBFloat16
-  let (cos, sin) := Tensor.rotaryFreqs seqLen 64 10000.0 device
+  let (cos, sin) := Tensor.rotaryFreqs seqLen 32 10000.0 device
   let (expectedQ, expectedK, expectedGradQ, expectedGradK) :=
     referenceTraining q k gradQ gradK cos sin
   let qOut := Tensor.mulScalar q 0.0

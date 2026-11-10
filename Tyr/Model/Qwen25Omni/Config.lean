@@ -21,7 +21,7 @@ def qwen25omni_3B : Config := {
   num_hidden_layers := 36
   num_attention_heads := 16
   num_key_value_heads := 2
-  head_dim := 128
+  half_head_dim := 64
   rope_theta := 1000000.0
   rms_norm_eps := 1e-6
 }
@@ -34,7 +34,7 @@ def qwen25omni_7B : Config := {
   num_hidden_layers := 28
   num_attention_heads := 28
   num_key_value_heads := 4
-  head_dim := 128
+  half_head_dim := 64
   rope_theta := 1000000.0
   rms_norm_eps := 1e-6
 }

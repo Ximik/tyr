@@ -361,8 +361,8 @@ private def attentionSlidingPrefillWithMask {batch seq cap : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (attnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
     (hfit : seq ≤ cap)
@@ -402,8 +402,8 @@ private def attentionFullPrefillWithMask {batch seq cap : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (attnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
     (hfit : seq ≤ cap)
@@ -447,8 +447,8 @@ private def attentionSlidingNoCache {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let q0 := qProjSliding cfg m x
   let k0 := kProjSliding cfg m x
@@ -472,8 +472,8 @@ private def attentionFullNoCache {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let q0 := qProjFull cfg m x
   let kRaw := kProjFull cfg m x
@@ -501,8 +501,8 @@ private def attentionSlidingWithCache {batch seq cap : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
     (hfit : seq ≤ cap)
     (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
@@ -551,8 +551,8 @@ private def attentionFullWithCache {batch seq cap : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
     (hfit : seq ≤ cap)
     (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
@@ -605,8 +605,8 @@ private def attentionSlidingStep {batch cap : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
     (pos : Nat) (hpos : pos < cap)
     (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
@@ -672,8 +672,8 @@ private def attentionFullStep {batch cap : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[1, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[1, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
     (pos : Nat) (hpos : pos < cap)
     (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
@@ -734,10 +734,10 @@ def forward {batch seq : Nat}
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   match layerType with
   | .slidingAttention => attentionSlidingNoCache cfg m x slidingCos slidingSin
@@ -748,10 +748,10 @@ def forwardWithCache {batch seq cap : Nat}
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
     (hfit : seq ≤ cap)
     (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
@@ -765,10 +765,10 @@ def forwardStep {batch cap : Nat}
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
-    (slidingCos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCos : Tensor { device := device, shape := #[1, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSin : Tensor { device := device, shape := #[1, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCos : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
+    (fullCos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
     (pos : Nat) (hpos : pos < cap)
     (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
@@ -782,10 +782,10 @@ def forwardPrefillWithMask {batch seq cap : Nat}
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (slidingAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (fullAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
@@ -844,10 +844,10 @@ def forward {batch seq : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (perLayerInput : Option (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size_per_layer_input], dtype := dtype }) := none)
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let residual1 := x
@@ -883,10 +883,10 @@ def forwardWithCache {batch seq cap : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
     (hfit : seq ≤ cap)
     (sharedSource : Option (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
@@ -936,10 +936,10 @@ def forwardStep {batch cap : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
-    (slidingCos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCos : Tensor { device := device, shape := #[1, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSin : Tensor { device := device, shape := #[1, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCos : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
+    (fullCos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
     (pos : Nat) (hpos : pos < cap)
     (sharedSource : Option (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
@@ -989,10 +989,10 @@ def forwardPrefillWithMask {batch seq cap : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
+    (fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (slidingAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (fullAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
@@ -1100,17 +1100,17 @@ def computePerLayerInputs {batch seq : Nat}
 private def precomputeSlidingRotary {seq : Nat}
     (cfg : Config)
     (device : Device)
-    : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } × Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } :=
-  Tensor.rotaryFreqs seq cfg.head_dim cfg.sliding_rope_theta device
+    : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } × Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } :=
+  Tensor.rotaryFreqs seq cfg.half_head_dim cfg.sliding_rope_theta device
 
 private def precomputeFullRotary {seq : Nat}
     (cfg : Config)
     (device : Device)
-    : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } × Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } :=
-  let fullHalf := Config.fullHeadDim cfg / 2
+    : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } × Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } :=
+  let fullHalf := Config.fullHalfHeadDim cfg
   let rotHalf := Config.fullRotaryHalfDim cfg
-  have hRot : rotHalf ≤ fullHalf := Nat.div_le_div_right cfg.fullRotaryValid.2.2
-  let (cos0, sin0) := Tensor.rotaryFreqs seq (Config.fullHeadDim cfg) cfg.full_rope_theta device
+  have hRot : rotHalf ≤ fullHalf := cfg.fullRotaryValid.2
+  let (cos0, sin0) := Tensor.rotaryFreqs seq (Config.fullHalfHeadDim cfg) cfg.full_rope_theta device
   let cosRot : Tensor { device := device, shape := #[seq, rotHalf], dtype := .Float32 } := Tensor.slice cos0 1 0 rotHalf
   let sinRot : Tensor { device := device, shape := #[seq, rotHalf], dtype := .Float32 } := Tensor.slice sin0 1 0 rotHalf
   let passHalf : Nat := fullHalf - rotHalf
@@ -1198,18 +1198,18 @@ def forwardWithCache {batch seq maxLen : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (hfit : seq ≤ maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen :=
   Id.run do
     let inputsEmbeds := embedTokens cfg m inputIds
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
-    let slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
-    let fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
-    let fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
+    let slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
+    let slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
+    let fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
+    let fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1246,17 +1246,17 @@ def forwardWithCacheEmbeds {batch seq maxLen : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (hfit : seq ≤ maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen :=
   Id.run do
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
-    let slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
-    let fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
-    let fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
+    let slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
+    let slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
+    let fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
+    let fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1294,17 +1294,17 @@ def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (hfit : seq ≤ maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen :=
   Id.run do
     let _ := inputIds
-    let slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
-    let slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
-    let fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
-    let fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
+    let slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
+    let slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
+    let fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
+    let fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1342,19 +1342,19 @@ def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLe
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (hfit : seq ≤ maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (slidingAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (fullAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen :=
   Id.run do
     let _ := inputIds
-    let slidingCos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
-    let slidingSin : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
-    let fullCos : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
-    let fullSin : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
+    let slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
+    let slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
+    let fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
+    let fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1386,18 +1386,18 @@ def forwardStep {batch cap : Nat} {maxLen : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 })
     (position : Nat) (hpos : position < cap)
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch cap)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch cap :=
   Id.run do
     let inputsEmbeds := embedTokens cfg m inputIds
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let slidingCos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice! slidingCosAll 0 position 1
-    let slidingSin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice! slidingSinAll 0 position 1
-    let fullCos : Tensor { device := device, shape := #[1, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice! fullCosAll 0 position 1
-    let fullSin : Tensor { device := device, shape := #[1, Config.fullHeadDim cfg / 2], dtype := .Float32 } := Tensor.slice! fullSinAll 0 position 1
+    let slidingCos : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice! slidingCosAll 0 position 1
+    let slidingSin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice! slidingSinAll 0 position 1
+    let fullCos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice! fullCosAll 0 position 1
+    let fullSin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice! fullSinAll 0 position 1
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1511,10 +1511,10 @@ def forwardEmbedsWithPerLayerInputsBidirectionalVision {batch seq : Nat}
 private def precomputeDecodeRotary {maxLen : Nat}
     (cfg : Config)
     (device : Device)
-    : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 }
-      × Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 }
-      × Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 }
-      × Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 } :=
+    : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 }
+      × Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 }
+      × Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 }
+      × Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 } :=
   let (slCos, slSin) := Gemma4Model.precomputeSlidingRotary cfg device
   let (fullCos, fullSin) := Gemma4Model.precomputeFullRotary cfg device
   (slCos, slSin, fullCos, fullSin)
@@ -1525,10 +1525,10 @@ private def prefillCaches {batch seq maxLen : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (hfit : seq ≤ maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCache
@@ -1553,10 +1553,10 @@ private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (hfit : seq ≤ maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCacheEmbeds
@@ -1583,10 +1583,10 @@ private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (hfit : seq ≤ maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCacheEmbedsWithPerLayerInputs
@@ -1614,10 +1614,10 @@ private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch 
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (hfit : seq ≤ maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (slidingAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (fullAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
@@ -1647,10 +1647,10 @@ private def decodeStep {batch maxLen : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 })
     (position : Nat) (hpos : position < maxLen)
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
   let (hidden, cache') :=
     Gemma4Model.forwardStep
@@ -1677,10 +1677,10 @@ private partial def decodeLoopCached {batch maxLen : Nat}
     (remaining : Nat)
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
     (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype })
-    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
-    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (onStep : Option (StreamCallback (device := device) batch))
     (generatedSoFar : Nat)
     {curSeq : Nat}

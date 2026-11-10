@@ -63,7 +63,7 @@ def testMaskedLoss : IO Unit := do
 def testDiffusionForward : IO Unit := do
   let cfg := Config.tiny
   let params ← DiffusionParams.init cfg
-  let rotaryCache ← RotaryCache.init cfg.seq_len cfg.headDim
+  let rotaryCache ← RotaryCache.init cfg.seq_len cfg.half_head_dim
   -- Create input tensors
   let x_t ← Tensor.randint 0 cfg.vocab_size.toInt64 #[(2 : Nat), cfg.seq_len]
   let t ← Tensor.randint 0 cfg.diffusion_steps.toInt64 #[(2 : Nat)]
@@ -77,7 +77,7 @@ def testDiffusionForward : IO Unit := do
 def testSampleConfidence : IO Unit := do
   let cfg := Config.tiny
   let params ← DiffusionParams.init cfg
-  let rotaryCache ← RotaryCache.init cfg.seq_len cfg.headDim
+  let rotaryCache ← RotaryCache.init cfg.seq_len cfg.half_head_dim
   let result ← sampleConfidence (batch := 1) params rotaryCache (confidenceThreshold := 0.3) (maxSteps := 50)
   -- Check if any positions still masked
   let _anyMasked := Tensor.any (Tensor.eqScalar result cfg.mask_token_id.toInt64)
@@ -90,7 +90,7 @@ def testSampleConfidence : IO Unit := do
 def testSampleTopK : IO Unit := do
   let cfg := Config.tiny
   let params ← DiffusionParams.init cfg
-  let rotaryCache ← RotaryCache.init cfg.seq_len cfg.headDim
+  let rotaryCache ← RotaryCache.init cfg.seq_len cfg.half_head_dim
   let result ← sampleTopK (batch := 1) params rotaryCache (k := 8) (maxSteps := 50)
   -- Verify output is valid
   let sum := Tensor.item (Tensor.sumAll (result.toFloat32))
@@ -102,7 +102,7 @@ def testTrainStep : IO Unit := do
   let modelCfg := Config.tiny
   let trainCfg : diffusion.train.TrainConfig := { maxIters := 1, batchSize := 2 }
   let params ← DiffusionParams.init modelCfg
-  let rotaryCache ← RotaryCache.init modelCfg.seq_len modelCfg.headDim
+  let rotaryCache ← RotaryCache.init modelCfg.seq_len modelCfg.half_head_dim
   let schedule := MaskedDiffusionSchedule.init modelCfg.diffusion_steps modelCfg.mask_token_id modelCfg.context_len
   -- Initialize optimizer
   let opt := Optim.adamw (lr := 1e-4)
@@ -132,20 +132,20 @@ example (n : Nat) (params : MLPParams n) : True := by
 
 set_option linter.unusedVariables false in
 example (cfg : Config) (params : DiffusionParams cfg) (x : Activation #[1, cfg.seq_len])
-    (t : Tokens #[1]) (rotary : RotaryCache cfg.seq_len cfg.headDim) : True := by
+    (t : Tokens #[1]) (rotary : RotaryCache cfg.seq_len cfg.half_head_dim) : True := by
   fail_if_success
     have _ := forward params x t rotary
   trivial
 
 private def checkpointConfig : Config := {
-  seq_len := 4, vocab_size := 8, n_layer := 1, n_head := 1, n_embd := 4,
+  seq_len := 4, vocab_size := 8, n_layer := 1, n_head := 1, half_head_dim := 2,
   diffusion_steps := 2, context_len := 2
 }
 
 @[test] def testDiffusionCheckpointResumeAndShape : IO Unit := IO.FS.withTempDir fun dir => do
   let cfg := checkpointConfig
   let params ← DiffusionParams.init cfg
-  let rotary ← RotaryCache.init cfg.seq_len cfg.headDim
+  let rotary ← RotaryCache.init cfg.seq_len cfg.half_head_dim
   let schedule := MaskedDiffusionSchedule.init 1 0 2
   let x := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshape #[1, 4]
   let opt := Optim.adamw (α := DiffusionParams cfg) (lr := 0.001)
@@ -174,7 +174,7 @@ private def checkpointConfig : Config := {
   let head := Tensor.fromFloatArray #[0,0,0,0, 1,1,1,1, 0,0,0,0, 0,0,0,0,
     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0] |>.reshape #[8,4]
   let params := { params with token_emb := Tensor.ones #[8,4], time_emb := Tensor.ones #[2,4], output_head := head }
-  let rotary ← RotaryCache.init cfg.seq_len cfg.headDim
+  let rotary ← RotaryCache.init cfg.seq_len cfg.half_head_dim
   let contextIds := Tensor.fromInt64Array #[0,3] |>.reshape #[1,2]
   let topk ← sampleTopK params rotary 2 1.0 4 (some contextIds)
   let confidence ← sampleConfidence params rotary 0.99 1.0 4 (some contextIds)

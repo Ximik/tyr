@@ -187,8 +187,8 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
   saveDebug cfg.debugDir "txt_proj" txt_proj
 
   -- RoPE embeddings
-  let img_pe := ropeEmbed (head_dim := fluxCfg.head_dim) imgIds fluxCfg.axes_dims fluxCfg.axesValid fluxCfg.theta fluxCfg.thetaPos
-  let txt_pe := ropeEmbed (head_dim := fluxCfg.head_dim) txtIds fluxCfg.axes_dims fluxCfg.axesValid fluxCfg.theta fluxCfg.thetaPos
+  let img_pe := ropeEmbed (half_head_dim := fluxCfg.half_head_dim) imgIds fluxCfg.half_axes_dims fluxCfg.axesValid fluxCfg.theta fluxCfg.thetaPos
+  let txt_pe := ropeEmbed (half_head_dim := fluxCfg.half_head_dim) txtIds fluxCfg.half_axes_dims fluxCfg.axesValid fluxCfg.theta fluxCfg.thetaPos
   saveDebug cfg.debugDir "img_pe" img_pe
   saveDebug cfg.debugDir "txt_pe" txt_pe
 
@@ -249,10 +249,10 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       saveDebug cfg.debugDir "txt_k_norm" txt_k_norm
 
       -- Apply RoPE
-      let img_q_rope := applyRope img_q_norm fluxCfg.headDimEven img_pe
-      let img_k_rope := applyRope img_k_norm fluxCfg.headDimEven img_pe
-      let txt_q_rope := applyRope txt_q_norm fluxCfg.headDimEven txt_pe
-      let txt_k_rope := applyRope txt_k_norm fluxCfg.headDimEven txt_pe
+      let img_q_rope := applyRope (half := fluxCfg.half_head_dim) img_q_norm img_pe
+      let img_k_rope := applyRope (half := fluxCfg.half_head_dim) img_k_norm img_pe
+      let txt_q_rope := applyRope (half := fluxCfg.half_head_dim) txt_q_norm txt_pe
+      let txt_k_rope := applyRope (half := fluxCfg.half_head_dim) txt_k_norm txt_pe
       saveDebug cfg.debugDir "img_q_rope" img_q_rope
       saveDebug cfg.debugDir "img_k_rope" img_k_rope
       saveDebug cfg.debugDir "txt_q_rope" txt_q_rope
@@ -319,7 +319,7 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       img_cur := img_next
       txt_cur := txt_next
     else
-      let (img_next, txt_next) := block.forward fluxCfg.headDimEven img_cur txt_cur img_pe txt_pe mod_img mod_txt
+      let (img_next, txt_next) := block.forward img_cur txt_cur img_pe txt_pe mod_img mod_txt
       img_cur := img_next
       txt_cur := txt_next
 

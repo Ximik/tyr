@@ -108,7 +108,7 @@ def main : IO Unit := do
 
   -- 3. Layout equivalence with the C++ fast path.
   let (fastCos, fastSin) :=
-    Tensor.rotaryFreqs maxLen cfg.rotaryDimSliding cfg.rope_theta_sliding Device.CPU
+    Tensor.rotaryFreqs maxLen cfg.half_rotary_dim_sliding cfg.rope_theta_sliding Device.CPU
   check (fastCos.runtimeShape == #[1024, 64])
     s!"computeFreqsOnDevicePure sliding shape = {fastCos.runtimeShape}"
   let dFastCos ← tensorMaxAbsDiff cpuTables.slidingCos fastCos
@@ -122,31 +122,31 @@ def main : IO Unit := do
   let q ← src.load "q_in" #[1, 16, 4, 128]
   let q := q.2
   -- Full-attention layer: partial rotary (rotary_dim = 64) with the YaRN table.
-  let fullCos16 : Tensor { shape := #[16, cfg.rotaryDimFull / 2], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullCos 0 16
-  let fullSin16 : Tensor { shape := #[16, cfg.rotaryDimFull / 2], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 0 16
-  let qFull := applyRotaryPartial (rotary_dim := 64) q fullCos16 fullSin16
+  let fullCos16 : Tensor { shape := #[16, cfg.half_rotary_dim_full], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullCos 0 16
+  let fullSin16 : Tensor { shape := #[16, cfg.half_rotary_dim_full], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 0 16
+  let qFull := applyRotaryPartial (half := 32) q fullCos16 fullSin16
   let refQFull ← src.load "q_out_full_yarn" #[1, 16, 4, 128]
   let refQFull := refQFull.2
   let dQFull ← tensorMaxAbsDiff qFull refQFull
   check (dQFull < 1e-4) s!"applyRotaryPartial (YaRN, prefill) vs HF: max|Δ| = {dQFull}"
   -- Sliding layer: full-width rotary (rotary_dim = head_dim = 128), direct apply.
-  let slCos16 : Tensor { shape := #[16, cfg.rotaryDimSliding / 2], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.slidingCos 0 16
-  let slSin16 : Tensor { shape := #[16, cfg.rotaryDimSliding / 2], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.slidingSin 0 16
-  let qSlide := Tensor.applyRotary q slCos16 slSin16
+  let slCos16 : Tensor { shape := #[16, cfg.half_rotary_dim_sliding], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.slidingCos 0 16
+  let slSin16 : Tensor { shape := #[16, cfg.half_rotary_dim_sliding], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.slidingSin 0 16
+  let qSlide := Tensor.applyRotary (half := 64) q slCos16 slSin16
   let refQSlide ← src.load "q_out_sliding" #[1, 16, 4, 128]
   let refQSlide := refQSlide.2
   let dQSlide ← tensorMaxAbsDiff qSlide refQSlide
   check (dQSlide < 1e-4) s!"applyRotaryEmb (sliding, prefill) vs HF: max|Δ| = {dQSlide}"
   -- applyRotaryPartial must agree with the direct apply for rotary_dim == head_dim
   -- (empty pass-through slice).
-  let qSlide2 := applyRotaryPartial (rotary_dim := 128) q slCos16 slSin16
+  let qSlide2 := applyRotaryPartial (half := 64) q slCos16 slSin16
   let dQSlide2 ← tensorMaxAbsDiff qSlide2 refQSlide
   check (dQSlide2 < 1e-4) s!"applyRotaryPartial (full-width sliding) vs HF: max|Δ| = {dQSlide2}"
   -- Decode step: single row at position 5 through the partial YaRN path.
-  let cos1 : Tensor { shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullCos 5 1
-  let sin1 : Tensor { shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 5 1
+  let cos1 : Tensor { shape := #[1, cfg.half_rotary_dim_full], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullCos 5 1
+  let sin1 : Tensor { shape := #[1, cfg.half_rotary_dim_full], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 5 1
   let q5 := q.slice 1 5 1
-  let qPos5 := applyRotaryPartial (rotary_dim := 64) q5 cos1 sin1
+  let qPos5 := applyRotaryPartial (half := 32) q5 cos1 sin1
   let refQPos5 ← src.load "q_out_full_yarn_pos5" #[1, 1, 4, 128]
   let refQPos5 := refQPos5.2
   let dQPos5 ← tensorMaxAbsDiff qPos5 refQPos5
@@ -168,9 +168,9 @@ def main : IO Unit := do
     check (dGpuCpu == 0.0) s!"cuda vs cpu fullCos identical (max|Δ| = {dGpuCpu})"
     -- Apply on device.
     let qGpu : Tensor { shape := #[1, 16, 4, 128], dtype := q.dtype, device := device } := q.to device
-    let gpuFullCos16 : Tensor { shape := #[16, cfg.rotaryDimFull / 2], dtype := .Float32, device := device } := sliceRotaryRows gpuTables.fullCos 0 16
-    let gpuFullSin16 : Tensor { shape := #[16, cfg.rotaryDimFull / 2], dtype := .Float32, device := device } := sliceRotaryRows gpuTables.fullSin 0 16
-    let qFullGpu := applyRotaryPartial (rotary_dim := 64) qGpu gpuFullCos16 gpuFullSin16
+    let gpuFullCos16 : Tensor { shape := #[16, cfg.half_rotary_dim_full], dtype := .Float32, device := device } := sliceRotaryRows gpuTables.fullCos 0 16
+    let gpuFullSin16 : Tensor { shape := #[16, cfg.half_rotary_dim_full], dtype := .Float32, device := device } := sliceRotaryRows gpuTables.fullSin 0 16
+    let qFullGpu := applyRotaryPartial (half := 32) qGpu gpuFullCos16 gpuFullSin16
     let dQFullGpu ← tensorMaxAbsDiff qFullGpu refQFull
     check (dQFullGpu < 1e-4) s!"[cuda] applyRotaryPartial (YaRN, prefill) vs HF: max|Δ| = {dQFullGpu}"
   else

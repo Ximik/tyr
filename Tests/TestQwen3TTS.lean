@@ -15,7 +15,7 @@ private def tinyCfg : Qwen3TTSConfig :=
         numHiddenLayers := 1
         numAttentionHeads := 4
         numKeyValueHeads := 2
-        headDim := 8
+        halfHeadDim := 4
       }
       vocabSize := 128
       hiddenSize := 32
@@ -23,7 +23,7 @@ private def tinyCfg : Qwen3TTSConfig :=
       numHiddenLayers := 2
       numAttentionHeads := 4
       numKeyValueHeads := 2
-      headDim := 8
+      halfHeadDim := 4
       numCodeGroups := 4
       textHiddenSize := 32
       textVocabSize := 128
@@ -105,7 +105,7 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
   torch.manualSeed 7341
   let inputs : Tensor { shape := #[1, 5, 8], dtype := .Float32, device := .CPU } := Tensor.reshape
     (Tensor.mulScalar (Tensor.sin (Tensor.toFloat32 (Tensor.arange 40))) 0.5) #[1, 5, 8]
-  let (cos, sin) := Tensor.rotaryFreqs 5 4 10000
+  let (cos, sin) := Tensor.rotaryFreqs 5 2 10000
   for bf16 in #[false, true] do
     let selected : RealFloatingDType :=
       if bf16 then ⟨.BFloat16, by decide⟩ else ⟨.Float32, by decide⟩

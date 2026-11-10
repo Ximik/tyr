@@ -483,8 +483,8 @@ private def forwardAttention {batch seq : Nat}
   let k : Tensor { shape := #[batch, seq, 8, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshape k0 #[batch, seq, 8, 64]
   let v : Tensor { shape := #[batch, seq, 8, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshape v0 #[batch, seq, 8, 64]
 
-  let q := Tensor.applyRotary q cos sin
-  let k := Tensor.applyRotary k cos sin
+  let q := Tensor.applyRotary (half := 32) q cos sin
+  let k := Tensor.applyRotary (half := 32) k cos sin
 
   let qh : Tensor { shape := #[batch, 8, seq, 64], dtype := dtypes.compute.val, device := device } := Tensor.splitHeads q
   let kh : Tensor { shape := #[batch, 8, seq, 64], dtype := dtypes.compute.val, device := device } := Tensor.splitHeads k
@@ -607,7 +607,7 @@ def encodeWithRoPEOffset {batch samples : Nat}
 
   let x0 : Tensor { shape := #[batch, t4, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose h9 1 2) #[batch, t4, 512]
   let ropeTotal : Nat := ropeStartPos + t4
-  let (cosAll, sinAll) := Tensor.rotaryFreqs ropeTotal 64 10000.0
+  let (cosAll, sinAll) := Tensor.rotaryFreqs ropeTotal 32 10000.0
   let cosAll : Tensor { shape := #[ropeTotal, 32], dtype := .Float32, device := device } :=
     cosAll.to x0.device
   let sinAll : Tensor { shape := #[ropeTotal, 32], dtype := .Float32, device := device } :=
@@ -668,7 +668,7 @@ def encodeWithRoPEOffsetDynamic {batch samples : Nat}
 
   let x0 : Tensor { shape := #[batch, t4, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose h9 1 2) #[batch, t4, 512]
   let ropeTotal : Nat := ropeStartPos + t4
-  let (cosAll, sinAll) := Tensor.rotaryFreqs ropeTotal 64 10000.0
+  let (cosAll, sinAll) := Tensor.rotaryFreqs ropeTotal 32 10000.0
   let cosAll : Tensor { shape := #[ropeTotal, 32], dtype := .Float32, device := device } :=
     cosAll.to x0.device
   let sinAll : Tensor { shape := #[ropeTotal, 32], dtype := .Float32, device := device } :=

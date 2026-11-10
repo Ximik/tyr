@@ -531,8 +531,8 @@ private def forwardAttention {batch seq : Nat}
   let k : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshape k0 #[batch, seq, 16, 64]
   let v : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshape v0 #[batch, seq, 16, 64]
 
-  let q := Tensor.applyRotary q cos sin
-  let k := Tensor.applyRotary k cos sin
+  let q := Tensor.applyRotary (half := 32) q cos sin
+  let k := Tensor.applyRotary (half := 32) k cos sin
 
   let qh : Tensor { shape := #[batch, 16, seq, 64], dtype := dtypes.compute.val, device := device } := Tensor.splitHeads q
   let kh : Tensor { shape := #[batch, 16, seq, 64], dtype := dtypes.compute.val, device := device } := Tensor.splitHeads k
@@ -570,7 +570,7 @@ private def forwardPreTransformer {batch frames : Nat}
   Id.run do
     let x0 : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose x 1 2) #[batch, frames, 1024]
     let mut h : Tensor { shape := #[batch, frames, 512], dtype := dtypes.compute.val, device := device } := Tensor.affine3d x0 m.preTransformerInputProj m.preTransformerInputBias
-    let (cos0, sin0) := Tensor.rotaryFreqs frames 64 10000.0
+    let (cos0, sin0) := Tensor.rotaryFreqs frames 32 10000.0
     let cos : Tensor { shape := #[frames, 32], dtype := .Float32, device := device } := cos0.to h.device
     let sin : Tensor { shape := #[frames, 32], dtype := .Float32, device := device } := sin0.to h.device
     for layer in m.preTransformerLayers do
