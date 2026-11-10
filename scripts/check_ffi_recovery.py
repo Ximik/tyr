@@ -6,7 +6,8 @@ submodules except OwnedKV, Tyr/Basic.lean, and Tyr/ConstantSupport.lean.
 Other native subsystems are outside this explicitly reviewed scope.
 Every source definition, including inactive
 platform branches, must contain only a checkedCall/checkedIoCall return with a
-literal context and reference-capture lambda. This forbids throwable work in
+literal context and reference-capture lambda; an Except export may instead use
+dataCheckedCall, which converts only data failures and lets the rest abort. This forbids throwable work in
 argument evaluation before the guard as well as statements before/after it.
 
 This is a conservative source convention check, complementary to the generated FFI header
@@ -255,12 +256,13 @@ def native_definitions(source: str, path: str, symbols: set[str]) -> list[Defini
 
 
 def guarded_body(body: tuple[Token, ...], carrier: str) -> bool:
-    wrapper = "checkedIoCall" if carrier == "IO" else "checkedCall"
-    prefix = ["return", "tyr", "::", wrapper, "(", "<string>", ",", "[", "&", "]", "{"]
-    if [t.text for t in body[:len(prefix)]] != prefix:
-        return False
-    end = group_end(body, len(prefix) - 1)
-    return [t.text for t in body[end + 1:]] == [")", ";"]
+    wrappers = ["checkedIoCall"] if carrier == "IO" else ["checkedCall", "dataCheckedCall"]
+    for wrapper in wrappers:
+        prefix = ["return", "tyr", "::", wrapper, "(", "<string>", ",", "[", "&", "]", "{"]
+        if [t.text for t in body[:len(prefix)]] == prefix:
+            end = group_end(body, len(prefix) - 1)
+            return [t.text for t in body[end + 1:]] == [")", ";"]
+    return False
 
 
 def audit(root: Path) -> tuple[list[str], Counter]:

@@ -255,8 +255,9 @@ including borrowed-reference preservation and cleanup on invalid input.
 Typed operations take their preconditions in their types and call unguarded
 native exports through `!` variants; a libtorch error aborts through Tyr's fatal
 error report. Each typed result is still admitted against its full
-specification. `svdReduced?` returns dtype, backend, and factorization failures as
-errors. `crossEntropy` and `crossEntropyNone` validate
+specification. `svdReduced?` and `matrixLog?` return only data failures (a factorization that
+does not converge, a matrix with no real logarithm) as errors; a contract
+violation or a missing kernel aborts. `crossEntropy` and `crossEntropyNone` validate
 target labels in the native call against the class range, allowing the default
 ignored label `-100`, before dispatching the loss kernel. The convolution
 adapters `conv1d`, `conv2dBias`, `conv1dGroups`, and `convTranspose1d` take their

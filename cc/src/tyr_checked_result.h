@@ -2,6 +2,7 @@
 #include <lean/lean.h>
 #include <c10/util/Exception.h>
 #include <exception>
+#include <stdexcept>
 #include <utility>
 
 namespace tyr {
@@ -36,6 +37,33 @@ lean_object* checkedCall(const char* context, F&& operation) noexcept {
     return checkedError(context, error.what());
   } catch (...) {
     return checkedError(context, "unknown native exception");
+  }
+}
+
+// A failure that depends on the values of the inputs (no real logarithm, a
+// factorization that does not converge), as opposed to a contract violation or
+// a missing kernel. Only `dataCheckedCall` turns it into an error.
+struct DataError : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
+#define TYR_DATA_CHECK(cond, ...) \
+  do { if (!(cond)) throw ::tyr::DataError(::c10::str(__VA_ARGS__)); } while (0)
+
+// The export behind a `foo?`: data failures, including libtorch's own
+// non-convergence (`c10::LinAlgError`), become `Except.error`. Every other
+// exception propagates to Tyr's terminate handler and aborts.
+template <typename F>
+lean_object* dataCheckedCall(const char* context, F&& operation) {
+  try {
+    auto* payload = std::forward<F>(operation)();
+    auto* result = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(result, 0, payload);
+    return result;
+  } catch (const DataError& error) {
+    return checkedError(context, error.what());
+  } catch (const c10::LinAlgError& error) {
+    return checkedError(context, error.what_without_backtrace());
   }
 }
 

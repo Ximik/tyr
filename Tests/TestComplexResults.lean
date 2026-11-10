@@ -23,18 +23,18 @@ example (x : Tensor ⟨#[2, 2], .Complex128, .CPU⟩) :
     Tensor ⟨#[2], .Float64, .CPU⟩ := Tensor.svdvals x
 
 example (x : Tensor ⟨#[2, 2], .Complex64, .CPU⟩) :
-    Tensor ⟨#[2, 2], .Complex64, .CPU⟩ × Tensor ⟨#[2], .Float32, .CPU⟩ ×
-      Tensor ⟨#[2, 2], .Complex64, .CPU⟩ := Tensor.svdReduced x
+    Except String (Tensor ⟨#[2, 2], .Complex64, .CPU⟩ × Tensor ⟨#[2], .Float32, .CPU⟩ ×
+      Tensor ⟨#[2, 2], .Complex64, .CPU⟩) := Tensor.svdReduced? x
 
 example {d : DType} [DType.RealFloating d] (x : Tensor ⟨#[2, 2], d, .CPU⟩) :
-    Tensor ⟨#[2, 2], d, .CPU⟩ := Tensor.matrixLog x
+    Except String (Tensor ⟨#[2, 2], d, .CPU⟩) := Tensor.matrixLog? x
 
 example (_x : Tensor ⟨#[2, 2], .Complex64, .CPU⟩) : True := by
-  fail_if_success have _ := Tensor.matrixLog _x
+  fail_if_success have _ := Tensor.matrixLog? _x
   trivial
 
 example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
-  fail_if_success have _ := Tensor.matrixLog _x
+  fail_if_success have _ := Tensor.matrixLog? _x
   trivial
 
 @[test] def testComplexRowNormsAreReal : IO Unit := do
@@ -58,7 +58,7 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
 @[test] def testComplexSVDKeepsComplexVectorsAndRealValues : IO Unit := do
   for (complex, real) in #[(DType.Complex64, DType.Float32), (.Complex128, .Float64)] do
     let input := diagonal complex
-    let (u, values, vh) := Tensor.svdReduced input
+    let (u, values, vh) := Tensor.svdReduced! input
     LeanTest.assertEqual values.raw.dtype real
     LeanTest.assertEqual u.raw.dtype complex
     LeanTest.assertEqual vh.raw.dtype complex
@@ -71,7 +71,7 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
 
 @[test] def testRealMatrixLogRoundtrip : IO Unit := do
   let input := diagonal .Float64
-  let logarithm := Tensor.matrixLog input
+  let logarithm := Tensor.matrixLog! input
   let restored := Tensor.matrixExp logarithm
   LeanTest.assertEqual logarithm.raw.dtype .Float64
   LeanTest.assertTrue ((Tensor.frobeniusNorm (restored - input)) < 1e-10)
@@ -127,9 +127,7 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
     LeanTest.assertEqual vh.raw.dtype .Complex128
   | .error _ => LeanTest.fail "Valid exact complex factorization was rejected"
 
-@[test] def testMatrixLogRejectsInvalidRuntimeDomain : IO Unit := do
-  expectError (Tensor.matrixLog? (diagonal .Complex64))
-  expectError (Tensor.matrixLog? (diagonal .Int64))
+@[test] def testMatrixLogPreservesDTypeAndDevice : IO Unit := do
   let input := (diagonal .Float32)
   match Tensor.matrixLog? input with
   | .error message => LeanTest.fail message
@@ -142,9 +140,5 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
   -- return the input as though a logarithm had been computed.
   expectError (Tensor.matrixLog? (Tensor.zeros #[2, 2]))
   expectError (Tensor.matrixLog? (Tensor.full #[1, 1] (-1)))
-  -- CPU SVD does not implement ComplexHalf, even though its metadata and
-  -- real singular-value dtype are represented by the type system.
-  let halfComplex := diagonal .Complex32
-  expectError (Tensor.svdReduced? halfComplex)
 
 end Tests.ComplexResults

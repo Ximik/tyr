@@ -29,7 +29,7 @@ def random (n : Nat) : IO (SymmetricPositiveDefinite n) := do
 /-- Affine-invariant inspired distance proxy using `log(inv(A) B)`. -/
 def distance [DType.RealFloating d] (A B : SymmetricPositiveDefinite n d dev) : Float :=
   let rel := Tensor.mm (Tensor.inv A.matrix) B.matrix
-  let logRel := Tensor.matrixLog rel
+  let logRel := Tensor.matrixLog! rel
   Tensor.frobeniusNorm logRel
 
 end SymmetricPositiveDefinite
@@ -62,10 +62,10 @@ instance spdManifold (n : Nat) [DType.RealFloating d] :
   sharp := id
   flat := id
   exp x v :=
-    let lx := Tensor.matrixLog x.matrix
+    let lx := Tensor.matrixLog! x.matrix
     SymmetricPositiveDefinite.project n (Tensor.add lx v.vec)
   retract x v :=
-    let lx := Tensor.matrixLog x.matrix
+    let lx := Tensor.matrixLog! x.matrix
     SymmetricPositiveDefinite.project n (Tensor.add lx v.vec)
 
 end Tyr.AD
