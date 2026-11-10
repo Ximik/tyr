@@ -36,9 +36,6 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_item"] opaque item (t : @& RawTensor) : Float
 
-@[extern "lean_torch_item_try"] opaque item?
-    (t : @& RawTensor) : Except String Float
-
 @[extern "lean_torch_gt"] opaque gt (a b : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_where"] opaque whereSelect! (condition a b : @& RawTensor) : RawTensor
@@ -301,9 +298,8 @@ end torch.RawTensor
 namespace torch.RawTensor
 /-- Differentiate a pure scalar function with private fresh leaves. The callback
 cannot export the temporary leaves; only detached derivatives are returned. -/
-@[extern "lean_torch_functional_grad"] opaque functionalGrad
-    (inputs : @& Array RawTensor) (f : Array RawTensor → RawTensor) :
-    Except String (Array RawTensor)
+@[extern "lean_torch_functional_grad"] opaque functionalGrad!
+    (inputs : @& Array RawTensor) (f : Array RawTensor → RawTensor) : Array RawTensor
 end torch.RawTensor
 
 namespace torch.RawTensor

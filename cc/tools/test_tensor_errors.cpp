@@ -54,22 +54,6 @@ void crossEntropy(bool unreduced) {
             "Incorrect cross entropy value");
   require(logits->m_rc == 1 && labels->m_rc == 1, "Cross entropy changed borrowed references");
 }
-void tryItem(bool invalid) {
-  Object input(lean_torch_full(shape(invalid ? std::initializer_list<uint64_t>{2}
-                                          : std::initializer_list<uint64_t>{}),
-                             3.25, 0, lean_box(1)), lean_dec);
-  Object result(lean_torch_item_try(input.get()), lean_dec);
-  if (invalid) {
-    exceptError(result.get(), "item");
-  } else {
-    require(!lean_is_scalar(result.get()) && !lean_is_external(result.get()) &&
-            lean_obj_tag(result.get()) == 1, "Expected Except.ok scalar carrier");
-    require(lean_unbox_float(lean_ctor_get(result.get(), 0)) == 3.25,
-            "Incorrect boxed Float payload");
-  }
-  require(input->m_rc == 1, "Item changed borrowed references");
-}
-
 void indexSelect(bool empty) {
   const uint64_t count = empty ? 0 : 1;
   Object input(lean_torch_full(shape({empty ? uint64_t{0} : uint64_t{2}}), 3.25, 0, lean_box(1)), lean_dec);
@@ -270,31 +254,33 @@ void matrix(Binary operation) {
   require(input->m_rc == 1, "matrix operation changed borrowed tensor ownership");
 }
 
-void tryEarlyFailure() {
-  Object invalid(lean_mk_string("not a tensor"), lean_dec);
-  Object target(shape({2}), lean_dec);
-  Object cast(lean_torch_cast_dtype_try(retain(target.get()), invalid.get(),
-    static_cast<uint8_t>(tyr::lean::DType::Float64)), lean_dec);
-  exceptError(cast.get(), "borrowTensor");
-  require(invalid->m_rc == 1 && target->m_rc == 1,
-    "checked early failure leaked owned parameters or changed borrowed argument");
-}
-
 void tryExceptionKinds() {
-  static_assert(noexcept(tyr::catchAllCall("test", []() -> lean_object* { return lean_box(0); })));
   Object owned(shape({2}), lean_dec);
-  auto check = [&](int kind) {
-    Object result(tyr::catchAllCall("firewall", [&]() -> lean_object* {
+  // Data failures become Except.error and unwind native ownership guards.
+  for (int kind : {0, 1}) {
+    Object result(tyr::tryCall("data", [&]() -> lean_object* {
       Object transferred(retain(owned.get()), lean_dec);
-      if (kind == 0) TORCH_CHECK(false, "libtorch test error");
-      if (kind == 1) throw std::runtime_error("standard test error");
-      throw 7;
+      if (kind == 0) TYR_DATA_CHECK(false, "data test error");
+      throw c10::LinAlgError({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, "linalg test error");
     }), lean_dec);
-    exceptError(result.get(), kind == 0 ? "libtorch test error" :
-      kind == 1 ? "standard test error" : "unknown native exception");
-    require(owned->m_rc == 1, "Exception firewall failed to unwind native ownership guards");
-  };
-  for (int kind : {0, 1, 2}) check(kind);
+    exceptError(result.get(), kind == 0 ? "data test error" : "linalg test error");
+    require(owned->m_rc == 1, "tryCall failed to unwind native ownership guards");
+  }
+  // Any other exception is not converted: it leaves tryCall unchanged.
+  for (int kind : {0, 1}) {
+    bool propagated = false;
+    try {
+      Object result(tyr::tryCall("contract", [&]() -> lean_object* {
+        Object transferred(retain(owned.get()), lean_dec);
+        if (kind == 0) TORCH_CHECK(false, "libtorch test error");
+        throw std::runtime_error("standard test error");
+      }), lean_dec);
+    } catch (const std::exception&) {
+      propagated = true;
+    }
+    require(propagated, "tryCall converted a non-data exception into an error");
+    require(owned->m_rc == 1, "tryCall propagation leaked native ownership guards");
+  }
 }
 
 void tryIoExceptionKinds() {
@@ -427,8 +413,6 @@ int main() {
     }
   };
   run("flash/success-carrier", flashSuccess);
-  run("try/item-success", [] { tryItem(false); });
-  run("try/item-shape-error", [] { tryItem(true); });
   run("indexSelect/success", [] { indexSelect(false); });
   run("indexSelect/empty", [] { indexSelect(true); });
   run("try/indexSelect-negative-error", [] { tryIndexSelectError(UINT64_MAX); });
@@ -453,7 +437,6 @@ int main() {
   run("transpose/scalar-success", transposeScalar);
   run("try/cat-error", [] { tryCat(true); });
   run("try/cat-success", [] { tryCat(false); });
-  run("try/owned-arguments-early-error", tryEarlyFailure);
   run("try/exception-kinds", tryExceptionKinds);
   run("try/IO-exception-kinds", tryIoExceptionKinds);
   run("logicalAnd/success", logicalAnd);

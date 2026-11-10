@@ -126,7 +126,7 @@ instance tensorStructEuclidean [s : TensorStruct α] [torch.FloatingTensorStruct
   -- Inner product: sum of all element-wise products across tensors
   inner a b :=
     let product := torch.FloatingTensorStruct.zipWith (fun a b => torch.Tensor.mul a b) a b
-    TensorStruct.fold (fun t acc => acc + torch.Tensor.item (torch.Tensor.sumAll t)) 0.0 product
+    TensorStruct.fold (fun t acc => acc + torch.Tensor.item! (torch.Tensor.sumAll t)) 0.0 product
 
 /-- Gradient descent step using exponential map / retraction.
     For Euclidean spaces: x' = x - lr * grad

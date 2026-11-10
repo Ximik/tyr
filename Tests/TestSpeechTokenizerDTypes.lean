@@ -36,8 +36,8 @@ example : True := by
   for (compute, usage, sum) in #[(float32DType, float32DType, bf16),
       (float32DType, bf16, float32DType), (bf16, bf16, bf16)] do
     let layout ← IO.ofExcept (SpeechTokenizerDTypes.ofDTypes? compute.val usage.val sum.val)
-    let sums ← IO.ofExcept ((Tensor.fromFloatArray #[6, 8]).castDType? layout.sum)
-    let counts ← IO.ofExcept ((Tensor.fromFloatArray #[2, 4]).castDType? layout.usage)
+    let sums := (Tensor.fromFloatArray #[6, 8]).castDType layout.sum
+    let counts := (Tensor.fromFloatArray #[2, 4]).castDType layout.usage
     let result : Tensor ⟨#[2], layout.compute.val, .CPU⟩ := layout.divideCodebook sums counts
     LeanTest.assertEqual result.raw.dtype compute.val
     LeanTest.assertEqual (← result.toFloatArray) #[3, 2]

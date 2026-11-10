@@ -57,7 +57,7 @@ def extractSpeakerEmbedding {batch frames : Nat} {inputDType : DType}
   | some enc => do
       -- Mel features are an explicit preprocessing boundary. Conversion changes
       -- their dtype, while all speaker weights and activations share one index.
-      let mel ← IO.ofExcept (mel.castDType? dtypes.speaker.val)
+      let mel := mel.castDType dtypes.speaker.val
       let ⟨hf⟩ ← if h : 0 < frames then pure (PLift.up h) else
         throw (IO.userError "Speaker embedding needs at least one mel frame")
       pure (enc.forward hf mel)

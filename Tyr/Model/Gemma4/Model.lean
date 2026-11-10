@@ -161,7 +161,7 @@ def forward {tokens : Nat}
   let topVals : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.div topValsRaw denom
   let flatIdx : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Int64 } := Tensor.reshape topIdx #[tokens * cfg.top_k_experts]
   let scalesFlat : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Float32 } :=
-    Tensor.indexSelect m.per_expert_scale flatIdx
+    Tensor.indexSelect! m.per_expert_scale flatIdx
   let scales : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.reshape scalesFlat #[tokens, cfg.top_k_experts]
   (probs, Tensor.mul topVals scales, topIdx)
 

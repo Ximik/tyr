@@ -618,7 +618,7 @@ def runEndToEnd (args : Args) : IO Unit := do
         IO.println s!"Extracted speaker embedding from reference audio: {refAudioPath}"
         -- The speaker encoder has its own stored dtype; conditioning enters
         -- the talker's execution dtype at this explicit model boundary.
-        let emb ← IO.ofExcept (emb.castDType? dtypes.talker.val)
+        let emb := emb.castDType dtypes.talker.val
         pure (some emb)
     | none, none =>
         pure none

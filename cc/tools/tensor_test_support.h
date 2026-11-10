@@ -58,10 +58,7 @@ void expectThrow(Action action) {
   throw std::runtime_error("Expected native rejection");
 }
 Object cast(lean_object* input, tyr::lean::DType dtype) {
-  Object dims(lean_torch_get_shape(input), lean_dec);
-  Object result(lean_torch_cast_dtype_try(retain(dims.get()), input,
-                                              static_cast<uint8_t>(dtype)), lean_dec);
-  return Object(retain(exceptValue(result.get())), lean_dec);
+  return Object(lean_torch_cast_dtype(input, static_cast<uint8_t>(dtype)), lean_dec);
 }
 
 using Binary = lean_object* (*)(lean_object*, lean_object*);

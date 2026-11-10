@@ -63,7 +63,7 @@ example (_empty : Tensor ⟨#[0], .Float32, .CPU⟩) (_complex : Tensor ⟨#[2],
 
 @[test] def testCheckedShapeErrorsAreRecoverable : IO Unit := do
   let x := Tensor.ones #[2]
-  expectError (Tensor.catMany? #[x.packShape, x.packShape] 9 #[4]) "Dimension"
+  expectError (Tensor.catMany? #[x.packShape, x.packShape] 9 #[4]) "axis"
   expectError (Tensor.catMany? (d := .Float32) (dev := .CPU) #[] 0 #[0]) "at least one"
   let concatenated ← checked (Tensor.catMany? #[x.packShape, x.packShape] 0 #[4])
   LeanTest.assertEqual (← concatenated.toFloatArray) #[1, 1, 1, 1]
