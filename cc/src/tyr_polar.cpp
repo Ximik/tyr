@@ -11,7 +11,7 @@
 #include "tyr_nat.h"
 #include <lean/lean.h>
 #include "generated/tyr_ffi.h"
-#include "tyr_checked_result.h"
+#include "tyr_try_result.h"
 #include <torch/torch.h>
 
 // Forward declarations from tyr.cpp
@@ -34,7 +34,7 @@ extern "C" {
  */
 lean_object* lean_torch_xxt(
     b_lean_obj_arg A_obj) {
-  return tyr::checkedIoCall("lean_torch_xxt", [&] {
+  return tyr::ioCall("lean_torch_xxt", [&] {
       try {
           auto A = borrowTensor(A_obj);
 
@@ -77,7 +77,7 @@ lean_object* lean_torch_ba_plus_cAA(
     b_lean_obj_arg A_obj,
     double alpha,
     double beta) {
-  return tyr::checkedIoCall("lean_torch_ba_plus_cAA", [&] {
+  return tyr::ioCall("lean_torch_ba_plus_cAA", [&] {
       try {
           auto A = borrowTensor(A_obj);
 
@@ -132,7 +132,7 @@ lean_object* lean_torch_newton_schulz_step(
     double a,
     double b,
     double c) {
-  return tyr::checkedIoCall("lean_torch_newton_schulz_step", [&] {
+  return tyr::ioCall("lean_torch_newton_schulz_step", [&] {
       try {
           auto X = borrowTensor(X_obj);
 
@@ -193,7 +193,7 @@ lean_object* lean_torch_newton_schulz_step(
 lean_object* lean_torch_polar_express(
     b_lean_obj_arg G_obj,
     b_lean_obj_arg num_iters_obj) {
-  return tyr::checkedIoCall("lean_torch_polar_express", [&] {
+  return tyr::ioCall("lean_torch_polar_express", [&] {
   const uint64_t num_iters = tyr::natTo<uint64_t>(num_iters_obj, "num_iters");
       try {
           auto G = borrowTensor(G_obj);
@@ -267,7 +267,7 @@ lean_object* lean_torch_polar_express(
 lean_object* lean_torch_muon_orthogonalize(
     b_lean_obj_arg G_obj,
     b_lean_obj_arg num_iters_obj) {
-  return tyr::checkedIoCall("lean_torch_muon_orthogonalize", [&] {
+  return tyr::ioCall("lean_torch_muon_orthogonalize", [&] {
   const uint64_t num_iters = tyr::natTo<uint64_t>(num_iters_obj, "num_iters");
       try {
           auto G = borrowTensor(G_obj);
@@ -334,7 +334,7 @@ lean_object* lean_torch_cautious_update(
     b_lean_obj_arg update_obj,
     double lr,
     double wd) {
-  return tyr::checkedIoCall("lean_torch_cautious_update", [&] {
+  return tyr::ioCall("lean_torch_cautious_update", [&] {
       try {
           auto param = borrowTensor(param_obj);
           auto update = borrowTensor(update_obj);

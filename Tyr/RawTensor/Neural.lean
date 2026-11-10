@@ -48,7 +48,7 @@ namespace torch.RawTensor
 @[extern "lean_torch_stft_1d"] opaque stft (input : @& RawTensor)
     (nFft hopLength winLength : @& Nat) (window : @& RawTensor) (center normalized : Bool) : RawTensor
 /-- STFT with all native validation and kernel failures contained in `Except`. -/
-@[extern "lean_torch_stft_1d_checked"] opaque stftChecked (input : @& RawTensor)
+@[extern "lean_torch_stft_1d_try"] opaque stft? (input : @& RawTensor)
     (nFft hopLength winLength : @& Nat) (window : @& RawTensor) (center normalized : Bool) :
     Except String RawTensor
 @[extern "lean_torch_tensor_log10"] opaque log10! (input : @& RawTensor) : RawTensor
@@ -109,5 +109,5 @@ namespace torch.RawTensor
 end torch.RawTensor
 
 namespace torch.RawTensor
-@[extern "lean_torch_cat_dyn_checked"] opaque catMany? (tensors : @& Array RawTensor) (dim : @& Nat) : Except String RawTensor
+@[extern "lean_torch_cat_dyn_try"] opaque catMany? (tensors : @& Array RawTensor) (dim : @& Nat) : Except String RawTensor
 end torch.RawTensor

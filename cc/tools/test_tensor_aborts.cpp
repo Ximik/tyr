@@ -145,11 +145,11 @@ std::vector<AbortCase> cases() {
   });
   add("svd-checked-integral", "floating point or complex", [] {
     Object input(lean_torch_full_int(shape({2, 2}), 3), lean_dec);
-    Object r(lean_torch_svd_checked(input.get()), lean_dec);
+    Object r(lean_torch_svd_try(input.get()), lean_dec);
   });
   add("svd-checked-missing-kernel", "not implemented for", [] {
     auto input = cast(full({2, 2}, 1).get(), tyr::lean::DType::Complex32);
-    Object r(lean_torch_svd_checked(input.get()), lean_dec);
+    Object r(lean_torch_svd_try(input.get()), lean_dec);
   });
   add("flashAttention-rank", "rank-4", [] { flash(full({2, 2}, 1)); });
   add("flashAttention-dtype", "expected scalar type Float but found Long", [] { flash(Object(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec)); });

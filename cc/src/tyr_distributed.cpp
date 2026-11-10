@@ -10,7 +10,7 @@
 #include "tyr_nat.h"
 #include <lean/lean.h>
 #include "generated/tyr_ffi.h"
-#include "tyr_checked_result.h"
+#include "tyr_try_result.h"
 #include <torch/torch.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -123,7 +123,7 @@ extern "C" {
  * duplicate-device communicator initialization.
  */
 lean_object* lean_torch_dist_set_cuda_device(b_lean_obj_arg device_obj) {
-  return tyr::checkedIoCall("lean_torch_dist_set_cuda_device", [&] {
+  return tyr::ioCall("lean_torch_dist_set_cuda_device", [&] {
       try {
           const uint64_t device = tyr::natTo<c10::DeviceIndex>(device_obj, "CUDA device index");
   #if TYR_HAS_NCCL
@@ -157,7 +157,7 @@ lean_object* lean_torch_dist_init_process_group(
     b_lean_obj_arg master_port_obj,
     b_lean_obj_arg rank_obj,
     b_lean_obj_arg world_size_obj) {
-  return tyr::checkedIoCall("lean_torch_dist_init_process_group", [&] {
+  return tyr::ioCall("lean_torch_dist_init_process_group", [&] {
   const uint64_t master_port = tyr::natTo<uint16_t>(master_port_obj, "master_port");
   const uint64_t rank = tyr::natTo<int>(rank_obj, "rank");
   const uint64_t world_size = tyr::natTo<int>(world_size_obj, "world_size");
@@ -220,7 +220,7 @@ lean_object* lean_torch_dist_init_process_group(
  * Get the rank of this process.
  */
 lean_object* lean_torch_dist_get_rank() {
-  return tyr::checkedIoCall("lean_torch_dist_get_rank", [&] {
+  return tyr::ioCall("lean_torch_dist_get_rank", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
       if (!g_initialized) {
           return lean_io_result_mk_error(lean_mk_io_user_error(
@@ -234,7 +234,7 @@ lean_object* lean_torch_dist_get_rank() {
  * Get the world size (total number of processes).
  */
 lean_object* lean_torch_dist_get_world_size() {
-  return tyr::checkedIoCall("lean_torch_dist_get_world_size", [&] {
+  return tyr::ioCall("lean_torch_dist_get_world_size", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
       if (!g_initialized) {
           return lean_io_result_mk_error(lean_mk_io_user_error(
@@ -248,7 +248,7 @@ lean_object* lean_torch_dist_get_world_size() {
  * Check if distributed is initialized.
  */
 lean_object* lean_torch_dist_is_initialized() {
-  return tyr::checkedIoCall("lean_torch_dist_is_initialized", [&] {
+  return tyr::ioCall("lean_torch_dist_is_initialized", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
       return lean_io_result_mk_ok(lean_box(g_initialized ? 1 : 0));
   });
@@ -258,7 +258,7 @@ lean_object* lean_torch_dist_is_initialized() {
  * Destroy the process group and clean up resources.
  */
 lean_object* lean_torch_dist_destroy_process_group() {
-  return tyr::checkedIoCall("lean_torch_dist_destroy_process_group", [&] {
+  return tyr::ioCall("lean_torch_dist_destroy_process_group", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
       // Attempt every wait, including after an earlier failure. Always release
       // residual state, even when initialization never reached its commit point.
@@ -285,7 +285,7 @@ lean_object* lean_torch_dist_destroy_process_group() {
  * Barrier - synchronize all processes.
  */
 lean_object* lean_torch_dist_barrier() {
-  return tyr::checkedIoCall("lean_torch_dist_barrier", [&] {
+  return tyr::ioCall("lean_torch_dist_barrier", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       if (!g_initialized) {
@@ -316,7 +316,7 @@ lean_object* lean_torch_dist_all_reduce(
     b_lean_obj_arg tensor,
     uint8_t op,
     uint8_t async_op) {
-  return tyr::checkedIoCall("lean_torch_dist_all_reduce", [&] {
+  return tyr::ioCall("lean_torch_dist_all_reduce", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       if (!g_initialized) {
@@ -358,7 +358,7 @@ lean_object* lean_torch_dist_all_reduce(
 lean_object* lean_torch_dist_broadcast(
     b_lean_obj_arg tensor,
     b_lean_obj_arg src_rank_obj) {
-  return tyr::checkedIoCall("lean_torch_dist_broadcast", [&] {
+  return tyr::ioCall("lean_torch_dist_broadcast", [&] {
   const uint64_t src_rank = tyr::natTo<int>(src_rank_obj, "src_rank");
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
@@ -402,7 +402,7 @@ lean_object* lean_torch_dist_reduce_scatter_tensor(
     b_lean_obj_arg input,
     uint8_t op,
     uint8_t async_op) {
-  return tyr::checkedIoCall("lean_torch_dist_reduce_scatter_tensor", [&] {
+  return tyr::ioCall("lean_torch_dist_reduce_scatter_tensor", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       if (!g_initialized) {
@@ -462,7 +462,7 @@ lean_object* lean_torch_dist_reduce_scatter_list(
     b_lean_obj_arg output,
     b_lean_obj_arg inputs,
     uint8_t op) {
-  return tyr::checkedIoCall("lean_torch_dist_reduce_scatter_list", [&] {
+  return tyr::ioCall("lean_torch_dist_reduce_scatter_list", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       if (!g_initialized) {
@@ -517,7 +517,7 @@ lean_object* lean_torch_dist_all_gather_into_tensor(
     b_lean_obj_arg output,
     b_lean_obj_arg input,
     uint8_t async_op) {
-  return tyr::checkedIoCall("lean_torch_dist_all_gather_into_tensor", [&] {
+  return tyr::ioCall("lean_torch_dist_all_gather_into_tensor", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       if (!g_initialized) {
@@ -570,7 +570,7 @@ lean_object* lean_torch_dist_all_gather_into_tensor(
 lean_object* lean_torch_dist_all_gather_list(
     b_lean_obj_arg outputs,
     b_lean_obj_arg input) {
-  return tyr::checkedIoCall("lean_torch_dist_all_gather_list", [&] {
+  return tyr::ioCall("lean_torch_dist_all_gather_list", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       if (!g_initialized) {
@@ -616,7 +616,7 @@ lean_object* lean_torch_dist_all_gather_list(
  * @param work_id - Work ID returned from async operation
  */
 lean_object* lean_torch_dist_wait(uint64_t work_id) {
-  return tyr::checkedIoCall("lean_torch_dist_wait", [&] {
+  return tyr::ioCall("lean_torch_dist_wait", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       auto it = g_pending_work.find(work_id);
@@ -642,7 +642,7 @@ lean_object* lean_torch_dist_wait(uint64_t work_id) {
  * @return Bool - true if complete
  */
 lean_object* lean_torch_dist_is_completed(uint64_t work_id) {
-  return tyr::checkedIoCall("lean_torch_dist_is_completed", [&] {
+  return tyr::ioCall("lean_torch_dist_is_completed", [&] {
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       auto it = g_pending_work.find(work_id);

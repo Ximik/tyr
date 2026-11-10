@@ -8,7 +8,7 @@ native_dir=${TYR_NATIVE_LIB_DIR:-"$repo_root/cc/build"}
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/tyr-native-errors.XXXXXX")
 source "$repo_root/scripts/native_tensor_test_common.sh"
 trap native_test_cleanup EXIT
-if [[ ${TYR_CHECKED_BASELINE:-0} == 1 ]]; then
+if [[ ${TYR_TRY_BASELINE:-0} == 1 ]]; then
   native_cxx_flags+=(-DTYR_CHECKED_BASELINE)
 fi
 

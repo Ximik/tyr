@@ -21,7 +21,7 @@ def copyInto {s : Shape} {d : DType} {dstDevice srcDevice : Device}
 recognizing a dtype does not promise that a backend implements its conversion. -/
 def castDType? {σ : StaticSpec} (t : Tensor σ) (dtype : DType) :
     Except String (Tensor (σ.withDType dtype)) := do
-  let raw ← RawTensor.castDTypeChecked σ.shape t.raw dtype
+  let raw ← RawTensor.castDType? σ.shape t.raw dtype
   pure (Tensor.ofRaw! (σ := σ.withDType dtype) "castDType" raw)
 
 /-- Cast to a concrete dtype; use `castDType?` to handle conversion failures. -/
@@ -35,7 +35,7 @@ def castLike? {σ τ : StaticSpec} (reference : Tensor τ) (t : Tensor σ) :
     Except String (Tensor (σ.withDType τ.dtype)) := do
   let dtype := reference.raw.dtype
   let raw ← if t.raw.dtype == dtype then pure t.raw else
-    RawTensor.castDTypeChecked σ.shape t.raw dtype
+    RawTensor.castDType? σ.shape t.raw dtype
   pure (Tensor.ofRaw! (σ := σ.withDType τ.dtype) "castLike" raw)
 
 /-- Match the reference's native dtype; use `castLike?` for recoverable errors. -/
@@ -375,7 +375,7 @@ def stftFrames (n nFft hopLength : Nat) (center : Bool) : Nat :=
 def stft {n winLength : Nat} {dev : Device} (input : Tensor { shape := #[n], dtype := .Float32, device := dev }) (nFft hopLength : Nat)
     (window : Tensor { shape := #[winLength], dtype := .Float32, device := dev }) (center : Bool := true) (normalized : Bool := false) :
     IO (Tensor { shape := #[nFft / 2 + 1, stftFrames n nFft hopLength center, 2], dtype := .Float32, device := dev }) := do
-  let raw ← match RawTensor.stftChecked input.raw nFft hopLength winLength window.raw center normalized with
+  let raw ← match RawTensor.stft? input.raw nFft hopLength winLength window.raw center normalized with
     | .ok raw => pure raw
     | .error message => throw <| IO.userError s!"Tensor.stft: {message}"
   pure (Tensor.ofRaw! "stft" raw)
