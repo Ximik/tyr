@@ -54,6 +54,17 @@ def kvSharingValid (types : Array LayerType) (numLayers shared : Nat) : Bool :=
   shared == 0 || (shared < numLayers && (List.range shared).all fun j =>
     (List.range (numLayers - shared)).any fun s => types[s]? == types[numLayers - shared + j]?)
 
+/-- A full-attention layer size: the sliding-layer size, or a size of its own. -/
+inductive FullSize where
+  | same
+  | distinct (size : PosNat)
+  deriving Repr, Inhabited, BEq, DecidableEq
+
+/-- The size given the sliding-layer size. -/
+def FullSize.value (sliding : Nat) : FullSize → Nat
+  | .same => sliding
+  | .distinct size => size.val
+
 /-- Gemma 4 text model configuration. -/
 structure Gemma4Config where
   vocab_size : Nat := 262144
@@ -62,11 +73,12 @@ structure Gemma4Config where
   num_hidden_layers : Nat := 42
   num_attention_heads : Nat := 8
   num_key_value_heads : Nat := 2
-  num_global_key_value_heads : Nat := 0
+  /-- K/V heads of full-attention layers. -/
+  num_global_key_value_heads : FullSize := .same
   /-- Half the sliding-layer head dimension; those heads have `2 * half_head_dim` channels. -/
   half_head_dim : Nat := 128
-  /-- Half the full-layer head dimension; `0` means the same as `half_head_dim`. -/
-  global_half_head_dim : Nat := 256
+  /-- Half the full-layer head dimension. -/
+  global_half_head_dim : FullSize := .distinct 256
 
   sliding_window : Nat := 512
   sliding_rope_theta : Float := 10000.0
@@ -103,14 +115,13 @@ structure Gemma4Config where
   slidingKVHeadsDivide : num_key_value_heads ∣ num_attention_heads := by decide
   /-- Query heads are whole multiples of the full-layer K/V heads (`fullNumKVHeads`); checked when the config is built. -/
   fullKVHeadsDivide :
-    (if num_global_key_value_heads == 0 then num_key_value_heads else num_global_key_value_heads) ∣
-      num_attention_heads := by decide
+    num_global_key_value_heads.value num_key_value_heads ∣ num_attention_heads := by decide
   headsPos : 0 < num_attention_heads ∧ 0 < num_key_value_heads := by decide
   /-- Sliding-layer heads are nonempty; checked when the config is built. -/
   headDimPos : 0 < half_head_dim := by decide
   /-- Full layers rotate a nonzero prefix of each head; checked when the config is built. -/
   fullRotaryValid : 0 < half_full_rotary_dim ∧
-    half_full_rotary_dim ≤ (if global_half_head_dim == 0 then half_head_dim else global_half_head_dim) := by decide
+    half_full_rotary_dim ≤ global_half_head_dim.value half_head_dim := by decide
   /-- Sliding layers attend over a nonempty window; checked when the config is built. -/
   slidingWindowPos : 0 < sliding_window := by decide
   /-- One attention kind per layer, the last one full; checked when the config is built. -/
@@ -145,9 +156,9 @@ def gemma4_E4B : Gemma4Config :=
     num_hidden_layers := 42
     num_attention_heads := 8
     num_key_value_heads := 2
-    num_global_key_value_heads := 0
+    num_global_key_value_heads := .same
     half_head_dim := 128
-    global_half_head_dim := 256
+    global_half_head_dim := .distinct 256
     sliding_window := 512
     sliding_rope_theta := 10000.0
     full_rope_theta := 1000000.0
@@ -215,9 +226,9 @@ def gemma4_26B_A4B : Gemma4Config :=
     num_hidden_layers := 30
     num_attention_heads := 16
     num_key_value_heads := 8
-    num_global_key_value_heads := 2
+    num_global_key_value_heads := .distinct 2
     half_head_dim := 128
-    global_half_head_dim := 256
+    global_half_head_dim := .distinct 256
     sliding_window := 1024
     sliding_rope_theta := 10000.0
     full_rope_theta := 1000000.0
@@ -255,7 +266,7 @@ def gemma4_31B : Gemma4Config :=
     num_hidden_layers := 60
     num_attention_heads := 32
     num_key_value_heads := 16
-    num_global_key_value_heads := 4
+    num_global_key_value_heads := .distinct 4
     enable_moe_block := false
     num_experts := 0
     top_k_experts := 0
@@ -285,7 +296,7 @@ def gemma4_31B : Gemma4Config :=
 def head_dim (cfg : Gemma4Config) : Nat := 2 * cfg.half_head_dim
 
 def fullHalfHeadDim (cfg : Gemma4Config) : Nat :=
-  if cfg.global_half_head_dim == 0 then cfg.half_head_dim else cfg.global_half_head_dim
+  cfg.global_half_head_dim.value cfg.half_head_dim
 
 def fullHeadDim (cfg : Gemma4Config) : Nat :=
   2 * fullHalfHeadDim cfg
@@ -294,7 +305,7 @@ def maxHeadDim (cfg : Gemma4Config) : Nat :=
   if cfg.head_dim >= fullHeadDim cfg then cfg.head_dim else fullHeadDim cfg
 
 def fullNumKVHeads (cfg : Gemma4Config) : Nat :=
-  if cfg.num_global_key_value_heads == 0 then cfg.num_key_value_heads else cfg.num_global_key_value_heads
+  cfg.num_global_key_value_heads.value cfg.num_key_value_heads
 
 def maxKVHeads (cfg : Gemma4Config) : Nat :=
   if cfg.num_key_value_heads >= fullNumKVHeads cfg then cfg.num_key_value_heads else fullNumKVHeads cfg
@@ -336,20 +347,19 @@ def layerIntermediateSize (cfg : Gemma4Config) (layerIdx : Nat) : Nat :=
   else
     cfg.intermediate_size
 
-def sharedSourceLayer? (cfg : Gemma4Config) (layerIdx : Nat) : Option Nat :=
+theorem firstKVSharedLayer_le (cfg : Gemma4Config) : firstKVSharedLayer cfg ≤ cfg.num_hidden_layers := by
+  unfold firstKVSharedLayer; split <;> omega
+
+def sharedSourceLayer? (cfg : Gemma4Config) (layerIdx : Nat) : Option (Fin cfg.num_hidden_layers) :=
   if !(isKVSharedLayer cfg layerIdx) then
     none
   else
     Id.run do
       let target := layerTypeAt cfg layerIdx
-      let first := firstKVSharedLayer cfg
-      if first == 0 then
-        return none
-      let mut src : Option Nat := none
-      for i in [:first] do
-        let idx := i
-        if layerTypeAt cfg idx == target then
-          src := some idx
+      let mut src : Option (Fin cfg.num_hidden_layers) := none
+      for h : i in [:firstKVSharedLayer cfg] do
+        if layerTypeAt cfg i == target then
+          src := some ⟨i, Nat.lt_of_lt_of_le h.upper (firstKVSharedLayer_le cfg)⟩
       return src
 
 def isMoE (cfg : Gemma4Config) : Bool :=
@@ -409,7 +419,8 @@ def layerTypeAt (cfg : Config) (layerIdx : Nat) : LayerType := Gemma4Config.laye
 def firstKVSharedLayer (cfg : Config) : Nat := Gemma4Config.firstKVSharedLayer cfg
 def isKVSharedLayer (cfg : Config) (layerIdx : Nat) : Bool := Gemma4Config.isKVSharedLayer cfg layerIdx
 def layerIntermediateSize (cfg : Config) (layerIdx : Nat) : Nat := Gemma4Config.layerIntermediateSize cfg layerIdx
-def sharedSourceLayer? (cfg : Config) (layerIdx : Nat) : Option Nat := Gemma4Config.sharedSourceLayer? cfg layerIdx
+def sharedSourceLayer? (cfg : Config) (layerIdx : Nat) : Option (Fin cfg.num_hidden_layers) :=
+  Gemma4Config.sharedSourceLayer? cfg layerIdx
 def isMoE (cfg : Config) : Bool := Gemma4Config.isMoE cfg
 def hasPerLayerInput (cfg : Config) : Bool := Gemma4Config.hasPerLayerInput cfg
 
