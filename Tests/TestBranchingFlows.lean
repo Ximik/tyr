@@ -14,7 +14,7 @@ import LeanTest
 open torch
 open torch.branching
 open torch.DiffEq
-open Tyr.AD
+open Tyr.Manifolds
 
 private def clamp01 (x : Float) : Float :=
   max 0.0 (min x 1.0)

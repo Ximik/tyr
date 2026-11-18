@@ -5,7 +5,7 @@
 -/
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -110,4 +110,4 @@ instance stiefelManifold (n p : Nat) : DifferentiableManifold (Stiefel n p d dev
     let (Q, _R) := Tensor.qrReduced (Tensor.add X.matrix Z.vec) X.tall
     ⟨Q, X.tall⟩
 
-end Tyr.AD
+end Tyr.Manifolds

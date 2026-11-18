@@ -13,8 +13,8 @@ import Tyr.Optim.ManifoldMuon
 namespace Tests.ManifoldMuon
 
 open LeanTest
-open Tyr.AD
-open Tyr.AD.DifferentiableManifold
+open Tyr.Manifolds
+open Tyr.Manifolds.DifferentiableManifold
 open torch
 open torch.Optim.ManifoldMuon
 

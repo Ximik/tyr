@@ -5,7 +5,7 @@
 -/
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -120,4 +120,4 @@ instance hyperbolicManifold (n : Nat) : DifferentiableManifold (Hyperbolic n d d
   retract X V :=
     Hyperbolic.normalize n (Tensor.add X.coords V.vec)
 
-end Tyr.AD
+end Tyr.Manifolds

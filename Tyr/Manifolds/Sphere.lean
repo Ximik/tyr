@@ -1,6 +1,6 @@
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -80,4 +80,4 @@ instance sphereManifold (n : Nat) : DifferentiableManifold (Sphere n d dev) wher
   retract x v :=
     Sphere.project n (Tensor.add x.coords v.vec)
 
-end Tyr.AD
+end Tyr.Manifolds

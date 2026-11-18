@@ -11,7 +11,7 @@ namespace Tests.AdditionalManifolds
 
 open LeanTest
 open torch
-open Tyr.AD
+open Tyr.Manifolds
 
 @[test]
 def testSphereProjectionKeepsUnitNorm : IO Unit := do

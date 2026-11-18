@@ -42,7 +42,7 @@ def testLinearRiemannianMSEStepProducesFiniteDiagnostics : IO Unit := do
 
 @[test]
 def testManifoldLinearRiemannianStepPreservesStiefelConstraint : IO Unit := do
-  let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 4 6 false
+  let layer ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 4 6 false
   let x ← Tensor.randn #[4]
   let target ← Tensor.randn #[6]
   let result ← torch.Optim.RiemannianSGD.stepMSE layer x target 0.02

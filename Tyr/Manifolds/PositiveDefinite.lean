@@ -1,6 +1,6 @@
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -68,4 +68,4 @@ instance spdManifold (n : Nat) [DType.RealFloating d] :
     let lx := Tensor.matrixLog! x.matrix
     SymmetricPositiveDefinite.project n (Tensor.add lx v.vec)
 
-end Tyr.AD
+end Tyr.Manifolds

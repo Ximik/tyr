@@ -13,7 +13,7 @@ import Tyr.Manifolds.Orthogonal
 import Tyr.Manifolds.Grassmann
 import Tyr.Manifolds.Hyperbolic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -178,4 +178,4 @@ instance hyperbolicDualMapGeometry [DType.ConstantSupported d dev] (n : Nat) : D
     let projected := HyperbolicTangent.project x metric
     { vec := normalizeVectorL2 projected.vec }
 
-end Tyr.AD
+end Tyr.Manifolds

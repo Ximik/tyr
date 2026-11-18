@@ -10,7 +10,7 @@ open Tyr.Modular
 
 @[test]
 def testStiefelLinearConstraintAfterUpdate : IO Unit := do
-  let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 8 16 true
+  let layer ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 8 16 true
   let gW ← Tensor.randn #[16, 8] false
   let gB ← Tensor.randn #[16] false
   let layer' ← ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
@@ -23,7 +23,7 @@ def testStiefelLinearConstraintAfterUpdate : IO Unit := do
 
 @[test]
 def testStiefelLinearWeightIsTrainableLeaf : IO Unit := do
-  let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 8 16 true
+  let layer ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 8 16 true
   let w0 := layer.weight.matrix
   LeanTest.assertTrue (Tensor.requiresGrad w0)
     "Expected manifold-linear weight to require gradients after init"
@@ -41,7 +41,7 @@ def testStiefelLinearWeightIsTrainableLeaf : IO Unit := do
 
 @[test]
 def testGrassmannLinearConstraintAfterUpdate : IO Unit := do
-  let layer ← ManifoldLinear.init (M := Tyr.AD.Grassmann) 6 12 true
+  let layer ← ManifoldLinear.init (M := Tyr.Manifolds.Grassmann) 6 12 true
   let gW ← Tensor.randn #[12, 6] false
   let gB ← Tensor.randn #[12] false
   let layer' ← ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
@@ -70,8 +70,8 @@ def testOrthogonalLinearConstraintAfterUpdate : IO Unit := do
 
 @[test]
 def testModularBudgetBridgeProducesFiniteMultiplier : IO Unit := do
-  let l1 ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 8 16 false
-  let l2 ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 16 16 false
+  let l1 ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 8 16 false
+  let l2 ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 16 16 false
   let modules : Array (StiefelLinear 8 16 × StiefelLinear 16 16) := #[(l1, l2)]
 
   let merged : Array (Sequential (StiefelLinear 8 16) (StiefelLinear 16 16)) :=
@@ -91,7 +91,7 @@ def testModularBudgetBridgeProducesFiniteMultiplier : IO Unit := do
 
 @[test]
 def testManifoldLinearBenchmarkPositive : IO Unit := do
-  let mut layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 32 64 false
+  let mut layer ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 32 64 false
   let t0 ← IO.monoNanosNow
   for _ in [:3] do
     let gW ← Tensor.randn #[64, 32] false
@@ -103,7 +103,7 @@ def testManifoldLinearBenchmarkPositive : IO Unit := do
 
 @[test]
 def testHyperbolicVectorConstraintAfterUpdate : IO Unit := do
-  let p0 ← ManifoldVectorParam.init (V := Tyr.AD.Hyperbolic) 6
+  let p0 ← ManifoldVectorParam.init (V := Tyr.Manifolds.Hyperbolic) 6
   let v0 := p0.value.coords
   LeanTest.assertTrue (Tensor.requiresGrad v0)
     "Expected hyperbolic manifold vector to require gradients after init"
@@ -117,13 +117,13 @@ def testHyperbolicVectorConstraintAfterUpdate : IO Unit := do
     "Expected hyperbolic manifold vector to require gradients after update"
   LeanTest.assertTrue (Tensor.isLeaf coords)
     "Expected hyperbolic manifold vector to remain a leaf tensor after update"
-  let inner := Tyr.AD.Hyperbolic.minkowskiInner coords coords
+  let inner := Tyr.Manifolds.Hyperbolic.minkowskiInner coords coords
   LeanTest.assertTrue (Float.abs (inner + 1.0) < 1e-4)
     s!"HyperbolicVector should preserve <x,x>_L = -1 after update, got {inner}"
 
 @[test]
 def testHyperbolicVectorBenchmarkPositive : IO Unit := do
-  let mut p ← ManifoldVectorParam.init (V := Tyr.AD.Hyperbolic) 8
+  let mut p ← ManifoldVectorParam.init (V := Tyr.Manifolds.Hyperbolic) 8
   let t0 ← IO.monoNanosNow
   for _ in [:3] do
     let g ← Tensor.randn #[9] false
@@ -135,8 +135,8 @@ def testHyperbolicVectorBenchmarkPositive : IO Unit := do
 
 @[test]
 def testManifoldUpdatableSequentialComposes : IO Unit := do
-  let l1 ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 8 16 true
-  let l2 ← ManifoldLinear.init (M := Tyr.AD.Grassmann) 16 16 true
+  let l1 ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 8 16 true
+  let l2 ← ManifoldLinear.init (M := Tyr.Manifolds.Grassmann) 16 16 true
   let net : Sequential (StiefelLinear 8 16) (GrassmannLinear 16 16) := Sequential.mk' l1 l2
 
   let g1w ← Tensor.randn #[16, 8] false
@@ -159,8 +159,8 @@ def testManifoldUpdatableSequentialComposes : IO Unit := do
 
 @[test]
 def testManifoldUpdatablePairComposes : IO Unit := do
-  let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 6 10 false
-  let vec ← ManifoldVectorParam.init (V := Tyr.AD.Hyperbolic) 5
+  let layer ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 6 10 false
+  let vec ← ManifoldVectorParam.init (V := Tyr.Manifolds.Hyperbolic) 5
   let params : StiefelLinear 6 10 × HyperbolicVector 5 := (layer, vec)
 
   let gw ← Tensor.randn #[10, 6] false
@@ -175,7 +175,7 @@ def testManifoldUpdatablePairComposes : IO Unit := do
     "Pair ManifoldUpdatable step should preserve Stiefel constraint for matrix component"
 
   let hv := params'.2.value.coords
-  let inner := Tyr.AD.Hyperbolic.minkowskiInner hv hv
+  let inner := Tyr.Manifolds.Hyperbolic.minkowskiInner hv hv
   LeanTest.assertTrue (Float.abs (inner + 1.0) < 1e-4)
     s!"Pair ManifoldUpdatable step should preserve hyperbolic constraint, got {inner}"
 

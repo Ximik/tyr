@@ -1,6 +1,6 @@
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -75,4 +75,4 @@ instance obliqueManifold (m n : Nat) : DifferentiableManifold (Oblique m n d dev
   retract x v :=
     Oblique.project m n (Tensor.add x.matrix v.vec)
 
-end Tyr.AD
+end Tyr.Manifolds

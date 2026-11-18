@@ -1,6 +1,6 @@
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -70,4 +70,4 @@ instance positiveManifold (m n : Nat) : DifferentiableManifold (Positive m n d d
       simpa using Tensor.div quad (Tensor.addScalar denom 1e-12)
     Positive.project m n (Tensor.add (Tensor.add x.matrix v.vec) second)
 
-end Tyr.AD
+end Tyr.Manifolds

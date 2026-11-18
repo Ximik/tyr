@@ -123,7 +123,7 @@ def testStepMatrixSingleStiefelConstraint : IO Unit := do
 def testStepMatrixSingleGrassmannConstraint : IO Unit := do
   let pRaw ← Tensor.randn #[9, 3]
   let p ← Tensor.setRequiresGrad
-    (Tensor.detach (Tyr.AD.Grassmann.project 9 3 pRaw).matrix) true
+    (Tensor.detach (Tyr.Manifolds.Grassmann.project 9 3 pRaw).matrix) true
   let g ← Tensor.randn #[9, 3]
 
   let cfg : Config := {
@@ -146,7 +146,7 @@ def testStepMatrixSingleGrassmannConstraint : IO Unit := do
 def testStepMatrixSingleOrthogonalSquareConstraint : IO Unit := do
   let pRaw ← Tensor.randn #[6, 6]
   let p ← Tensor.setRequiresGrad
-    (Tensor.detach (Tyr.AD.Orthogonal.project 6 pRaw).matrix) true
+    (Tensor.detach (Tyr.Manifolds.Orthogonal.project 6 pRaw).matrix) true
   let g ← Tensor.randn #[6, 6]
 
   let cfg : Config := {
@@ -169,7 +169,7 @@ def testStepMatrixSingleOrthogonalSquareConstraint : IO Unit := do
 def testStepMatrixSingleOrthogonalNonSquareFails : IO Unit := do
   let pRaw ← Tensor.randn #[8, 4]
   let p ← Tensor.setRequiresGrad
-    (Tensor.detach (Tyr.AD.Stiefel.project 8 4 pRaw).matrix) true
+    (Tensor.detach (Tyr.Manifolds.Stiefel.project 8 4 pRaw).matrix) true
   let g ← Tensor.randn #[8, 4]
 
   let cfg : Config := {
@@ -198,9 +198,9 @@ def testMatrixBackendOpsComposable : IO Unit := do
   let p0Raw ← Tensor.randn #[12, 4]
   let p1Raw ← Tensor.randn #[12, 4]
   let p0 ← Tensor.setRequiresGrad
-    (Tensor.detach (Tyr.AD.Grassmann.project 12 4 p0Raw).matrix) true
+    (Tensor.detach (Tyr.Manifolds.Grassmann.project 12 4 p0Raw).matrix) true
   let p1 ← Tensor.setRequiresGrad
-    (Tensor.detach (Tyr.AD.Grassmann.project 12 4 p1Raw).matrix) true
+    (Tensor.detach (Tyr.Manifolds.Grassmann.project 12 4 p1Raw).matrix) true
   let g0 ← Tensor.randn #[12, 4]
   let g1 ← Tensor.randn #[12, 4]
 
@@ -218,7 +218,7 @@ def testMatrixBackendOpsBenchmarkPositive : IO Unit := do
     matrixManifold := .grassmann
     matrixLr := 0.01
   }
-  let mut p := (Tyr.AD.Grassmann.project 20 6 (← Tensor.randn #[20, 6])).matrix
+  let mut p := (Tyr.Manifolds.Grassmann.project 20 6 (← Tensor.randn #[20, 6])).matrix
   p ← Tensor.parameter p
   let mut st := initMatrixParamState cfg p
 

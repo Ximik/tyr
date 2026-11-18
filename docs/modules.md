@@ -295,11 +295,11 @@ import Tyr.Manifolds
 open torch Tyr.Modular
 
 def manifoldStepExample : IO Unit := do
-  let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 8 16 true
+  let layer ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 8 16 true
   let gW ← Tensor.randn #[16, 8] false
   let gB ← Tensor.randn #[16] false
   let layer' := ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
-  let w := MatrixManifoldCarrier.toMatrix (M := Tyr.AD.Stiefel) layer'.weight
+  let w := MatrixManifoldCarrier.toMatrix (M := Tyr.Manifolds.Stiefel) layer'.weight
   let wtW := Tensor.mm (Tensor.transpose2d w) w
   IO.println s!"Gram shape: {wtW.runtimeShape}" -- #[8, 8], approximately identity
 ```
