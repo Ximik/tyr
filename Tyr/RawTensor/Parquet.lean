@@ -1,4 +1,4 @@
-namespace torch.Data.Pretraining
+namespace torch.Data.Parquet
 
 /-! ## Parquet FFI Declarations
 
@@ -54,4 +54,4 @@ opaque readParquetAsJson (filePath : @& String) : IO (Array String)
 @[extern "lean_parquet_read_row_group_as_json"]
 opaque readRowGroupAsJson (filePath : @& String) (rowGroupIdx : @& Nat) : IO (Array String)
 
-end torch.Data.Pretraining
+end torch.Data.Parquet

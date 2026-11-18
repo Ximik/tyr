@@ -22,7 +22,7 @@ unrelated roots:
 - `tokenizer` (global, no `Tyr` prefix) — the BPE stack in `Tyr/Tokenizer/`.
   Umbrella import: `import Tyr.Tokenizer` (re-exports all 13 submodules).
 - `torch.DataLoader` (`Tyr/DataLoader.lean`) and `torch.Data.*`
-  (`Tyr/Data/{Task,TaskClass,Tasks,Pretraining,Download,HuggingFace}.lean`).
+  (`Tyr/Data/{Task,TaskClass,Tasks,Download,HuggingFace}.lean`).
   Umbrella `import Tyr.Data` re-exports all of them.
 - `Tyr.Text` (`Tyr/Text/`) — streaming-ASR utilities; no umbrella module and
   not re-exported by `import Tyr`.
@@ -140,16 +140,11 @@ It lives in `Examples.GPT.GPTDataLoader`, alongside `BatchIterator.nextGPT`
 and the distributed GPT batching and scheduling helpers. These GPT helpers
 retain both the input and target dimensions and their Int64 dtype.
 
-### Parquet pretraining loaders
+### Parquet
 
-`torch.Data.Pretraining` (`Tyr/Data/Pretraining.lean`) binds Apache Arrow
-through `@[extern]` declarations in `Tyr/RawTensor/Parquet.lean`, implemented in `cc/src/tyr_parquet.cpp`: `listParquetFiles`, `getParquetMetadata`,
-`readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson`
-(`Pretraining.lean:48-74`). On top sit `RowGroupIterator` (rank-strided row
-groups, `:189`), a `TokenBuffer` ring, and `StreamingLoaderState` (`:405`),
-which tokenizes documents into windows with approximate resume via `LoaderState`
-checkpoints. `lossToBPB` (`:368`) converts validation loss to bits-per-byte
-using a `TokenBytes` table.
+`torch.Data.Parquet` (`Tyr/RawTensor/Parquet.lean`) binds Apache Arrow
+through `@[extern]` declarations implemented in `cc/src/tyr_parquet.cpp`: `listParquetFiles`, `getParquetMetadata`,
+`readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson`.
 
 `torch.Data.Download` shells out to `curl`/`unzip` with retry/backoff
 (`downloadWithRetry`, `Tyr/Data/Download.lean:60`) and resolves HF parquet
@@ -259,14 +254,11 @@ one-token shift — the nanochat midtraining data flow.
 | `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }` batches | `Examples/GPT/GPTDataLoader.lean:118,159,166` |
 | `loadShakespeareData` | `(trainPath valPath) (batchSize seqLen) : IO (Σ n, SequentialBatchIterator n .. × Option (Σ m, SequentialLoader m))` — one-shot Shakespeare setup | `Examples/GPT/GPTDataLoader.lean:188` |
 
-### Parquet / downloads — `torch.Data.Pretraining`, `torch.Data.Download`, `torch.Data.HuggingFace`
+### Parquet / downloads — `torch.Data.Parquet`, `torch.Data.Download`, `torch.Data.HuggingFace`
 
 | API | Signature | Location |
 | --- | --- | --- |
 | `listParquetFiles`, `getParquetMetadata`, `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson` | `@[extern]` opaque IO functions | `Tyr/RawTensor/Parquet.lean` |
-| `RowGroupIterator.init` / `.next` | `(dataPath) (rank worldSize : UInt64) (log := {})` / `IO (Option RowGroupData × _)` | `Pretraining.lean:189,229` |
-| `StreamingLoaderState.init` / `.nextBatch` / `.getCheckpoint` / `.resume` | streaming windows with resume | `Pretraining.lean:419,496,534,538` |
-| `lossToBPB` | `(loss : Float) (numTokens numBytes : Nat) : Float` | `Pretraining.lean:368` |
 | `downloadWithRetry` | `(url dest : String) (maxRetries := 5) (initialBackoffMs := 1000) (log := {}) : IO Bool` | `Tyr/Data/Download.lean:60` |
 | `ensureHFParquet` | `(repoId subset split : String) (cacheDir ..) : IO String` | `Download.lean:187` |
 | `loadARC` / `loadGSM8K` / `loadMMLU` / `loadSmolTalk` | `... : IO (Array Lean.Json)` | `Tyr/Data/HuggingFace.lean:59,67,75,167` |
@@ -385,10 +377,6 @@ Behavior verified against source that the module docs do not advertise:
 
 - `trainBPE` never pretokenizes and ignores `TrainConfig.{maxChars, docCap,
   splitPattern, seed}` (`Tyr/Tokenizer/Training.lean:211-278`).
-- `PretrainingLoader.nextBatch` / `ValidationLoader.nextBatch` are incomplete
-  (the refill path returns `none`), and `tokenizeDocuments` is a byte-level
-  placeholder (`Tyr/Data/Pretraining.lean:298-356,445`); the NanoChat pipeline
-  drives the parquet FFI declarations directly.
 - `allSpecialTokens` mixes control tokens with ordinary words ("theorem",
   "def", Greek letters); via `encodeWithSpecials` these match atomically
   anywhere in text (`Tyr/Tokenizer/SpecialTokens.lean:53-99`).

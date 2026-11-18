@@ -1,7 +1,7 @@
 import LeanTest
-import Tyr.Data.Pretraining
+import Tyr.RawTensor.Parquet
 
-open torch.Data.Pretraining
+open torch.Data.Parquet
 
 namespace Tests.TestParquetRecovery
 

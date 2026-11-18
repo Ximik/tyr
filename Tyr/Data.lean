@@ -1,7 +1,6 @@
 import Tyr.Data.Task
 import Tyr.Data.TaskClass
 import Tyr.Data.Tasks
-import Tyr.Data.Pretraining
 import Tyr.Data.Download
 import Tyr.Data.HuggingFace
 
@@ -16,7 +15,6 @@ It re-exports task abstractions, task registries, and pretraining pipeline utili
 - `Tyr.Data.Task`: core task abstractions.
 - `Tyr.Data.TaskClass`: shared task typing/evaluation contracts.
 - `Tyr.Data.Tasks`: concrete built-in tasks.
-- `Tyr.Data.Pretraining`: streaming pretraining data support.
 - `Tyr.Data.Download`: download utilities with retry and caching.
 - `Tyr.Data.HuggingFace`: HuggingFace dataset loading via parquet FFI.
 
