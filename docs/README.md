@@ -25,8 +25,7 @@ Two kinds of documentation exist:
   [GPU kernels & ops](gpu/kernels.md) → [FFI & build system](ffi-and-build.md).
 - **Training at scale:** [Data pipeline](data.md) → [Autodiff](autodiff.md) →
   [Distributed & orchestration](distributed.md).
-- **Scientific computing:** [DiffEq](diffeq.md) →
-  [Event-skeleton simulation](event-skeleton.md) → [MCTS](mctx.md).
+- **Scientific computing:** [DiffEq](diffeq.md) → [MCTS](mctx.md).
 
 ## Contents
 
@@ -84,8 +83,6 @@ Two kinds of documentation exist:
 
 - [DiffEq](diffeq.md) — ODE/SDE solvers, adjoints, Brownian paths,
   interpolation, root finding, events.
-- [Event-skeleton simulation](event-skeleton.md) — hybrid event-driven
-  dynamics: saltation, marks, branching, contact physics, manipulators, URDF.
 - [MCTS](mctx.md) — Monte Carlo tree search (`Tyr/Mctx`) and the DAG variant
   (`Tyr/MctxDag`), including the AlphaGrad bridge.
 

@@ -23,12 +23,5 @@ run_built() {
 run ./scripts/launch/run_shape_safety.sh
 run_built BranchingFlowsContinuousTrain
 
-if [[ -x .lake/build/bin/RunVanDerPolLeanPlot ]]; then
-  run_built RunVanDerPolLeanPlot
-else
-  echo
-  echo "SKIP: RunVanDerPolLeanPlot belongs to the optional Event Skeleton branch."
-fi
-
 echo
 echo "Local showcase complete. GPU and model-weight demos are intentionally separate."

@@ -14,7 +14,6 @@ import LeanTest
 open torch
 open torch.branching
 open torch.DiffEq
-open Tyr.EventSkeleton
 open Tyr.AD
 
 private def clamp01 (x : Float) : Float :=
@@ -1015,38 +1014,6 @@ def testMoleculeTransformerCoordTargetCapAppliesInTrainingAndInference : IO Unit
     s!"Inference should use the same signed cap as training, got {reprStr target}"
 
 @[test]
-def testBranchingSegmentsProjectToEventSkeleton : IO Unit := do
-  let seg : Segment Float := {
-    Xt := 0.5
-    t := 0.75
-    anchor := 1.0
-    descendants := 3
-    del := false
-    branchable := true
-    flowable := true
-    group := 0
-    lastCoalescence := 0.25
-    id := 11
-  }
-  let interval := Segment.toAcceptedStepSegment 0 0 seg
-  LeanTest.assertTrue (Float.abs (interval.tStart - 0.25) < 1.0e-12)
-    s!"Projected interval should start at last coalescence, got {interval.tStart}"
-  LeanTest.assertTrue (Float.abs (interval.tAfter - 0.75) < 1.0e-12)
-    s!"Projected interval should end at the segment time, got {interval.tAfter}"
-  LeanTest.assertTrue interval.crossedJumpFlag
-    "Segments with multiple descendants should mark a branch crossing"
-
-  let graph := graphFromBranchingSegments #[seg]
-  LeanTest.assertEqual graph.vertices.size 2
-    "One interval plus one branch vertex should be projected"
-  LeanTest.assertTrue (graph.containsMoveKind .intervalAdjoint)
-    "Projected graph should include interval adjoint work"
-  LeanTest.assertTrue (graph.containsMoveKind .checkpointBoundary)
-    "Projected graph should include checkpoint boundaries by default"
-  LeanTest.assertTrue (graph.containsMoveKind .branchAggregate)
-    "Projected graph should include branch aggregation for descendant-count segments"
-
-@[test]
 def testReconstructLineageAssignsStableParentChildIds : IO Unit := do
   let split0 : BranchingStepEvent := {
     sourceIndex := 0
@@ -1128,37 +1095,6 @@ def testMoleculeTrajectoryJsonlRejectsNonfiniteCoordinates : IO Unit := do
     | .ok _ => false
   LeanTest.assertTrue rejected
     "Trajectory JSONL must reject NaN/Inf coordinates rather than emitting invalid JSON"
-
-@[test]
-def testBranchingStepEventsProjectToEventSkeleton : IO Unit := do
-  let event : BranchingStepEvent := {
-    sourceIndex := 0
-    sourceId := 21
-    group := 0
-    splitCount := 2
-    deleted := false
-    t0 := 0.0
-    t1 := 0.5
-  }
-  let graph := graphFromBranchingStepEvents #[event]
-  LeanTest.assertTrue (graph.containsMoveKind .intervalAdjoint)
-    "Step-event graph should include interval adjoint work"
-  LeanTest.assertTrue (graph.containsMoveKind .checkpointBoundary)
-    "Step-event graph should include checkpoint boundaries by default"
-  LeanTest.assertTrue (graph.containsMoveKind .branchAggregate)
-    "Step-event graph should include branch aggregation for split events"
-
-  let generated : BranchingGenerateResult Nat := {
-    finalState := mkState #[1] #[0]
-    trajectory := #[mkState #[0] #[0], mkState #[0] #[0], mkState #[1] #[0]]
-    events := #[#[], #[event]]
-    times := #[0.0, 0.5, 1.0]
-  }
-  let generatedGraph := graphFromBranchingGenerateResult generated
-  LeanTest.assertTrue (generatedGraph.vertices.size >= 3)
-    s!"Generation graph should include a quiet interval plus split interval/branch vertices, got {generatedGraph.vertices.size}"
-  LeanTest.assertTrue (generatedGraph.containsMoveKind .branchAggregate)
-    "Generation graph should preserve branch aggregation moves"
 
 @[test]
 def testGeodesicInterpolateFloat : IO Unit := do

@@ -125,9 +125,7 @@ policies return `(i, i+1)`, so this only bites hand-written policies.
   parameterized by the future anchor; `ODEBridgeConfig` (`:107`) and `SDEBridgeConfig`
   (`:140`) are specialized abbrevs with `mk` constructors. `OUBridgeConfig` (`:199`) is an
   analytic scalar endpoint-conditioned Ornstein–Uhlenbeck bridge used for molecular
-  coordinates. The same file also projects branching results into the event-skeleton
-  vocabulary: `graphFromBranchingGenerateResult` (`:458`),
-  `graphsFromBranchingBridgeResult`, `summarizeBranchingBridgeResult`.
+  coordinates.
 
 ### Molecule instantiation (`Molecule.lean`, `QM9.lean`)
 
@@ -441,7 +439,6 @@ def fluxExample (qwenDir : String) (tokens : Tensor { shape := #[1, 512], dtype 
 - [optimization.md](../optimization.md) — `Optim.adamw` and optimizer state
 - [serialization.md](../serialization.md) — SafeTensors loading and checkpoint save/resume
 - [diffeq.md](../diffeq.md) — the solvers behind `DiffEqBridgeConfig`/`ODEBridgeConfig`/`SDEBridgeConfig`
-- [event-skeleton.md](../event-skeleton.md) — the interval-skeleton graphs branching results project into
 - [llms.md](llms.md) — the Qwen text encoder used for Flux conditioning
 - [examples-and-testing.md](../examples-and-testing.md) — the demo executables and `Tests/TestBranchingFlows.lean`
 

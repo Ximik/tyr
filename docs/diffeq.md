@@ -243,9 +243,7 @@ structure EventSpec (Y Args : Type) where
 Real-valued conditions are localized by bisection on the dense interpolation.
 `EventSpec.steadyState` builds a boolean "vector field norm below tolerance"
 event. `EventTree` / `EventMaskTree` plus `diffeqsolveEventTree` give
-diffrax-style pytree event masks. The read-only bridge
-`Tyr/DiffEq/EventSkeleton.lean` projects accepted `SolveLoopAttempt`s into
-`Tyr.EventSkeleton` interval segments — see [Event skeleton](event-skeleton.md).
+diffrax-style pytree event masks.
 
 ### Adjoints
 
@@ -399,9 +397,7 @@ def adjointExample : IO Unit := do
   | none => IO.println "adjoint solve failed"
 ```
 
-For a larger system, `Tyr/EventSkeleton/Examples/Pendulum.lean:1306-1350`
-integrates a custom record state (hand-written `DiffEqSpace` instances) with
-`RK4`; `Tyr/Model/BranchingFlows/DiffEq.lean` wraps `diffeqsolve` for
+`Tyr/Model/BranchingFlows/DiffEq.lean` wraps `diffeqsolve` for
 generative modeling; `Examples/GPU/RunRKFusedSolve.lean` is a fused CUDA bench.
 
 ## Related guides
@@ -410,7 +406,6 @@ generative modeling; `Examples/GPU/RunRKFusedSolve.lean` is a fused CUDA bench.
 - [Tensors](core/tensors.md) — `Tensor σ`, the indexed tensor state type
 - [TensorStruct](core/tensorstruct.md) — model-tree states for neural ODEs
 - [Typed tensors](core/typed.md) — `Tensor σ` states with static shape/dtype specs
-- [Event skeleton](event-skeleton.md) — the hybrid-systems representation the DiffEq bridge projects into
 - [Generative models](models/generative.md) — BranchingFlows, a downstream `diffeqsolve` consumer
 - [GPU kernels](gpu/kernels.md) — fused RK solve kernels
 - [Examples and testing](examples-and-testing.md) — the DiffEq parity test suites (`Tests/TestDiffEq*.lean`)

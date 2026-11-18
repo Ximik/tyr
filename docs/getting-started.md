@@ -77,9 +77,8 @@ fetches the variant named on the command line; `cuda` adds
 `external/wheels/nvidia`. `deps/lock_wheels.py`
 regenerates the wheel lock after a version bump.
 
-Lake-level requirements are declared in `lakefile.lean`: `LeanTest`,
-`LeanBenchmark`, and `LeanUrdfTypeProvider`, all pinned git revisions that Lake
-fetches automatically.
+Lake-level requirements are declared in `lakefile.lean`: `LeanTest` and
+`LeanBenchmark`, both pinned git revisions that Lake fetches automatically.
 
 ## Building
 

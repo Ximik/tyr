@@ -57,9 +57,6 @@ package tyr where
 require LeanTest from git "https://github.com/cpehle/lean_test.git" @ "b42cd3d78716e5a2de5b640ac82d7fe3f05f2a4c"
 require LeanBenchmark from git "https://github.com/cpehle/lean-benchmark.git" @
   "9ab68a2e976aef3791b5b5630be8f5f1e8f79fe9"
-require LeanUrdfTypeProvider from git
-  "https://github.com/ranvier-labs/lean-urdf-typeprovider.git" @
-  "5712c1fcdf4462d1e7a216f12159651381410149"
 
 /-! ## C++ Library Build -/
 
@@ -358,11 +355,6 @@ lean_exe RunRiemannianNanoGPT where
 /-- Diffusion training executable -/
 lean_exe TrainDiffusion where
   root := `Examples.TrainDiffusion
-  supportInterpreter := true
-
-/-- URDF-backed hybrid contact event-skeleton simulation demo. -/
-lean_exe RunUrdfContactExample where
-  root := `Examples.EventSkeleton.RunUrdfContactExample
   supportInterpreter := true
 
 /-- AlphaGrad-style RoeFlux_1d elimination planning port demo. -/

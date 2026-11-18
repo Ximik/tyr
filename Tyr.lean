@@ -1,6 +1,7 @@
 -- Core infrastructure
 import Tyr.Basic
 import Tyr.Log
+import Tyr.PRNG
 import Tyr.Torch
 import Tyr.Typed
 import Tyr.SafeTensors
@@ -13,9 +14,6 @@ import Tyr.MctxDag
 
 -- AutoGrad (JAX-style AD on IR)
 import Tyr.AD
-
--- Event-skeleton representation for hybrid/stochastic differentiation
-import Tyr.EventSkeleton
 
 -- Neural network modules
 import Tyr.Module
@@ -89,7 +87,6 @@ This root module re-exports the core, general-purpose surface area:
 - `Tyr.Mctx`: Monte Carlo tree search infrastructure.
 - `Tyr.MctxDag`: DAG-oriented counterpart to `Tyr.Mctx` with sharing semantics.
 - `Tyr.AutoGrad`: JAX-style automatic differentiation over Tyr IR.
-- `Tyr.EventSkeleton`: event-skeleton representation for hybrid/stochastic differentiation.
 - `Tyr.Module`: neural network module abstractions and layers.
 - `Tyr.Optim` (+ scheduler/dist variants): optimizers and learning-rate scheduling.
 - `Tyr.Distributed` and `Tyr.Sharding`: distributed training and partitioning utilities.
