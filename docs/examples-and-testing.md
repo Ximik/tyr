@@ -126,9 +126,6 @@ first two to abort (SIGABRT) with Tyr's report and the third to exit normally.
 - `Tests/fixtures/safetensors/` — `single.safetensors`, `sharded/`,
   `indexed.safetensors`, `indexed_dir/`, `provider_errors/` for the SafeTensors
   loader and type-provider tests (see [serialization.md](serialization.md)).
-- `Tests/MctxData/` — independent upstream MuZero/Gumbel references checked
-  against complete search statistics. The original large dumps are preserved
-  as historical data; see the [fixture guide](../Tests/MctxData/README.md).
 - GPU kernel examples compare against `.pt` fixtures produced by libtorch
   reference implementations; see `Examples/GPU/FixtureRunner.lean` below.
 
@@ -145,8 +142,7 @@ def main (args : List String) : IO UInt32 :=
   Examples.GPU.RunRMSNorm.main args
 ```
 
-The root module `Examples.lean` imports only library modules (GPT, NanoChat,
-AlphaGradPort) — executables are excluded by design because they define global
+The root module `Examples.lean` imports only library modules (GPT, NanoChat) — executables are excluded by design because they define global
 `main`.
 
 Shared infrastructure:
@@ -195,7 +191,6 @@ and is the authoritative source for running them.
 | `Examples/Diffusion/` | Masked discrete diffusion on ASCII text, checkpoint save/load, terminal animation | `TrainDiffusion` |
 | `Examples/NanoChat/` | Modded-nanogpt port: NorMuon + DistAdam training, SFT (`ChatSFT`), GRPO, tool-augmented generation, eval tasks | `TrainNanoChat` (torchrun-capable), `NanoChatPipeline`, `NanoChatChat` |
 | `Examples/BranchingFlows/` | Branching-flow generative models: toy demos, QM9 molecule training/generation (`qm9_xyz/` data) | `BranchingFlows{Continuous,Molecule,MoleculeTransformer}Train`, `BranchingFlowsMoleculeGenerate`, `BranchingFlowsMoleculeTrainGenerate` |
-| `Examples/AlphaGradPort/` | PDE flux tasks with MCTS-driven search (see [mctx.md](mctx.md)) | `AlphaGradRoeFlux1dA0`, `AlphaGradPortSweep`, `AlphaGradPolicyTrain`, `AlphaGradPolicySweep` |
 | `Examples/GPU/` | ThunderKittens-style kernel parity vs libtorch fixtures, H100 MHA, decode benchmarks, B200 GEMM | `RunCopy`, `RunRotary`, `RunLayerNorm`, `RunRMSNorm`, `RunFlashAttn{,3,Op,Bench}`, `RunMhaH100{,Decode,Train,Seq768}`, `RunDecodeBench`, `RunB200Bf16Gemm` |
 | `Examples/Flux/` | Flux Klein 4B image generation (text encode → diffusion → VAE decode) | `FluxDemo`, `FluxDebug` |
 | `Examples/Qwen35/`, `Qwen25Omni/`, `Gemma4/` | Pretrained HF-hub inference with a shared CLI (`--source`, `--prompt[-file]`, `--image`, `--video`, `--batch-size`, `--max-new-tokens`, `--stream`, `--device`, ...) | `Qwen35RunHF`, `Qwen25OmniRunHF`, `Gemma4RunHF` |
@@ -258,9 +253,8 @@ lake exe RunMhaH100 && lake exe RunMhaH100Seq768   # H100 MHA fixture checks
 
 ## What is covered vs uncovered
 
-The main suite (`Tests.lean`) is deepest in: autodiff
-(`TestAD*`, `TestAutoGrad`), differential equations (`TestDiffEq*` —
-`TestDiffEq.lean` alone is 3880 lines), Mctx (`TestMctx*`), GPU DSL/kernels/TileIR
+The main suite (`Tests.lean`) is deepest in: differential equations (`TestDiffEq*` —
+`TestDiffEq.lean` alone is 3880 lines), GPU DSL/kernels/TileIR
 (`TestGPUDSL`, `TestGPUKernels`, `TestGPUTileIR` — these also run standalone),
 model configs and pretrained-weight loading (Qwen3/3.5/3.6, Qwen2.5-Omni,
 Gemma-era FLM, KittenTTS, Qwen3TTS, Qwen3ASR, SileroVAD), the SafeTensors type
@@ -291,7 +285,7 @@ Caveats to be aware of when extending the suite:
 - [distributed.md](distributed.md) — torchrun-based NanoChat training
 - [models/llms.md](models/llms.md), [models/generative.md](models/generative.md), [models/audio-speech.md](models/audio-speech.md) — models exercised by the RunHF/ASR/TTS demos
 - [gpu/dsl-codegen.md](gpu/dsl-codegen.md), [gpu/kernels.md](gpu/kernels.md) — the GPU suites and kernel examples
-- [diffeq.md](diffeq.md), [mctx.md](mctx.md) — heavily tested subsystems
+- [diffeq.md](diffeq.md) — heavily tested subsystem
 - [ffi-and-build.md](ffi-and-build.md) — the C++ FFI layer probed by `ffi_crash_probe`
 
 This chapter is a guide, not a symbol dump: exhaustive API documentation is

@@ -31,8 +31,7 @@ import Tests.TestQwenTypedLoading
 import Tests.TestQwen3Model
 import Tests.TestSileroVAD
 import Tests.TestTypedStandalone
-import Tests.TestADFrontendSignature
-import Tests.TestADTensorStructFlatten
+import Tests.TestTensorStructFlatten
 import Tests.TestWidgetTyped
 import Tests.TestModuleTyped
 import Tests.TestGPTTyped
@@ -79,8 +78,7 @@ unsafe def main : IO UInt32 := do
     { module := `Tests.TestQwen3Model },
     { module := `Tests.TestSileroVAD },
     { module := `Tests.TestTypedStandalone },
-    { module := `Tests.TestADFrontendSignature },
-    { module := `Tests.TestADTensorStructFlatten },
+    { module := `Tests.TestTensorStructFlatten },
     { module := `Tests.TestWidgetTyped },
     { module := `Tests.TestModuleTyped },
     { module := `Tests.TestGPTTyped },

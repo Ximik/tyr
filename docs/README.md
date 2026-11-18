@@ -25,7 +25,7 @@ Two kinds of documentation exist:
   [GPU kernels & ops](gpu/kernels.md) → [FFI & build system](ffi-and-build.md).
 - **Training at scale:** [Data pipeline](data.md) → [Autodiff](autodiff.md) →
   [Distributed & orchestration](distributed.md).
-- **Scientific computing:** [DiffEq](diffeq.md) → [MCTS](mctx.md).
+- **Scientific computing:** [DiffEq](diffeq.md).
 
 ## Contents
 
@@ -50,8 +50,7 @@ Two kinds of documentation exist:
   HuggingFace Hub resolution, and training checkpoints.
 - [Data pipeline](data.md) — tokenizers, batch iterators (fixed-dim vs
   shape-erased), parquet/shard loading, task mixtures, streaming text.
-- [Autodiff](autodiff.md) — the three AD layers: `torch.autograd` FFI,
-  IR-level JVP/VJP in `Tyr/AutoGrad.lean`, and the `Tyr/AD` elimination stack.
+- [Autodiff](autodiff.md) — the `torch.autograd` FFI path.
 - [Modules](modules.md) — neural network layers, `deriving Model`, and the
   `Tyr/Modular` normed-module / LR-budget machinery.
 - [Optimization](optimization.md) — Optax-style `GradientTransformation`s,
@@ -83,8 +82,6 @@ Two kinds of documentation exist:
 
 - [DiffEq](diffeq.md) — ODE/SDE solvers, adjoints, Brownian paths,
   interpolation, root finding, events.
-- [MCTS](mctx.md) — Monte Carlo tree search (`Tyr/Mctx`) and the DAG variant
-  (`Tyr/MctxDag`), including the AlphaGrad bridge.
 
 ### Infrastructure
 

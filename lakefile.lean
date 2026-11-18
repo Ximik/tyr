@@ -266,10 +266,6 @@ lean_exe RunDistributedValues where
   root := `Tests.RunDistributedValues
   supportInterpreter := true
 
-/-- Native tensor-free MCTS search and allocation microbenchmarks. -/
-lean_exe mctx_bench where
-  root := `benchmarks.Mctx
-
 /-- Dopri5 per-step cost on a tensor state versus a `Float` state. -/
 lean_exe diffeq_glue_bench where
   root := `benchmarks.DiffEqGlue
@@ -355,26 +351,6 @@ lean_exe RunRiemannianNanoGPT where
 /-- Diffusion training executable -/
 lean_exe TrainDiffusion where
   root := `Examples.TrainDiffusion
-  supportInterpreter := true
-
-/-- AlphaGrad-style RoeFlux_1d elimination planning port demo. -/
-lean_exe AlphaGradRoeFlux1dA0 where
-  root := `Examples.AlphaGradPort.RoeFlux1dA0
-  supportInterpreter := true
-
-/-- AlphaGrad port task sweep runner (targets tasks one-by-one). -/
-lean_exe AlphaGradPortSweep where
-  root := `Examples.AlphaGradPort.TaskSweep
-  supportInterpreter := true
-
-/-- AlphaGrad policy-training runner with real parameter updates. -/
-lean_exe AlphaGradPolicyTrain where
-  root := `Examples.AlphaGradPort.PolicyTrainMain
-  supportInterpreter := true
-
-/-- AlphaGrad policy-training sweep runner across tasks and training modes. -/
-lean_exe AlphaGradPolicySweep where
-  root := `Examples.AlphaGradPort.PolicySweepMain
   supportInterpreter := true
 
 /-- NanoChat training executable (modded GPT + distributed) -/

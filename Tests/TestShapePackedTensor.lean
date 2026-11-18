@@ -1,4 +1,4 @@
-import Tyr.AD.TensorStructSchema
+import Tyr.TensorStruct.Schema
 import Tyr.Checkpoint
 import Tyr.Typed.Neural
 import Tyr.Model.KittenTTS.TypedOps

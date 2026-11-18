@@ -230,7 +230,7 @@ def applyMatrixBudgetFromModules [NormedModule M]
 
 ### Model structure with derived traversal
 
-Reconstructed example (from `Examples/AlphaGradPort/PolicyTrain.lean:113-134`):
+Example:
 
 ```lean
 import Tyr.Module

@@ -2,7 +2,7 @@ import Tyr.Module.Derive
 import Tyr.Typed.Ops
 import LeanTest
 
-namespace Tests.ADTensorStructFlatten
+namespace Tests.TensorStructFlatten
 
 open torch
 open LeanTest
@@ -268,4 +268,4 @@ def testTypedRebuildRejectsShapeDTypeAndRole : IO Unit := do
     (TensorLeafValue.ofTensor .frozen mixedParams.weight) "role"
   expectWeightRebuildError (TensorLeafValue.ofTensor .diff (Tensor.zeros #[3])) "shape"
 
-end Tests.ADTensorStructFlatten
+end Tests.TensorStructFlatten

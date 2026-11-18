@@ -2,13 +2,13 @@ import Lean
 import Tyr.TensorStruct
 
 /-!
-# Tyr.AD.TensorStructSchema
+# Tyr.TensorStruct.Schema
 
 Schema-oriented structural metadata for `TensorStruct` values.
 
 This layer is intentionally separate from `TensorStruct.map/fold`: it records
-stable leaf ordering, field/index paths, and AD participation roles, and it
-provides a schema-aware flatten/rebuild boundary for structured AD frontends.
+stable leaf ordering, field/index paths, and differentiation roles, and it
+provides a schema-aware flatten/rebuild boundary.
 -/
 
 namespace torch
@@ -51,7 +51,7 @@ private def shapeToString (s : Shape) : String :=
 private def shapeToNatArray (s : Shape) : Array Nat :=
   s
 
-/-- AD participation role for one structural leaf. -/
+/-- Differentiation role for one structural leaf. -/
 inductive TensorLeafRole where
   | diff
   | static
@@ -161,7 +161,7 @@ def summary [ToTensorStructSchema α] (x : α) : String :=
 end ToTensorStructSchema
 
 /--
-Schema-aware flatten/rebuild support for structured AD boundaries.
+Schema-aware flatten/rebuild support.
 
 `rebuildAt` uses an existing value as a structural template. This preserves
 static fields and dynamic container shape while replacing only the selected

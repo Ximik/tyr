@@ -2,7 +2,7 @@ import Tyr.Module.Derive
 import Tyr.Typed.Ops
 import LeanTest
 
-namespace Tests.ADTensorStructSchema
+namespace Tests.TensorStructSchema
 
 open torch
 open LeanTest
@@ -113,4 +113,4 @@ def testTensorStructSchemaIndexesArraysListsAndSkipsNone : IO Unit := do
   LeanTest.assertTrue ((schema.leaves.map (·.shape)) == expectedShapes)
     s!"Container element shapes should be preserved, got {reprStr (schema.leaves.map (·.shape))}"
 
-end Tests.ADTensorStructSchema
+end Tests.TensorStructSchema

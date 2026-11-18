@@ -103,7 +103,7 @@ jobs:
 
       - name: Build examples and FFI probe
         run: |
-          lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate mctx_bench ffi_crash_probe
+          lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate ffi_crash_probe
           lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
       - name: Check FFI crash reporting
@@ -134,7 +134,6 @@ jobs:
         run: |
           lake env python3 scripts/test_inventory.py --run --report output/ci/suites.json
           lake env python3 scripts/test_branching_checkpoint_resume.py
-          lake env ./.lake/build/bin/mctx_bench
 
       - name: Test two-rank Gloo collective values
         run: lake env python3 scripts/test_distributed_values.py --log-dir output/ci/distributed
