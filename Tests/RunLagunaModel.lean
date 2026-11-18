@@ -334,17 +334,19 @@ private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]
   let dSamePrefix ← maxAbsDiff (logitsP) (logitsUncachedPrefix)
   check (dSamePrefix == 0.0) s!"(a) [{lbl}] same-prefix prefill is exactly equal to uncached forward"
 
-  let mut cache := cacheP1
-  let mut dStep : Float := 0.0
-  for h : pos in [prefillLen : seq] do
-    let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice! ids 1 pos 1
-    let (hiddenStep, cache') ←
-      model.model.forwardStep cfg (model.embedTokens tok) tables pos h.upper cache
-    cache := cache'
-    let logitsStep : Tensor { shape := #[1, 1, cfg.vocab_size], device := device, dtype := dtype } := Tensor.linear3d hiddenStep model.lmHead
-    let logitsRef : Tensor { shape := #[1, 1, cfg.vocab_size], device := device, dtype := dtype } := Tensor.slice! logitsAll 1 pos 1
-    let d ← maxAbsDiff (logitsStep) (logitsRef)
-    if d > dStep then dStep := d
+  let rec decodeFrom (pos : Nat) (cache : LagunaCache (device := device) (dtype := dtype) cfg 1 20 pos)
+      (worst : Float) : IO Float := do
+    if h : pos < 20 then
+      let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice ids 1 pos 1
+      let (hiddenStep, cache') ← model.model.forwardStep cfg (model.embedTokens tok) tables cache h
+      let logitsStep : Tensor { shape := #[1, 1, cfg.vocab_size], device := device, dtype := dtype } := Tensor.linear3d hiddenStep model.lmHead
+      let logitsRef : Tensor { shape := #[1, 1, cfg.vocab_size], device := device, dtype := dtype } := Tensor.slice logitsAll 1 pos 1
+      let d ← maxAbsDiff (logitsStep) (logitsRef)
+      decodeFrom (pos + 1) cache' (max worst d)
+    else
+      pure worst
+  termination_by 20 - pos
+  let dStep ← decodeFrom prefillLen cacheP1 0.0
 
   let crossShapeStatus := if bf16Diagnostic then "diagnostic" else s!"tol={tol}"
   IO.println s!"  [{lbl}] prefill-20 maxAbs={dPrefill} (same-shape tol={tol}); prefill-12 maxAbs={dPrefillPart} decode maxAbs={dStep} (cross-shape {crossShapeStatus})"
@@ -362,7 +364,7 @@ private def runBf16AttentionCacheParity {numHeads rotaryHalf cap : Nat}
     (hkv : cfg.num_key_value_heads ∣ numHeads) (hrot : 2 * rotaryHalf ≤ cfg.head_dim)
     (inputs : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 })
     (cos sin : Tensor { shape := #[20, rotaryHalf], dtype := .Float32, device := device }) (window : Option Nat)
-    (fresh : LagunaAttention.KVCache (device := device) cfg 1 cap .BFloat16) : IO (Nat × Nat) := do
+    (fresh : LagunaAttention.KVCache (device := device) cfg 1 cap 0 .BFloat16) : IO (Nat × Nat) := do
   let fullOutput : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } := attention.forward (rotaryHalf := rotaryHalf) cfg hkv hrot inputs cos sin window
   let inputsPre : Tensor { shape := #[1, 12, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice inputs 1 0 12
   let cosPre : Tensor { shape := #[12, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice cos 0 0 12
@@ -374,27 +376,28 @@ private def runBf16AttentionCacheParity {numHeads rotaryHalf cap : Nat}
   let expectedPre : Tensor { shape := #[1, 12, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice fullOutput 1 0 12
   let preStats ← mixedErrorStats (prefill) (expectedPre)
   reportMixedErrors preStats s!"(a) [{lbl}] attention prefill"
-  let mut cache := initialCache
-  let mut stepStats : MixedErrorStats := {}
-  let mut undetected : Nat := 0
-  for pos in [12:20] do
-    let input : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice! inputs 1 pos 1
-    let expected : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice! fullOutput 1 pos 1
-    let cosStep : Tensor { shape := #[1, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice! cos 0 pos 1
-    let sinStep : Tensor { shape := #[1, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice! sin 0 pos 1
+  let rec decodeFrom (pos : Nat) (cache : LagunaAttention.KVCache (device := device) cfg 1 cap pos .BFloat16)
+      (stepStats : MixedErrorStats) (undetected : Nat) : IO (MixedErrorStats × Nat) := do
+    let ⟨_hMore⟩ ← if h : pos < 20 then pure (PLift.up h) else return (stepStats, undetected)
+    let input : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice inputs 1 pos 1 (_bounds := by simp; omega)
+    let expected : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice fullOutput 1 pos 1 (_bounds := by simp; omega)
+    let cosStep : Tensor { shape := #[1, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice cos 0 pos 1 (_bounds := by simp; omega)
+    let sinStep : Tensor { shape := #[1, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice sin 0 pos 1 (_bounds := by simp; omega)
     let ⟨hpos⟩ ← if h : pos < cap then pure (PLift.up h) else
       throw <| IO.userError s!"attention cache capacity {cap} cannot hold position {pos}"
+    let mut undetected := undetected
     if pos == 12 then
       let erased := { cache with vStore := Tensor.zerosLike cache.vStore }
       let (bad, _) := attention.forwardStep
-        (rotaryHalf := rotaryHalf) cfg hkv hrot input cosStep sinStep window erased pos hpos
+        (rotaryHalf := rotaryHalf) cfg hkv hrot input cosStep sinStep window erased hpos
       let badStats ← mixedErrorStats (bad) (expected)
       IO.println s!"  (a) [{lbl}] erased cached history: violations={badStats.violations} (must be positive)"
       if badStats.violations == 0 then undetected := undetected + 1
     let (out, next) := attention.forwardStep
-      (rotaryHalf := rotaryHalf) cfg hkv hrot input cosStep sinStep window cache pos hpos
-    cache := next
-    stepStats := stepStats.merge (← mixedErrorStats (out) (expected))
+      (rotaryHalf := rotaryHalf) cfg hkv hrot input cosStep sinStep window cache hpos
+    decodeFrom (pos + 1) next (stepStats.merge (← mixedErrorStats (out) (expected))) undetected
+  termination_by 20 - pos
+  let (stepStats, undetected) ← decodeFrom 12 initialCache {} 0
   reportMixedErrors stepStats s!"(a) [{lbl}] attention decode positions 12..19"
   pure (preStats.violations + stepStats.violations, undetected)
 
@@ -518,7 +521,7 @@ private def expectRejected (action : IO α) (label : String) : IO Unit := do
   check rejected label
 
 /-- Covers partial and over-window prefill, repeated ring wrap, earlier session
-values kept intact, preserved functional snapshots, capacity checks, and inference graphs.
+values kept intact, preserved functional snapshots, and inference graphs.
 BF16 MoE uses stable expert selection and compares identical decode positions
 against the functional cache. The 0.1 bound permits BF16 reduction rounding
 when ring order permutes paired keys/values; FP32 retains the tight bound. -/
@@ -549,44 +552,64 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
     let prefillDiff ← maxAbsDiff (actual) (expected)
     check (prefillDiff == 0.0) s!"(d) [{lbl}] owned prefill {promptLen} matches functional exactly"
     check (!hasGradFn actual) s!"(d) [{lbl}] inference output has no autograd graph"
-    expectRejected (model.prefillSession cfg tables embeds session) "session rejects repeated prefill"
     let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice! ids 1 promptLen 1
-    expectRejected (model.decodeSession cfg tables (model.embedTokens tok) (promptLen + 1) session)
-      "session rejects skipped positions without damaging state"
     let earlier := session
-    let mut session := session
-    let mut functional := functional
-    let mut firstLogits : Option (Tensor { shape := #[1, cfg.vocab_size], device := device, dtype := if bf16 then .BFloat16 else .Float32 }) := none
-    let mut maxDiff := 0.0
     -- Keep an actual old cache tensor alive across subsequent functional calls.
     let some oldEntry := functional.kvCaches[1]? | throw <| IO.userError "missing sliding cache"
     let oldCache := oldEntry
     let oldK := oldCache.kStore
     let oldKCopy ← data.cloneInferenceIO oldK
-    for h : pos in [promptLen:20] do
-      let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice! ids 1 pos 1
-      let emb := model.embedTokens tok
-      let (expected, next) ← model.decodeStep cfg tables emb pos h.upper functional
-      functional := next
-      let (actual, next) ← model.decodeSession cfg tables emb pos session
-      session := next
-      let diff ← maxAbsDiff (actual) (expected)
-      maxDiff := max maxDiff diff
-      if pos == promptLen then firstLogits := some actual
+    let rec decodeFrom (pos : Nat)
+        (functional : LagunaCache (device := device) (dtype := (if bf16 then .BFloat16 else .Float32)) cfg 1 20 pos)
+        (session : LagunaCacheSession (device := device) (dtype := (if bf16 then .BFloat16 else .Float32)) cfg 1 20 pos)
+        (firstLogits : Option (Tensor { shape := #[1, cfg.vocab_size], device := device, dtype := (if bf16 then .BFloat16 else .Float32) }))
+        (maxDiff : Float) :
+        IO (Option (Tensor { shape := #[1, cfg.vocab_size], device := device, dtype := (if bf16 then .BFloat16 else .Float32) }) × Float) := do
+      if h : pos < 20 then
+        let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice ids 1 pos 1
+        let emb := model.embedTokens tok
+        let (expected, next) ← model.decodeStep cfg tables emb functional h
+        let (actual, session') ← model.decodeSession cfg tables emb session h
+        let diff ← maxAbsDiff (actual) (expected)
+        decodeFrom (pos + 1) next session' (if pos == promptLen then some actual else firstLogits) (max maxDiff diff)
+      else
+        pure (firstLogits, maxDiff)
+    termination_by 20 - pos
+    let (firstLogits, maxDiff) ← decodeFrom promptLen functional session none 0.0
     IO.println s!"  [{lbl}] owned decode maxAbs={maxDiff} before the earlier-value comparison"
     check ((← maxAbsDiff oldK oldKCopy) == 0.0) "functional decode preserves earlier cache snapshots"
     -- The ring has wrapped repeatedly. Had the decodes written into the earlier
     -- value's buffers, it would read overwritten prompt slots here.
-    let (earlierLogits, _) ← model.decodeSession cfg tables (model.embedTokens tok) promptLen earlier
+    let (earlierLogits, _) ← model.decodeSession cfg tables (model.embedTokens tok) earlier (by simp at hp; omega)
     let some first := firstLogits | throw <| IO.userError "missing first decode output"
     check ((← maxAbsDiff (earlierLogits) (first)) == 0.0)
       s!"(d) [{lbl}] an earlier session value keeps its cache after ring wrap"
-    expectRejected (model.decodeSession cfg tables (model.embedTokens tok) 20 session)
-      "session rejects capacity overflow"
     IO.println s!"  [{lbl}] owned cache promptLen={promptLen} decode maxAbs={maxDiff} (tol={tol}), capacities={capacities}"
     check (maxDiff ≤ tol) s!"(d) [{lbl}] ring decode matches functional cache"
   expectRejected (model.model.initCacheSession (batch := 1) cfg 0 device)
     "session rejects zero capacity"
+
+set_option linter.unusedVariables false in
+example (m : LagunaForCausalLM (device := .CPU) denseTiny .Float32)
+    (tables : LagunaRotaryTables (device := .CPU) denseTiny 20)
+    (emb : Tensor { shape := #[1, 1, denseTiny.hidden_size], dtype := .Float32, device := .CPU })
+    (embeds : Tensor { shape := #[1, 5, denseTiny.hidden_size], dtype := .Float32, device := .CPU })
+    (prefilled : LagunaCacheSession (device := .CPU) denseTiny 1 20 5)
+    (full : LagunaCacheSession (device := .CPU) denseTiny 1 20 20) : True := by
+  -- A decode step continues at the session's position.
+  have : IO (_ × LagunaCacheSession (device := .CPU) denseTiny 1 20 6) :=
+    m.decodeSession denseTiny tables emb prefilled (by decide)
+  -- A step cannot skip a position.
+  fail_if_success
+    have : IO (_ × LagunaCacheSession (device := .CPU) denseTiny 1 20 7) :=
+      m.decodeSession denseTiny tables emb prefilled (by decide)
+  -- Prefill needs a fresh session.
+  fail_if_success
+    have := m.prefillSession denseTiny tables embeds prefilled
+  -- A full session has no room.
+  fail_if_success
+    have := m.decodeSession denseTiny tables emb full (by decide)
+  trivial
 
 /-- Opt-in timing of identical eight-token decode workloads. Allocation and
 prefill are outside the timer; CUDA is synchronized at both boundaries. -/
@@ -607,26 +630,32 @@ private def runCacheBenchmark (device : Device) : IO Unit := do
     for _ in [:3] do
       let (_, initial) ← model.prefill cfg tables (model.embedTokens prompt)
         (model.model.initCache cfg capacity device (by simp at hc; omega)) (by simp at hc; omega) (by decide)
-      let mut cache := initial
+      let rec decodeFrom (pos : Nat) (cache : LagunaCache (device := device) (dtype := .Float32) cfg 1 capacity pos) : IO Unit := do
+        if h : pos < 20 then
+          let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice ids 1 pos 1
+          let (_, next) ← model.decodeStep cfg tables (model.embedTokens tok) cache
+            (by simp at hc; omega)
+          decodeFrom (pos + 1) next
+      termination_by 20 - pos
       synchronize
       let start ← IO.monoMsNow
-      for h : pos in [12:20] do
-        let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice! ids 1 pos 1
-        let (_, next) ← model.decodeStep cfg tables (model.embedTokens tok) pos
-          (by have := h.upper; simp at this hc; omega) cache
-        cache := next
+      decodeFrom 12 initial
       synchronize
       functionalMs := functionalMs + ((← IO.monoMsNow) - start)
       let session ← model.model.initCacheSession (batch := 1) cfg capacity device
       ownedCapacity := session.capacities.foldl (· + ·) 0
       let (_, prefilled) ← model.prefillSession cfg tables (model.embedTokens prompt) session
-      let mut session := prefilled
+      let rec decodeSessionFrom (pos : Nat)
+          (session : LagunaCacheSession (device := device) (dtype := .Float32) cfg 1 capacity pos) : IO Unit := do
+        if h : pos < 20 then
+          let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice ids 1 pos 1
+          let (_, next) ← model.decodeSession cfg tables (model.embedTokens tok) session
+            (by simp at hc; omega)
+          decodeSessionFrom (pos + 1) next
+      termination_by 20 - pos
       synchronize
       let start ← IO.monoMsNow
-      for pos in [12:20] do
-        let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice! ids 1 pos 1
-        let (_, next) ← model.decodeSession cfg tables (model.embedTokens tok) pos session
-        session := next
+      decodeSessionFrom 12 prefilled
       synchronize
       ownedMs := ownedMs + ((← IO.monoMsNow) - start)
     let bytesPerPosition := 2 * cfg.num_key_value_heads * cfg.head_dim * 4

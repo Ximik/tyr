@@ -82,12 +82,12 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let cache := m.model.initCache cfg 7 .CPU
   let (prefill, initial) := m.model.forwardWithCache cfg (ids.slice 1 0 3) cache (by decide) sc ss fc fs
   close prefill (expected.slice 1 0 3)
-  let mut cache := initial
-  for hp : pos in [3:7] do
-    let (out, next) := m.model.forwardStep cfg (ids.slice! 1 pos 1) pos
-      (by have := hp.upper; simp at this; omega) cache sc ss fc fs
-    close out (expected.slice! 1 pos 1)
-    cache := next
+  let step : {n : Nat} → Gemma4Cache (device := .CPU) cfg 1 7 n → n < 7 → IO (Gemma4Cache (device := .CPU) cfg 1 7 (n + 1)) :=
+    fun {n} cache hn => do
+      let (out, next) := m.model.forwardStep cfg (ids.slice 1 n 1 (_bounds := by simp; omega)) cache hn sc ss fc fs
+      close out (expected.slice 1 n 1 (_bounds := by simp; omega))
+      pure next
+  let _ ← step (← step (← step (← step initial (by decide)) (by decide)) (by decide)) (by decide)
 
 @[test] def testGemma4GenerationDTypesAndStreaming : IO Unit := do
   for bf16 in #[false, true] do

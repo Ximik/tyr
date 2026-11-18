@@ -350,17 +350,19 @@ def layerIntermediateSize (cfg : Gemma4Config) (layerIdx : Nat) : Nat :=
 theorem firstKVSharedLayer_le (cfg : Gemma4Config) : firstKVSharedLayer cfg ≤ cfg.num_hidden_layers := by
   unfold firstKVSharedLayer; split <;> omega
 
-def sharedSourceLayer? (cfg : Gemma4Config) (layerIdx : Nat) : Option (Fin cfg.num_hidden_layers) :=
-  if !(isKVSharedLayer cfg layerIdx) then
-    none
-  else
+/-- The earlier layer whose K/V a shared layer reads: the last non-shared layer of its type. -/
+def sharedSourceLayer? (cfg : Gemma4Config) (layerIdx : Nat) : Option (Fin layerIdx) :=
+  let first := firstKVSharedLayer cfg
+  if h : cfg.num_kv_shared_layers > 0 ∧ first > 0 ∧ first ≤ layerIdx then
     Id.run do
       let target := layerTypeAt cfg layerIdx
-      let mut src : Option (Fin cfg.num_hidden_layers) := none
-      for h : i in [:firstKVSharedLayer cfg] do
+      let mut src : Option (Fin layerIdx) := none
+      for hs : i in [:first] do
         if layerTypeAt cfg i == target then
-          src := some ⟨i, Nat.lt_of_lt_of_le h.upper (firstKVSharedLayer_le cfg)⟩
+          src := some ⟨i, Nat.lt_of_lt_of_le hs.upper h.2.2⟩
       return src
+  else
+    none
 
 def isMoE (cfg : Gemma4Config) : Bool :=
   cfg.enable_moe_block
@@ -419,7 +421,7 @@ def layerTypeAt (cfg : Config) (layerIdx : Nat) : LayerType := Gemma4Config.laye
 def firstKVSharedLayer (cfg : Config) : Nat := Gemma4Config.firstKVSharedLayer cfg
 def isKVSharedLayer (cfg : Config) (layerIdx : Nat) : Bool := Gemma4Config.isKVSharedLayer cfg layerIdx
 def layerIntermediateSize (cfg : Config) (layerIdx : Nat) : Nat := Gemma4Config.layerIntermediateSize cfg layerIdx
-def sharedSourceLayer? (cfg : Config) (layerIdx : Nat) : Option (Fin cfg.num_hidden_layers) :=
+def sharedSourceLayer? (cfg : Config) (layerIdx : Nat) : Option (Fin layerIdx) :=
   Gemma4Config.sharedSourceLayer? cfg layerIdx
 def isMoE (cfg : Config) : Bool := Gemma4Config.isMoE cfg
 def hasPerLayerInput (cfg : Config) : Bool := Gemma4Config.hasPerLayerInput cfg

@@ -120,27 +120,24 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
     let x := inputs.castDType dtype
     let full := layer.forward (by decide) x cos sin
     LeanTest.assertEqual full.actualSpec.dtype x.actualSpec.dtype "Full Qwen layer retains model dtype"
-    let fresh : qwen.QwenAttention.KVCache 1 1 4 5 dtype := qwen.QwenAttention.initKVCache 5 (dtype := dtype)
-    let mut cache := fresh
+    let fresh : qwen.QwenAttention.KVCache 1 1 4 5 0 dtype := qwen.QwenAttention.initKVCache 5 (dtype := dtype)
     -- Three prompt tokens followed by two decode tokens exercise the Talker cache path.
-    let mut outputs : Array (Sigma (fun shape => Tensor { shape := shape, dtype, device := .CPU })) := #[]
-    for hp : pos in [:3] do
-      let (out, next) := layer.forwardStep (by decide) (Tensor.slice! x 1 pos 1)
-        (Tensor.slice! cos 0 pos 1) (Tensor.slice! sin 0 pos 1) cache
-        pos (by have := hp.upper; simp at this; omega)
-      LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Prefill step retains model dtype"
-      cache := next
-      outputs := outputs.push out.packShape
-    let prefixCache := cache
+    let step : {n : Nat} → qwen.QwenAttention.KVCache 1 1 4 5 n dtype → n < 5 → String →
+        IO (Tensor { shape := #[1, 1, 8], dtype, device := .CPU } × qwen.QwenAttention.KVCache 1 1 4 5 (n + 1) dtype) :=
+      fun {n} cache hn label => do
+        let (out, next) := layer.forwardStep (by decide) (Tensor.slice x 1 n 1 (_bounds := by simp; omega))
+          (Tensor.slice cos 0 n 1 (_bounds := by simp; omega)) (Tensor.slice sin 0 n 1 (_bounds := by simp; omega)) cache hn
+        LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype label
+        pure (out, next)
+    let (out0, c1) ← step fresh (by decide) "Prefill step retains model dtype"
+    let (out1, c2) ← step c1 (by decide) "Prefill step retains model dtype"
+    let (out2, prefixCache) ← step c2 (by decide) "Prefill step retains model dtype"
     let prefixK ← Tensor.toFloatArray prefixCache.kStore
     let prefixV ← Tensor.toFloatArray prefixCache.vStore
-    for hp : pos in [3:5] do
-      let (out, next) := layer.forwardStep (by decide) (Tensor.slice! x 1 pos 1)
-        (Tensor.slice! cos 0 pos 1) (Tensor.slice! sin 0 pos 1) cache
-        pos (by have := hp.upper; simp at this; omega)
-      LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Decode step retains model dtype"
-      cache := next
-      outputs := outputs.push out.packShape
+    let (out3, c4) ← step prefixCache (by decide) "Decode step retains model dtype"
+    let (out4, cache) ← step c4 (by decide) "Decode step retains model dtype"
+    let outputs : Array (Sigma (fun shape => Tensor { shape := shape, dtype, device := .CPU })) :=
+      #[out0.packShape, out1.packShape, out2.packShape, out3.packShape, out4.packShape]
     LeanTest.assertEqual cache.kStore.actualSpec.dtype x.actualSpec.dtype "K cache follows projected key dtype"
     LeanTest.assertEqual cache.vStore.actualSpec.dtype x.actualSpec.dtype "V cache follows projected value dtype"
     LeanTest.assertEqual (← Tensor.toFloatArray prefixCache.kStore) prefixK

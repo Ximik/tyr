@@ -80,9 +80,9 @@ private structure BeamState (cfg : WhisperConfig) (dtype : DType := .Float32) wh
   noSpeechProb : Float := 0.0
   measuredNoSpeech : Bool := false
   finished : Bool := false
-  caches : WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions := { layers := #[] }
-  lastLogits? : Option (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] }) := none
   nextPos : Nat := 0
+  caches : WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions nextPos := { layers := #[] }
+  lastLogits? : Option (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] }) := none
   /-- Decode steps this beam may still take; `fits` keeps every one inside the cache. -/
   budget : Nat := 0
   fits : nextPos + budget ≤ cfg.maxTargetPositions := by omega
@@ -666,24 +666,23 @@ private def prefillPromptCaches
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (promptIds : Array UInt32) (hPrompt : promptIds.size ≤ cfg.maxTargetPositions)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] } × WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions) := do
+    : IO (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] } × WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions promptIds.size) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
-  if promptIds.isEmpty then
+  let ⟨hNonempty⟩ ← if h : 0 < promptIds.size then pure (PLift.up h) else
     throw <| IO.userError "Whisper cached decode prompt is empty"
-  let mut caches : WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions :=
-    model.initLayerKVCaches cfg.maxTargetPositions device (h := cfg.maxTargetPositionsPos)
-  let mut last? : Option (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] }) := none
-  for h : i in [:promptIds.size] do
-    let tok := buildSingleTokenOnDevice promptIds[i]! device
+  let rec go (i : Nat) (hi : i < promptIds.size) (caches : WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions i)
+      : IO (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] } × WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions promptIds.size) := do
+    let tok := buildSingleTokenOnDevice promptIds[i] device
     let (logits, caches') ←
-      model.decodeStepWithCache (encSeq := encSeq) tok i (Nat.lt_of_lt_of_le h.upper hPrompt) (Nat.le_refl _)
-        crossCaches caches
-    caches := caches'
-    last? := some logits
-  match last? with
-  | some last => pure (last, caches)
-  | none => throw <| IO.userError "Whisper cached decode failed to prefill prompt"
+      model.decodeStepWithCache (encSeq := encSeq) tok crossCaches caches (by omega) (Nat.le_refl _)
+    if hNext : i + 1 < promptIds.size then
+      go (i + 1) hNext caches'
+    else
+      have hEnd : i + 1 = promptIds.size := by omega
+      pure (logits, hEnd ▸ caches')
+  termination_by promptIds.size - i
+  go 0 hNonempty (model.initLayerKVCaches cfg.maxTargetPositions device (h := cfg.maxTargetPositionsPos))
 
 private partial def decodeLoopCached
     {cfg : WhisperConfig}
@@ -699,9 +698,9 @@ private partial def decodeLoopCached
     (sample : Bool)
     (remaining : Nat)
     (state : DecodeState)
-    (caches : WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions)
-    (lastLogits : Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] })
     (nextPos : Nat)
+    (caches : WhisperForConditionalGeneration.SelfKVCaches (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions nextPos)
+    (lastLogits : Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] })
     (hfit : nextPos + remaining ≤ cfg.maxTargetPositions)
     : IO DecodeState := do
   if hr : remaining = 0 then
@@ -751,8 +750,7 @@ private partial def decodeLoopCached
     else
       let tokenIds := buildSingleTokenOnDevice nextId lastLogits.device
       let (nextLogits, caches') ←
-        model.decodeStepWithCache (encSeq := encSeq) tokenIds nextPos (by omega) (Nat.le_refl _)
-          crossCaches caches
+        model.decodeStepWithCache (encSeq := encSeq) tokenIds crossCaches caches (by omega) (Nat.le_refl _)
       decodeLoopCached
         (encSeq := encSeq)
         model
@@ -766,9 +764,9 @@ private partial def decodeLoopCached
         sample
         (remaining - 1)
         state'
+        (nextPos + 1)
         caches'
         nextLogits
-        (nextPos + 1)
         (by omega)
 
 private def beamRankScore {cfg : WhisperConfig} (beam : BeamState (device := device) (dtype := dtype) cfg) : Float :=
@@ -847,8 +845,8 @@ private def expandBeamCached
         else
           let tokenIds := buildSingleTokenOnDevice nextId last.device
           let (nextLogits, caches') ←
-            model.decodeStepWithCache (encSeq := encSeq) tokenIds beam.nextPos
-              (by have := beam.fits; omega) (Nat.le_refl _) crossCaches beam.caches
+            model.decodeStepWithCache (encSeq := encSeq) tokenIds crossCaches beam.caches
+              (by have := beam.fits; omega) (Nat.le_refl _)
           out := out.push {
             allIds := beam.allIds.push nextId
             generated := generated'
@@ -1042,9 +1040,9 @@ private def decodeAtTemperature
           false
           budget
           { allIds := promptIds }
+          promptIds.size
           caches0
           firstLogits
-          promptIds.size
           hfit
     pure (toDecodeCandidate tok st temperature)
   else
@@ -1065,9 +1063,9 @@ private def decodeAtTemperature
           true
           budget
           { allIds := promptIds }
+          promptIds.size
           caches0
           firstLogits
-          promptIds.size
           hfit
       let cand := toDecodeCandidate tok st temperature
       best? :=

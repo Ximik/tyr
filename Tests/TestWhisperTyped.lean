@@ -39,41 +39,36 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     let expected ← model.decode tokens encoded
     let cross ← model.precomputeCrossCaches encoded
     let initial := model.initLayerKVCaches (batch := 1) 4 .CPU
-    let mut caches := initial
-    for h : pos in [:4] do
-      let tok := tokens.slice! 1 pos 1
-      let (actual, next) ← model.decodeStepWithCache (encSeq := 3) tok pos h.upper (by decide) cross caches
-      close actual ((expected.slice! 1 pos 1).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
-      LeanTest.assertEqual actual.actualSpec.dtype expected.actualSpec.dtype
-      caches := next
-    LeanTest.assertEqual caches.position 4 "every decoded token advances the cache position"
-    LeanTest.assertEqual initial.position 0
+    let step : {n : Nat} → WhisperForConditionalGeneration.SelfKVCaches (device := .CPU) (dtype := dtype) cfg 1 4 n →
+        n < 4 → IO (WhisperForConditionalGeneration.SelfKVCaches (device := .CPU) (dtype := dtype) cfg 1 4 (n + 1)) :=
+      fun {n} caches hn => do
+        let tok := tokens.slice 1 n 1 (_bounds := by simp; omega)
+        let (actual, next) ← model.decodeStepWithCache (encSeq := 3) tok cross caches hn (by decide)
+        close actual ((expected.slice 1 n 1 (_bounds := by simp; omega)).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
+        LeanTest.assertEqual actual.actualSpec.dtype expected.actualSpec.dtype
+        pure next
+    let _ ← step (← step (← step (← step initial (by decide)) (by decide)) (by decide)) (by decide)
     let some untouched := initial.layers[0]? | throw (IO.userError "missing initial cache")
     let stored ← untouched.kStore.toFloatArray
     LeanTest.assertTrue (stored.all (· == 0)) "incremental updates must preserve the input cache snapshot"
-    let (again, _) ← model.decodeStepWithCache (encSeq := 3) (tokens.slice 1 0 1) 0 (by decide) (by decide) cross initial
+    let (again, _) ← model.decodeStepWithCache (encSeq := 3) (tokens.slice 1 0 1) cross initial (by decide) (by decide)
     close again ((expected.slice 1 0 1).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
-
-@[test] def testWhisperCachePositionErrors : IO Unit := do
-  let model ← WhisperForConditionalGeneration.init cfg
-  let encoded ← model.encode features (by decide)
-  let cross ← model.precomputeCrossCaches encoded
-  let caches := model.initLayerKVCaches (batch := 1) 2 .CPU
-  let tok := tokens.slice 1 0 1
-  let positionRejected ← try
-    let _ ← model.decodeStepWithCache (encSeq := 3) tok 1 (by decide) (by decide) cross caches
-    pure false
-  catch e => pure ((toString e).contains "position")
-  LeanTest.assertTrue positionRejected
 
 set_option linter.unusedVariables false in
 example (model : WhisperForConditionalGeneration (device := .CPU) cfg)
     (tok : Tensor { shape := #[1, 1], dtype := .Int64, device := .CPU })
     (cross : Array (WhisperForConditionalGeneration.LayerCrossCache (device := .CPU) cfg 1 3))
-    (caches : WhisperForConditionalGeneration.SelfKVCaches (device := .CPU) cfg 1 1) : True := by
-  have := model.decodeStepWithCache tok 0 (by omega) (by decide) cross caches
+    (fresh : WhisperForConditionalGeneration.SelfKVCaches (device := .CPU) cfg 1 2 0)
+    (full : WhisperForConditionalGeneration.SelfKVCaches (device := .CPU) cfg 1 2 2) : True := by
+  -- A step on a fresh cache writes slot 0; no position can be skipped.
+  have : IO (_ × WhisperForConditionalGeneration.SelfKVCaches (device := .CPU) cfg 1 2 1) :=
+    model.decodeStepWithCache tok cross fresh (by decide) (by decide)
   fail_if_success
-    have := model.decodeStepWithCache tok 1 (by omega) (by decide) cross caches
+    have : IO (_ × WhisperForConditionalGeneration.SelfKVCaches (device := .CPU) cfg 1 2 2) :=
+      model.decodeStepWithCache tok cross fresh (by decide) (by decide)
+  -- A full cache has no slot left.
+  fail_if_success
+    have := model.decodeStepWithCache tok cross full (by decide) (by decide)
   trivial
 
 @[test] def testWhisperConfigRejectsZeroTargetPositions : IO Unit := IO.FS.withTempDir fun dir => do
