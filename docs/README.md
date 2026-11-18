@@ -80,12 +80,6 @@ Two kinds of documentation exist:
 - [Examples and testing](examples-and-testing.md) — tour of `Examples/`,
   test organization, LeanTest, and coverage gaps.
 
-### Meta
-
-- [Improvement suggestions](IMPROVEMENTS.md) — consolidated, verified
-  findings (bug risks, stale docs, missing tests, cleanups) collected while
-  writing these guides.
-
 ## Conventions in these guides
 
 - Code examples are reconstructed from real call sites and labeled with their

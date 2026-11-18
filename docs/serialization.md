@@ -283,8 +283,7 @@ SafeTensors export.
 
 ## Usage examples
 
-Reconstructed example (from `Tests/TestSafeTensorsTypeProvider.lean:13-219` and
-`launch/demos/safetensors_schema.lean`):
+Reconstructed example (from `Tests/TestSafeTensorsTypeProvider.lean:13-219`):
 
 ```lean
 import Tyr.SafeTensors
