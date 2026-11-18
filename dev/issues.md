@@ -2,11 +2,6 @@
 
 This document tracks architectural, performance, and correctness issues identified during deep semantic review.
 
-## BranchingFlows
-
-The BranchingFlows sampler audit and learned constellation/QM9 work live in
-[`dev/launch/branchingflows.md`](launch/branchingflows.md).
-
 ## 🚀 Performance Bottlenecks
 
 ### P01: Recursive KV-Cache Prefill

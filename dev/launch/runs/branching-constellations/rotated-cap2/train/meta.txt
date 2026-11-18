@@ -1,4 +1,0 @@
-iteration=3000
-bestValLoss=22.740419
-trainLoss=22.740419
-optimCount=0
