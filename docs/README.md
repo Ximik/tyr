@@ -38,8 +38,8 @@ Two kinds of documentation exist:
   `deriving` handlers.
 - [Typed facade](core/typed.md) — `Tensor (σ : StaticSpec)`: phantom-typed
   tensors tracking shape, dtype, and concrete device.
-- [Utilities](core/utilities.md) — deterministic `PRNGKey` splitting, the
-  `Log.Handlers` pattern, and the `#tensor` / `#module` infoview widgets.
+- [Utilities](core/utilities.md) — the `Log.Handlers` pattern and the
+  `#tensor` / `#module` infoview widgets.
 
 ### Training stack
 

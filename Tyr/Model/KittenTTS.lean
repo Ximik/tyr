@@ -11,4 +11,3 @@ import Tyr.Model.KittenTTS.Checkpoint
 import Tyr.Model.KittenTTS.Model
 import Tyr.Model.KittenTTS.Weights
 import Tyr.Model.KittenTTS.Pretrained
-import Tyr.Model.KittenTTS.ReferenceBridge

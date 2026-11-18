@@ -150,12 +150,12 @@ and is the authoritative source for running them.
 | `Examples/GPT/` | Char-level GPT-2 on Shakespeare (nanoGPT configs), shape-indexed model code, Riemannian variant | `TrainGPT`, `RunRiemannianNanoGPT` |
 | `Examples/Diffusion/` | Masked discrete diffusion on ASCII text, checkpoint save/load, terminal animation | `TrainDiffusion` |
 | `Examples/NanoChat/` | Modded-nanogpt port: NorMuon + DistAdam training, SFT (`ChatSFT`), GRPO, tool-augmented generation, eval tasks | `TrainNanoChat` (torchrun-capable), `NanoChatPipeline`, `NanoChatChat` |
-| `Examples/Flux/` | Flux Klein 4B image generation (text encode → diffusion → VAE decode) | `FluxDemo`, `FluxDebug` |
+| `Examples/Flux/` | Flux Klein 4B image generation (text encode → diffusion → VAE decode) | `FluxDemo` |
 | `Examples/Qwen35/`, `Qwen25Omni/`, `Gemma4/` | Pretrained HF-hub inference with a shared CLI (`--source`, `--prompt[-file]`, `--image`, `--video`, `--batch-size`, `--max-new-tokens`, `--stream`, `--device`, ...) | `Qwen35RunHF`, `Qwen25OmniRunHF`, `Gemma4RunHF` |
 | `Examples/Qwen3ASR/` | Speech transcription, live microphone streaming | `Qwen3ASRTranscribe`, `Qwen3ASRLiveMic`, `Qwen3ASRLiveMicTrueStream` |
 | `Examples/Qwen3TTS/` | Text-to-speech end to end | `Qwen3TTSEndToEnd` |
 | `Examples/Whisper/` | Whisper transcription (file and in-memory), voice-mode loop | `WhisperTranscribe`, `WhisperTranscribeInMem`, `WhisperVoiceMode` |
-| `Examples/` (root) | KittenTTS pretrained synthesis and duration/debug harnesses; `TestGuard.lean` is a Widget display demo despite the name | `KittenTTSPretrained`, `KittenTTSDurations`, `KittenTTSDebug`, `KittenTTSCompare` |
+| `Examples/` (root) | KittenTTS pretrained synthesis; `TestGuard.lean` is a Widget display demo despite the name | `KittenTTSPretrained` |
 
 Test-side executables: `test_runner`,
 `RunRiemannianNanoGPTTests`, `ffi_crash_probe`, and the standalone suites
@@ -210,7 +210,7 @@ KittenTTS, Qwen3TTS, Qwen3ASR, SileroVAD), the SafeTensors type
 provider, checkpoints, manifolds/optimizers, and NanoChat tokenizer/tasks.
 
 No test file imports these modules directly (verified by grep): `Tyr.Audio`,
-`Tyr.Hub`, `Tyr.PRNG`, `Tyr.RL`, `Tyr.Widget`, `Tyr.Log`, `Tyr.Text`,
+`Tyr.Hub`, `Tyr.RL`, `Tyr.Widget`, `Tyr.Log`, `Tyr.Text`,
 `Tyr.Inference`. Coverage is thin (one or two files) for `Tyr.Distributed`,
 `Tyr.Sharding`, and `Tyr.Data`. Multi-process collective behavior is only
 smoke-tested through the FFI surface in `Tests/TestModdedGPT.lean`.

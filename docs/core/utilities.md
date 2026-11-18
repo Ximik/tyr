@@ -1,30 +1,13 @@
 # Supporting utilities
 
-Three small support modules: deterministic PRNG keys (`Tyr/PRNG.lean`), silent-by-default log handlers (`Tyr/Log.lean`), and VS Code infoview widgets for tensors and modules (`Tyr/Widget.lean`).
+Two small support modules: silent-by-default log handlers (`Tyr/Log.lean`) and VS Code infoview widgets for tensors and modules (`Tyr/Widget.lean`).
 
 ## Purpose & when to use
 
-- Use `Tyr.PRNG` when you need reproducible randomness threaded explicitly through pure code — simulation paths, stochastic experiments, per-element draws. It samples individual `Float` values; it does not sample tensors, and it is not cryptographically secure.
 - Use `Tyr.Log` when writing library code that should report progress, warnings, or errors without doing console I/O itself. Handlers default to no-ops, so libraries stay silent unless the executable wires up sinks.
 - Use `Tyr.Widget` during development to inspect tensor values and module parameter trees directly in the Lean infoview, instead of printing arrays.
 
 ## Architecture & main abstractions
-
-### Deterministic PRNG (`Tyr/PRNG.lean`)
-
-The whole module is one key type in `namespace torch`, depending only on `Std`:
-
-```lean
-structure PRNGKey where
-  state : UInt64
-  deriving Repr, BEq, Inhabited
-```
-
-Keys are plain values; every operation is pure and deterministic. State advancement is an LCG step, `mix x = x * 6364136223846793005 + 1442695040888963407`, and `foldIn`/`split` add the splitmix64 golden constant `0x9e3779b97f4a7c15` before mixing (`Tyr/PRNG.lean:30-55`). `normal01` derives two independent 53-bit uniforms from two differently-constanted mixes of the key state and applies Box-Muller, returning the cosine sample with `u1` clamped to `>= 1e-12` (`Tyr/PRNG.lean:57-69`).
-
-The threading model is JAX-style: you never mutate a key, you derive new ones. `split` gives two independent streams; `foldIn key tag` derives a child key labeled by a `UInt32` tag — loop indices, hashed time bounds, component selectors; `foldInUInt64` handles wider tags by folding both halves.
-
-Contrast with tensor RNG: `Tensor.randn (s : Shape) ... : IO (Tensor { shape := s, dtype := .Float32, device := .CPU })` lives behind the libtorch FFI, runs in `IO`, and is seeded globally via `manualSeed` (`Tyr/Torch.lean:1065`). `PRNGKey` is for value-level randomness in pure Lean code.
 
 ### Log handlers (`Tyr/Log.lean`)
 
@@ -104,16 +87,6 @@ Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` 
 
 ## Key APIs
 
-### `Tyr/PRNG.lean` (`namespace torch.PRNGKey`)
-
-| Signature | Purpose |
-| --- | --- |
-| `fromUInt64 (seed : UInt64) : PRNGKey` | Seed a key. |
-| `foldIn (key : PRNGKey) (tag : UInt32) : PRNGKey` | Derive a child key labeled by a tag. |
-| `foldInUInt64 (key : PRNGKey) (tag : UInt64) : PRNGKey` | Same, for 64-bit tags (folds low then high half). |
-| `split (key : PRNGKey) : PRNGKey × PRNGKey` | Two independent child keys. |
-| `normal01 (key : PRNGKey) (tag : UInt32) : Float` | Standard normal sample via Box-Muller. |
-
 ### `Tyr/Log.lean` (`namespace torch.Log`)
 
 | Signature | Purpose |
@@ -134,27 +107,6 @@ Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` 
 | `#module <term>` | Infoview tree for `ModuleDisplayProps` or `IO ModuleDisplayProps`. |
 
 ## Usage examples
-
-### Deterministic keys
-
-Example:
-
-```lean
-import Tyr.PRNG
-
-open torch
-
--- One child key per element: element i draws from foldIn root i.
-def normalVector (seed : UInt64) (n : Nat) : Array Float :=
-  let root := PRNGKey.foldIn (PRNGKey.fromUInt64 seed) 0x56544152
-  Array.ofFn fun (i : Fin n) =>
-    PRNGKey.normal01 (PRNGKey.foldIn root (UInt32.ofNat i.1)) 0
-
--- split gives independent streams without threading a counter.
-def twoStreams (seed : UInt64) : Float × Float :=
-  let (k1, k2) := PRNGKey.split (PRNGKey.fromUInt64 seed)
-  (PRNGKey.normal01 k1 0, PRNGKey.normal01 k2 0)
-```
 
 ### Wiring log handlers
 

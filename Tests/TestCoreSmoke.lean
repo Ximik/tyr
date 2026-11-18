@@ -1,8 +1,8 @@
 /-
   Tests/TestCoreSmoke.lean
 
-  Core smoke tests: deterministic PRNG streams, silent-by-default log
-  handlers, and basic TensorStruct traversal.
+  Core smoke tests: silent-by-default log handlers and basic TensorStruct
+  traversal.
 -/
 import LeanTest
 import Tyr
@@ -10,40 +10,6 @@ import Tyr
 open torch
 
 namespace Tests.CoreSmoke
-
-/-! ## PRNG smoke tests -/
-
-@[test]
-def testPRNGKeyFromSeedRepeatable : IO Unit := do
-  let k := PRNGKey.fromUInt64 42
-  let kAgain := PRNGKey.fromUInt64 42
-  LeanTest.assertTrue (k == kAgain) "the same seed should produce the same key"
-
-@[test]
-def testPRNGSplitDistinctAndRepeatable : IO Unit := do
-  let k := PRNGKey.fromUInt64 42
-  let (k1, k2) := PRNGKey.split k
-  let (k1b, k2b) := PRNGKey.split k
-  LeanTest.assertTrue (k1 == k1b && k2 == k2b) "split should be deterministic"
-  LeanTest.assertFalse (k1 == k2) "split should produce distinct child keys"
-  LeanTest.assertFalse (k1 == k) "first child key should differ from the parent"
-  LeanTest.assertFalse (k2 == k) "second child key should differ from the parent"
-
-@[test]
-def testPRNGNormal01SaneAndDistinct : IO Unit := do
-  let k := PRNGKey.fromUInt64 7
-  let (k1, k2) := PRNGKey.split k
-  -- Box-Muller with u1 clamped to >= 1e-12 bounds |x| <= sqrt(-2 log 1e-12) < 7.5.
-  for tag in ([0, 1, 2, 3] : List UInt32) do
-    let x := PRNGKey.normal01 k1 tag
-    LeanTest.assertTrue (x == x) "normal01 should not be NaN"
-    LeanTest.assertTrue (Float.abs x < 10.0) s!"normal01 should stay in a sane range, got {x}"
-  LeanTest.assertTrue (PRNGKey.normal01 k1 0 == PRNGKey.normal01 k1 0)
-    "normal01 should be repeatable for the same key and tag"
-  for tag in ([0, 1, 2, 3] : List UInt32) do
-    let a := PRNGKey.normal01 k1 tag
-    let b := PRNGKey.normal01 k2 tag
-    LeanTest.assertFalse (a == b) s!"distinct keys should give distinct streams (tag {tag})"
 
 /-! ## Log handler smoke tests -/
 

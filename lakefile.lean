@@ -311,18 +311,6 @@ lean_exe KittenTTSPretrained where
   root := `Examples.KittenTTSPretrained
   supportInterpreter := true
 
-lean_exe KittenTTSDurations where
-  root := `Examples.KittenTTSDurations
-  supportInterpreter := true
-
-lean_exe KittenTTSDebug where
-  root := `Examples.KittenTTSDebug
-  supportInterpreter := true
-
-lean_exe KittenTTSCompare where
-  root := `Examples.KittenTTSCompare
-  supportInterpreter := true
-
 /-- Offline Qwen3-ASR transcription demo (fully Lean pipeline). -/
 lean_exe Qwen3ASRTranscribe where
   root := `Examples.Qwen3ASR.Transcribe
@@ -356,11 +344,6 @@ lean_exe Qwen25OmniRunHF where
 /-- Gemma 4 text loader/generation demo with HF repo-id resolution. -/
 lean_exe Gemma4RunHF where
   root := `Examples.Gemma4.RunHF
-  supportInterpreter := true
-
-/-- Flux debug harness (saves intermediate tensors) -/
-lean_exe FluxDebug where
-  root := `Examples.Flux.FluxDebug
   supportInterpreter := true
 
 /-- Focused native acceptance path while model tensor migration is in progress. -/
