@@ -2,7 +2,7 @@
 
 ## Purpose and when to use
 
-`Tyr/Model/` provides shape-indexed Lean 4 implementations of the Qwen LLM lineage and Gemma 4, the shared decoding/sampling infrastructure they use, and the FLM flow-matching language-model library. Every model is a plain structure parameterized by a config *value*, with tensor fields whose compile-time shapes are computed from that config, so a mismatched checkpoint shape fails at elaboration rather than at runtime. Use this component to load a HuggingFace SafeTensors checkpoint and run KV-cached autoregressive generation, or as reference architectures when building your own models. Generative and multimodal models (Flux, VAE, TTS, ASR, Whisper) live in the same directory but are covered by the [generative](generative.md) and [audio/speech](audio-speech.md) guides.
+`Tyr/Model/` provides shape-indexed Lean 4 implementations of the Qwen LLM lineage and Gemma 4, and the shared decoding/sampling infrastructure they use. Every model is a plain structure parameterized by a config *value*, with tensor fields whose compile-time shapes are computed from that config, so a mismatched checkpoint shape fails at elaboration rather than at runtime. Use this component to load a HuggingFace SafeTensors checkpoint and run KV-cached autoregressive generation, or as reference architectures when building your own models. Generative and multimodal models (Flux, VAE, TTS, ASR, Whisper) live in the same directory but are covered by the [generative](generative.md) and [audio/speech](audio-speech.md) guides.
 
 ## Architecture and main abstractions
 
@@ -16,7 +16,6 @@
 | Qwen3.6 | `torch.qwen36` | `Tyr.Model.Qwen36` | `qwen36.Config` | `qwen36.Qwen36ForCausalLM` |
 | Qwen2.5-Omni (thinker text) | `torch.qwen25omni` | `Tyr.Model.Qwen25Omni` | `qwen25omni.Config` | `qwen25omni.Qwen25OmniForCausalLM` |
 | Gemma 4 | `torch.gemma4` | `Tyr.Model.Gemma4` | `gemma4.Config` | `gemma4.Gemma4ForCausalLM cfg` |
-| FLM (flow-matching LM) | `torch.flm` | `Tyr.Model.FLM` | `flm.FlowConfig` | backbone-agnostic |
 
 The reuse structure matters more than the table suggests:
 
@@ -163,24 +162,6 @@ Three `@[extern]` opaque kernels sit inside this component (declared `private`, 
 
 `Tyr/Model/Utils.lean` holds cross-family helpers: `initWeight` (Kaiming-like `randn * sqrt(2 / fanIn)`, trainable), `initBias`, `reqGradFalse` (freeze loaded tensors), and FP8 blockwise dequantization `dequantizeFP8` / `dequantizeFP8Experts` (128×128 blocks, HF `weight_scale_inv` convention).
 
-### FLM: flow-matching language models (`torch.flm`)
-
-`Tyr/Model/FLM.lean` ports the FLM/FMLM tensor contracts (continuous one-hot corruption, flow-matching loss, ODE sampling, PSD semigroup targets) from the sibling FLM repository. It is backbone-agnostic: the caller supplies the denoiser through an interface structure, so it works with any transformer, including the families above.
-
-```lean
-variable {device : Device}
-
-structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
-  forward : {batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device } → Tensor { shape := #[batch], dtype := .Float32, device := device }
-    → Option (Tensor { shape := #[batch], dtype := .Float32, device := device }) → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
-  forwardPure : Option ({batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device } → Tensor { shape := #[batch], dtype := .Float32, device := device }
-    → Option (Tensor { shape := #[batch], dtype := .Float32, device := device }) → Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }) := none
-  lossWeight : Option ({batch : UInt64} → Params → Tensor { shape := #[batch], dtype := .Float32, device := device } → Option (Tensor { shape := #[batch], dtype := .Float32, device := device })
-    → IO (Tensor { shape := #[batch], dtype := .Float32, device := device })) := none
-```
-
-`forwardPure` is required for generation because `Tyr.DiffEq` vector fields are pure functions; `generateFLM` throws if it is absent. Sampling treats the flow as an ODE from Gaussian noise to one-hot data and integrates it with `DiffEq.Euler` (`generateFLM`) or any `DiffEq.AbstractSolver` you supply (`generateFLMWithSolver`). FLM is currently library-only: its sole consumer in the repo is `Tests/TestFLM.lean`.
-
 ## Key APIs
 
 ### Generation (`Tyr/Model/Generation.lean`, `torch.Model`)
@@ -249,19 +230,6 @@ def Qwen35ForCausalLM.loadFromPretrained
 ### Gemma 4 (`torch.gemma4`)
 
 Same pattern: `Gemma4ForCausalLM.generate` / `generateStream` / `generateFromEmbeds` with `(maxNewTokens := 256) (strategy := .greedy) (eosTokenIds := #[])`; `load (path) (cfg := Config.gemma4_E4B) (log := {}) (device := .CPU)`; `loadFromPretrained (source) (defaults := Config.gemma4_E4B) (revision) (cacheDir) (device := .CPU)`. Both loaders return models indexed by the requested device; `loadFromPretrained` also packages the runtime configuration existentially. Covered repos: `gemma4.hub.gemma4CollectionRepoIds`.
-
-### FLM (`torch.flm`)
-
-| Symbol | Purpose |
-|---|---|
-| `FlowConfig` | `tMin`/`tMax`/`softcap`/`eps`/`weightDecay`/`gradClip` knobs |
-| `TimeMap.identity` | linear tau↔t map (plug LUT-based conversions in here) |
-| `corruptContinuous` | `x_t = (1 - t)·noise + t·oneHot(x)` corruption, returns `(x_t, target)` |
-| `flowLoss` / `flowLossGivenTau` | per-token flow-matching loss, `IO (Tensor { shape := #[batch, seq], dtype := .Float32, device := device })` |
-| `trainStep` | full AdamW step; returns `(Params × Optim.AdamWState Params × LossReport)` |
-| `generateFLM` | ODE sampling with DiffEq Euler, `(steps : Nat) → IO (Tensor { shape := #[batch, seq], dtype := .Int64, device := device })` |
-| `generateFLMWithSolver` | same with a caller-supplied `DiffEq.AbstractSolver` |
-| `psdLossGivenTau` / `diagonalLossGivenTau` / `samplePsdTimes` | FMLM semigroup losses and time sampling |
 
 ## Usage examples
 
@@ -336,27 +304,6 @@ let txtEmb := qwen.encodeMasked qwenCfg maxSeqLen tokens attnMask
 -- txtEmb : Tensor { shape := #[1, maxSeqLen, qwen.outputLayers.size.toUInt64 * qwenCfg.hidden_size], dtype := .Float32, device := .CPU }
 ```
 
-### FLM training loss and ODE sampling
-
-Reconstructed example (from `Tests/TestFLM.lean`):
-
-```lean
-import Tyr.Model.FLM
-
-open torch torch.flm
-
-def identityDenoiser : FlowDenoiser (device := .CPU) 3 5 Unit :=
-  { forward := fun {_batch} _ x _ _ => pure x
-    forwardPure := some (fun {_batch} _ x _ _ => x) }
-
-def main : IO Unit := do
-  let tokens := Tensor.reshape (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[2, 3]
-  let loss ← flowLoss (cfg := {}) TimeMap.identity identityDenoiser () tokens
-  IO.println s!"mean loss: {(Tensor.meanAll loss).item}"
-  let out ← generateFLM (batch := 2) (cfg := {}) TimeMap.identity identityDenoiser () 8
-  IO.println s!"sampled tokens: {out.runtimeShape}"  -- Tensor { shape := #[2, 3], dtype := .Int64, device := .CPU } after argmax
-```
-
 ## Caveats
 
 - Some parsed config fields are accepted but never read by the models — e.g. `Qwen35Config.attention_dropout`, `hidden_act`, `mamba_ssm_dtype`, `mrope_*`, `mtp_*`, `use_cache`, and `Gemma4Config.attention_dropout`, `use_bidirectional_attention`. Setting them is a silent no-op.
@@ -373,7 +320,6 @@ def main : IO Unit := do
 - [Data and tokenizers](../data.md) — the `tokenizer.qwen35` / `tokenizer.gemma4` codecs
 - [Generative models](generative.md) — Flux, which consumes `QwenFluxEmbedder`
 - [Audio and speech models](audio-speech.md) — Qwen3-ASR/TTS, built on the same Qwen base
-- [DiffEq](../diffeq.md) — the solver interface behind `generateFLMWithSolver`
 - [Examples and testing](../examples-and-testing.md) — the `*RunHF` executables and model test suites
 
 Exhaustive symbol-level documentation for everything in this chapter is generated by doc-gen4 (see `docbuild/`); this guide covers the concepts and the main entry points only.

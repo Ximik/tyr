@@ -17,12 +17,9 @@ import Tests.TestCORETyped
 import Tests.TestTTSTypedLoading
 import Tests.TestQwen3TTS
 import Tests.TestSpeechTokenizerConfig
-import Tests.TestFLM
 import Tests.TestDataLoader
 import Tests.TestQwen3ASR
 import Tests.TestTypedNeural
-import Tests.TestDiffEqSdeAdjoint
-import Tests.TestDiffEqImplicitAdjointParity
 import Tests.TestNanoChatTokens
 import LeanTest
 import Lean.Util.Path
@@ -35,9 +32,6 @@ import Tests.TestWidgetTyped
 import Tests.TestModuleTyped
 import Tests.TestGPTTyped
 import Tests.TestInferenceCache
-import Tests.TestDiffEqAdjoint
-import Tests.TestDiffEqTyped
-import Tests.TestDiffEqContainerBrownian
 
 /-- Native acceptance for the migrated model, AD, cache and solver boundaries. -/
 unsafe def main : IO UInt32 := do
@@ -63,13 +57,10 @@ unsafe def main : IO UInt32 := do
     { module := `Tests.TestQwen3TTS },
     { module := `Tests.TestSpeechTokenizerConfig },
 
-    { module := `Tests.TestFLM },
     { module := `Tests.TestDataLoader },
     { module := `Tests.TestQwen3ASR },
     { module := `Tests.TestTypedNeural },
 
-    { module := `Tests.TestDiffEqSdeAdjoint },
-    { module := `Tests.TestDiffEqImplicitAdjointParity },
     { module := `Tests.TestNanoChatTokens },
 
     { module := `Tests.TestQwenTypedLoading },
@@ -80,9 +71,6 @@ unsafe def main : IO UInt32 := do
     { module := `Tests.TestWidgetTyped },
     { module := `Tests.TestModuleTyped },
     { module := `Tests.TestGPTTyped },
-    { module := `Tests.TestInferenceCache },
-    { module := `Tests.TestDiffEqAdjoint },
-    { module := `Tests.TestDiffEqTyped },
-    { module := `Tests.TestDiffEqContainerBrownian }
+    { module := `Tests.TestInferenceCache }
   ] {}
   LeanTest.runTestsAndExit env {} { failFast := true }

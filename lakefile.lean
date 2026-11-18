@@ -184,10 +184,6 @@ lean_exe RunDistributedValues where
   root := `Tests.RunDistributedValues
   supportInterpreter := true
 
-/-- Dopri5 per-step cost on a tensor state versus a `Float` state. -/
-lean_exe diffeq_glue_bench where
-  root := `benchmarks.DiffEqGlue
-
 /-- Write the C prototypes of `TyrFFI`'s extern declarations. Imports only
     `Lean`, so it does not link `libTyrC`. -/
 lean_exe GenerateFfiHeader where
@@ -253,21 +249,6 @@ lean_exe TestDiffusion where
 /-- DataLoader test executable -/
 lean_exe TestDataLoader where
   root := `Tests.RunTestDataLoader
-  supportInterpreter := true
-
-/-- Differential equation baseline test executable. -/
-lean_exe TestDiffEq where
-  root := `Tests.RunTestDiffEq
-  supportInterpreter := true
-
-/-- Adjoint differential equation test executable. -/
-lean_exe TestDiffEqAdjoint where
-  root := `Tests.RunTestDiffEqAdjoint
-  supportInterpreter := true
-
-/-- Core adjoint differential equation test executable. -/
-lean_exe TestDiffEqAdjointCore where
-  root := `Tests.RunTestDiffEqAdjointCore
   supportInterpreter := true
 
 /-- Laguna config.json parsing tests. -/

@@ -60,34 +60,6 @@ import Tests.TestDTypeConversions
 import Tests.TestDTypeWitness
 import Tests.TestGPTTyped
 import Tests.TestModularNorm
-import Tests.TestDiffEq
-import Tests.TestDiffEqRootFinder
-import Tests.TestDiffEqEventTreeParity
-import Tests.TestDiffEqMilsteinAutodiffParity
-import Tests.TestDiffEqSDEOrderParity
-import Tests.TestDiffEqTableauConditions
-import Tests.TestDiffEqContainerBrownian
-import Tests.TestDiffEqImplicitAdjointParity
-import Tests.TestDiffEqTyped
-import Tests.TestDiffEqSdeAdjoint
-import Tests.TestDiffEqUnderdampedOrderParity
-import Tests.TestDiffEqWeakStats
-import Tests.TestDiffEqWeakStatsParity2
-import Tests.TestDiffEqAdjoint
-import Tests.TestDiffEqAdjointParity
-import Tests.TestDiffEqAdjointCore
-import Tests.TestDiffEqBrownianFinParity
-import Tests.TestDiffEqBrownianOptionParity
-import Tests.TestDiffEqEventSaveParity
-import Tests.TestDiffEqImplicitDenseParity
-import Tests.TestDiffEqInterpolationParity
-import Tests.TestDiffEqKencarpInterpolationParity
-import Tests.TestDiffEqOrderParity2
-import Tests.TestDiffEqPathComposeParity
-import Tests.TestDiffEqPathParity
-import Tests.TestDiffEqProgressMeterParity2
-import Tests.TestDiffEqSaveAtParity
-import Tests.TestDiffEqSteadyStateEventParity
 import Tests.TestDiffusion
 import Tests.TestNanoChatTokens
 import Tests.TestNanoChatTasks
@@ -110,7 +82,6 @@ import Tests.TestQwen36Pretrained
 import Tests.TestQwen25OmniPretrained
 import Tests.TestSafeTensorsTypeProvider
 import Tests.TestSafeTensorsTypeProviderErrors
-import Tests.TestFLM
 
 
 import Tests.TestTypedNeural

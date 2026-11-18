@@ -23,7 +23,6 @@ Two kinds of documentation exist:
   [Generative models](models/generative.md).
 - **Training at scale:** [Data pipeline](data.md) → [Autodiff](autodiff.md) →
   [Distributed & orchestration](distributed.md).
-- **Scientific computing:** [DiffEq](diffeq.md).
 
 ## Contents
 
@@ -60,15 +59,10 @@ Two kinds of documentation exist:
 ### Models
 
 - [LLMs](models/llms.md) — shared generation infrastructure (sampling, KV
-  caches) and the Qwen lineage, Gemma4, and FLM.
+  caches), the Qwen lineage and Gemma4.
 - [Generative models](models/generative.md) — Flux image generation and the VAE.
 - [Audio & speech models](models/audio-speech.md) — KittenTTS, Qwen3-TTS,
   Qwen3-ASR, Silero VAD, and Whisper.
-
-### Scientific computing
-
-- [DiffEq](diffeq.md) — ODE/SDE solvers, adjoints, Brownian paths,
-  interpolation, root finding, events.
 
 ### Infrastructure
 

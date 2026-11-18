@@ -133,7 +133,7 @@ lake exe test_runner --fail-fast            # stop at first failure
 ```
 
 Focused suites exist as separate executables:
-`TestDataLoader`, `TestDiffusion`, `TestDiffEq`, `TestDiffEqAdjoint`, plus
+`TestDataLoader`, `TestDiffusion`, plus
 `RunRiemannianNanoGPTTests`. Build and run them the same way
 (`lake exe <name>`).
 

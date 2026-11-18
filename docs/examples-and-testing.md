@@ -76,14 +76,11 @@ Tests are organized in two tiers:
    in `Tests.lean`). It parses `--filter PATTERN`, `--ignored`, `--fail-fast`,
    `--help` into a `LeanTest.RunConfig`.
 2. **Standalone executables** — focused or heavy suites built and run
-   individually: `TestDiffEq`, `TestDiffEqAdjoint`, `TestDiffEqAdjointCore`,
-   `TestDataLoader`, `TestDiffusion`, and `RunRiemannianNanoGPTTests`. Each is
+   individually: `TestDataLoader`, `TestDiffusion`, and `RunRiemannianNanoGPTTests`. Each is
    a thin runner module
    (`Tests/RunTest*.lean`, `Tests/Run*.lean` — the prefix split is historical)
    with a `parseArgs` → `runTestsAndExit` body in most runners. `TestDiffusion`
-   has a dedicated `Tests/RunTestDiffusion.lean` driver. The SDE/underdamped order-parity runners
-   (`Tests/RunDiffEqSDEOrderParity.lean`, `RunDiffEqUnderdampedOrderParity.lean`)
-   which just call a `run` function.
+   has a dedicated `Tests/RunTestDiffusion.lean` driver.
 
 Hosted CI (`.github/workflows/cpu.yml`) builds and runs the manifest in
 `scripts/test_suites.json`: the main runner plus Laguna's
@@ -196,7 +193,7 @@ Running tests and examples:
 
 ```bash
 lake test                                  # main suite (test_runner)
-lake test -- --filter diffeq --fail-fast   # subset, stop on first failure
+lake test -- --filter qwen --fail-fast     # subset, stop on first failure
 lake exe ffi_crash_probe                   # manual FFI failure-mode probe
 python3 scripts/test_inventory.py --build # build every required CPU suite
 lake env python3 scripts/test_inventory.py --run # run that same suite list
@@ -207,10 +204,9 @@ lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B --prompt "Summarize dependent ty
 
 ## What is covered vs uncovered
 
-The main suite (`Tests.lean`) is deepest in: differential equations (`TestDiffEq*` —
-`TestDiffEq.lean` alone is 3880 lines),
+The main suite (`Tests.lean`) is deepest in:
 model configs and pretrained-weight loading (Qwen3/3.5/3.6, Qwen2.5-Omni,
-Gemma-era FLM, KittenTTS, Qwen3TTS, Qwen3ASR, SileroVAD), the SafeTensors type
+KittenTTS, Qwen3TTS, Qwen3ASR, SileroVAD), the SafeTensors type
 provider, checkpoints, manifolds/optimizers, and NanoChat tokenizer/tasks.
 
 No test file imports these modules directly (verified by grep): `Tyr.Audio`,
@@ -234,7 +230,6 @@ Caveats to be aware of when extending the suite:
 - [autodiff.md](autodiff.md), [modules.md](modules.md), [optimization.md](optimization.md) — subsystems under test
 - [distributed.md](distributed.md) — torchrun-based NanoChat training
 - [models/llms.md](models/llms.md), [models/generative.md](models/generative.md), [models/audio-speech.md](models/audio-speech.md) — models exercised by the RunHF/ASR/TTS demos
-- [diffeq.md](diffeq.md) — heavily tested subsystem
 - [ffi-and-build.md](ffi-and-build.md) — the C++ FFI layer probed by `ffi_crash_probe`
 
 This chapter is a guide, not a symbol dump: exhaustive API documentation is
