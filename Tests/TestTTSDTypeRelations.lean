@@ -27,10 +27,10 @@ example (cfg : TalkerConfig)
     have _ : TalkerForConditionalGeneration (device := .CPU) cfg float32DType := _model
   trivial
 
-example (_cache : qwen.QwenAttention.KVCache (device := .CPU) 1 1 4 3 .Float32)
+example (_cache : qwen.QwenAttention.KVCache (device := .CPU) 1 1 4 3 0 .Float32)
     (_dtype : DType) : True := by
   fail_if_success
-    have _ : qwen.QwenAttention.KVCache (device := .CPU) 1 1 4 3 .BFloat16 := _cache
+    have _ : qwen.QwenAttention.KVCache (device := .CPU) 1 1 4 3 0 .BFloat16 := _cache
   trivial
 
 private def tinyConfig : Qwen3TTSConfig := {
@@ -91,10 +91,10 @@ private def tinyConfig : Qwen3TTSConfig := {
   let model := TensorStruct.detach model
   let input := TalkerModel.embedCodec model (Tensor.fullInt #[1, 1] 1)
   let (cos, sin) := Tensor.rotaryFreqs 1 cfg.halfHeadDim cfg.ropeTheta
-  let cache : qwen.QwenAttention.KVCache (device := .CPU) 1 cfg.numKeyValueHeads cfg.headDim 3 .BFloat16 :=
+  let cache : qwen.QwenAttention.KVCache (device := .CPU) 1 cfg.numKeyValueHeads cfg.headDim 3 0 .BFloat16 :=
     qwen.QwenAttention.initKVCache 3 (dtype := .BFloat16)
   let some layer := model.layers[0]? | throw (IO.userError "Expected one test layer")
-  let (output, updated) := layer.forwardStep (by decide) input cos sin cache 0 (by decide)
+  let (output, updated) := layer.forwardStep (by decide) input cos sin cache (by decide)
   LeanTest.assertEqual output.raw.dtype .BFloat16
   LeanTest.assertEqual updated.kStore.raw.dtype .BFloat16
   LeanTest.assertEqual updated.vStore.raw.dtype .BFloat16

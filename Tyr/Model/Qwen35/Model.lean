@@ -329,8 +329,8 @@ structure Qwen35Attention (cfg : Config) (dtype : DType := .Float32) where
 
 namespace Qwen35Attention
 
-abbrev KVCache (cfg : Config) (batch cap : Nat) (dtype : DType := .Float32) :=
-  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap dtype
+abbrev KVCache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) :=
+  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap len dtype
 
 def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35Attention (dtype := dtype) (device := device) cfg) := do
   let q ← initDynamicWeight (dtype := dtype) (device := device) #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size] cfg.hidden_size
@@ -423,9 +423,9 @@ def forwardWithCache {batch seq cap : Nat}
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   let qg : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2], dtype := dtype } := Tensor.linear3d x m.q_proj
   let qLen : Nat := cfg.num_attention_heads * cfg.head_dim
   let (q, gateFlat) := splitQProjAndGate cfg qg
@@ -455,7 +455,9 @@ def forwardWithCache {batch seq cap : Nat}
   let kStore' := Tensor.sliceScatter kStore 2 0 kh_new
   let vStore' := Tensor.sliceScatter vStore 2 0 vh_new
 
-  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := { cache with
+  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap seq := {
+    cap_pos := cache.cap_pos
+    len_le := hfit
     kStore := kStore'
     vStore := vStore'
   }
@@ -510,15 +512,15 @@ def forwardMasked {batch seq : Nat}
   let gated : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
   Tensor.linear3d gated m.o_proj
 
-def forwardStep {batch cap : Nat}
+def forwardStep {batch cap len : Nat}
     (cfg : Config)
     (m : Qwen35Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
-    (pos : Nat) (hpos : pos < cap)
-    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap len)
+    (hlen : len < cap)
+    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
   let qg : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim * 2], dtype := dtype } := Tensor.linear3d x m.q_proj
   let qLen : Nat := cfg.num_attention_heads * cfg.head_dim
   let (q, gateFlat) := splitQProjAndGate cfg qg
@@ -547,10 +549,10 @@ def forwardStep {batch cap : Nat}
     Tensor.castLike vNew (cache.vStore)
 
   let kStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
-    Tensor.sliceScatter kStore 2 pos kNew
+    Tensor.sliceScatter kStore 2 len kNew
   let vStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
-    Tensor.sliceScatter vStore 2 pos vNew
-  let kvLen : Nat := pos + 1
+    Tensor.sliceScatter vStore 2 len vNew
+  let kvLen : Nat := len + 1
   let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := kStore'.slice 2 0 kvLen
   let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := vStore'.slice 2 0 kvLen
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
@@ -559,8 +561,9 @@ def forwardStep {batch cap : Nat}
   let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshape attn #[batch, 1, qLen]
   let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
   let out : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.linear3d gated m.o_proj
-  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
+  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1) := {
     cap_pos := cache.cap_pos
+    len_le := hlen
     kStore := kStore'
     vStore := vStore'
   }
@@ -777,16 +780,16 @@ def forward {batch seq : Nat}
 
 end Qwen35GatedDeltaNet
 
-/-- Layer-local cache bundle for hybrid token mixers. -/
-structure HybridCache (cfg : Config) (batch cap : Nat) (dtype : DType := .Float32) where
-  attnCaches : Array (Option (Qwen35Attention.KVCache (dtype := dtype) (device := device) cfg batch cap))
+/-- Layer-local cache bundle for hybrid token mixers; the attention caches hold `len` tokens. -/
+structure HybridCache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) where
+  attnCaches : Array (Option (Qwen35Attention.KVCache (dtype := dtype) (device := device) cfg batch cap len))
   convStates : Array (Option (Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim], dtype := dtype }))
   recurrentStates : Array (Option (Tensor { device := device, shape := #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim], dtype := .Float32 }))
   lastLinearLayer : Option Nat := none
 
 namespace HybridCache
 
-def hasPreviousState (c : HybridCache (dtype := dtype) (device := device) cfg batch cap) : Bool :=
+def hasPreviousState (c : HybridCache (dtype := dtype) (device := device) cfg batch cap len) : Bool :=
   match c.lastLinearLayer with
   | none => false
   | some idx =>
@@ -794,7 +797,30 @@ def hasPreviousState (c : HybridCache (dtype := dtype) (device := device) cfg ba
     | some (some _) => true
     | _ => false
 
+/-- The same layers with no slots yet, for collecting per-layer updates in order. -/
+def emptyLike {len' : Nat} (c : HybridCache (dtype := dtype) (device := device) cfg batch cap len) :
+    HybridCache (dtype := dtype) (device := device) cfg batch cap len' :=
+  { attnCaches := Array.mkEmpty c.attnCaches.size
+    convStates := Array.mkEmpty c.convStates.size
+    recurrentStates := Array.mkEmpty c.recurrentStates.size
+    lastLinearLayer := c.lastLinearLayer }
+
 end HybridCache
+
+/-- One layer's slot of a `HybridCache` after a cached forward. -/
+structure LayerCacheUpdate (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) where
+  attn : Option (Qwen35Attention.KVCache (dtype := dtype) (device := device) cfg batch cap len)
+  conv : Option (Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim], dtype := dtype })
+  recurrent : Option (Tensor { device := device, shape := #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim], dtype := .Float32 })
+
+/-- Append the next layer's slot. -/
+def HybridCache.push (c : HybridCache (dtype := dtype) (device := device) cfg batch cap len)
+    (u : LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap len) :
+    HybridCache (dtype := dtype) (device := device) cfg batch cap len :=
+  { c with
+    attnCaches := c.attnCaches.push u.attn
+    convStates := c.convStates.push u.conv
+    recurrentStates := c.recurrentStates.push u.recurrent }
 
 /-- A layer's token mixer: full attention on full-attention layers
     (`Config.isFullAttentionLayer`), gated delta-net linear attention otherwise. -/
@@ -864,84 +890,73 @@ def forward {batch seq layerIdx : Nat}
   let ffn := layer.ffn.forward cfg h3
   Tensor.add residual2 ffn
 
-/-- Forward pass with optional cache update (for batch prefill). -/
+/-- Forward pass that fills this layer's slot of an empty cache (batch prefill). -/
 def forwardWithCache {batch seq cap layerIdx : Nat}
     (cfg : Config)
     (layer : Qwen35Layer (device := device) cfg dtype layerIdx)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
-    (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap seq :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
+  let conv := (cache.convStates[layerIdx]?).bind id
+  let recurrent := (cache.recurrentStates[layerIdx]?).bind id
 
-  let (mixed, cache') :=
+  let (mixed, update) : _ × LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap seq :=
     match cfg.isFullAttentionLayer layerIdx, layer.mixer with
     | true, .full a =>
       match cache.attnCaches[layerIdx]? with
       | some (some kv) =>
         let (out, kv') := a.forwardWithCache cfg h1 cos sin kv hfit
-        let c' := { cache with attnCaches := cache.attnCaches.modify layerIdx (fun _ => some kv') }
-        (out, c')
-      | _ => (h1, cache)
+        (out, { attn := some kv', conv, recurrent })
+      | _ => (h1, { attn := none, conv, recurrent })
     | false, .linear l =>
-      let convOpt := (cache.convStates[layerIdx]?).bind id
-      let recOpt := (cache.recurrentStates[layerIdx]?).bind id
       -- Batch prefill for linear attention just uses standard forward and updates state
-      let (out, conv', rec') := l.forward cfg h1 none convOpt recOpt false
-      let c' := { cache with
-        convStates := cache.convStates.modify layerIdx (fun _ => conv')
-        recurrentStates := cache.recurrentStates.modify layerIdx (fun _ => rec')
-      }
-      (out, c')
+      let (out, conv', rec') := l.forward cfg h1 none conv recurrent false
+      (out, { attn := none, conv := conv', recurrent := rec' })
 
   let h2 := Tensor.add residual1 mixed
   let residual2 := h2
   let h3 := layer.post_attention_layernorm.forward3d h2
   let ffn := layer.ffn.forward cfg h3
-  (Tensor.add residual2 ffn, cache')
+  (Tensor.add residual2 ffn, update)
 
-def forwardStep {batch cap layerIdx : Nat}
+def forwardStep {batch cap len layerIdx : Nat}
     (cfg : Config)
     (layer : Qwen35Layer (device := device) cfg dtype layerIdx)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
-    (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap)
-    (pos : Nat) (hpos : pos < cap)
-    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch cap :=
+    (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap len)
+    (hlen : len < cap)
+    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
+  let conv := cache.convStates[layerIdx]?.getD none
+  let recurrent := cache.recurrentStates[layerIdx]?.getD none
 
-  let (mixed, cache1) :=
+  let (mixed, update) : _ × LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
     match cfg.isFullAttentionLayer layerIdx, layer.mixer with
     | true, .full a =>
       match cache.attnCaches[layerIdx]? with
       | some (some kv) =>
-        let (out, kv') := a.forwardStep cfg h1 cos sin kv pos hpos
-        let c' := { cache with attnCaches := cache.attnCaches.set! layerIdx (some kv') }
-        (out, c')
+        let (out, kv') := a.forwardStep cfg h1 cos sin kv hlen
+        (out, { attn := some kv', conv, recurrent })
       | _ =>
-        (h1, cache)
+        (h1, { attn := none, conv, recurrent })
     | false, .linear l =>
-      let convOpt := cache.convStates[layerIdx]?.getD none
-      let recOpt := cache.recurrentStates[layerIdx]?.getD none
-      let usePrev := cache.hasPreviousState && convOpt.isSome && recOpt.isSome
-      let (out, conv', rec') := l.forward cfg h1 none convOpt recOpt usePrev
-      let c' := {
-        cache with
-        convStates := cache.convStates.set! layerIdx conv'
-        recurrentStates := cache.recurrentStates.set! layerIdx rec'
-      }
-      (out, c')
+      let usePrev := cache.hasPreviousState && conv.isSome && recurrent.isSome
+      let (out, conv', rec') := l.forward cfg h1 none conv recurrent usePrev
+      (out, { attn := none, conv := conv', recurrent := rec' })
 
   let h2 := Tensor.add residual1 mixed
   let residual2 := h2
   let h3 := layer.post_attention_layernorm.forward3d h2
   let ffn := layer.ffn.forward cfg h3
-  (Tensor.add residual2 ffn, cache1)
+  (Tensor.add residual2 ffn, update)
 
 end Qwen35Layer
 
@@ -970,10 +985,10 @@ def initCache {batch : Nat}
     (cacheDevice : Device)
     [DType.ConstantSupported dtype cacheDevice]
     (h : 0 < maxLen := by omega)
-    : HybridCache (dtype := dtype) (device := cacheDevice) cfg batch maxLen :=
+    : HybridCache (dtype := dtype) (device := cacheDevice) cfg batch maxLen 0 :=
   Id.run do
     let layerTypes := cfg.layer_types
-    let mut attn : Array (Option (Qwen35Attention.KVCache (dtype := dtype) (device := cacheDevice) cfg batch maxLen)) := #[]
+    let mut attn : Array (Option (Qwen35Attention.KVCache (dtype := dtype) (device := cacheDevice) cfg batch maxLen 0)) := #[]
     let mut conv : Array (Option (Tensor { device := cacheDevice, shape := #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim], dtype := dtype })) := #[]
     let mut recStates : Array (Option (Tensor { device := cacheDevice, shape := #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim], dtype := .Float32 })) := #[]
     let mut lastLinear : Option Nat := none
@@ -1024,11 +1039,15 @@ def forwardWithCache {batch seq cap : Nat}
     (x0 : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
-    (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    : IO (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch cap) := do
-  let (h, c) := m.layers.foldl (fun (h, c) _ layer => layer.forwardWithCache cfg h cos sin c hfit) (x0, cache)
-  return (m.norm.forward3d h, c)
+    : IO (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch cap seq) := do
+  let (h, next) := m.layers.foldl
+    (fun (h, next) _ layer =>
+      let (h', update) := layer.forwardWithCache cfg h cos sin cache hfit
+      (h', HybridCache.push next update))
+    (x0, HybridCache.emptyLike cache)
+  return (m.norm.forward3d h, next)
 
 
 end Qwen35Model
@@ -1098,9 +1117,9 @@ private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (cosAll : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sinAll : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cache : HybridCache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : HybridCache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen) (hseq : 0 < seq)
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch maxLen) := do
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch maxLen seq) := do
   let cos : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 } := Tensor.slice cosAll 0 0 seq
   let sin : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 } := Tensor.slice sinAll 0 0 seq
 
@@ -1111,20 +1130,22 @@ private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
   let logits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } := Tensor.reshape logits3 #[batch, cfg.vocab_size]
   pure (logits, cache')
 
-private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
+private def decodeStepFromEmbedWithCache {batch maxLen len : Nat}
     (cfg : Config)
     (m : Qwen35ForCausalLM (dtype := dtype) (device := device) cfg)
     (cosAll : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sinAll : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (tokenEmbed : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
-    (position : Nat) (hpos : position < maxLen)
-    (cache : HybridCache (dtype := dtype) (device := device) cfg batch maxLen)
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch maxLen) := do
-  let cos : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 } := Tensor.slice cosAll 0 position 1
-  let sin : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 } := Tensor.slice sinAll 0 position 1
+    (cache : HybridCache (dtype := dtype) (device := device) cfg batch maxLen len) (hlen : len < maxLen)
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch maxLen (len + 1)) := do
+  let cos : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 } := Tensor.slice cosAll 0 len 1
+  let sin : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 } := Tensor.slice sinAll 0 len 1
 
   let (hidden, cache') := m.model.layers.foldl
-    (fun (hidden, cache') _ layer => layer.forwardStep cfg hidden cos sin cache' position hpos) (tokenEmbed, cache)
+    (fun (hidden, next) _ layer =>
+      let (hidden', update) := layer.forwardStep cfg hidden cos sin cache hlen
+      (hidden', HybridCache.push next update))
+    (tokenEmbed, HybridCache.emptyLike cache)
 
   let hiddenNorm := m.model.norm.forward3d hidden
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := Tensor.linear3d hiddenNorm m.lmHead
@@ -1140,11 +1161,11 @@ private partial def decodeLoopCached {batch maxLen : Nat}
     (eosTokenIds : Array tokenizer.TokenId)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
     (remaining : Nat)
-    (cache : HybridCache (dtype := dtype) (device := device) cfg batch maxLen)
+    {curSeq : Nat}
+    (cache : HybridCache (dtype := dtype) (device := device) cfg batch maxLen curSeq)
     (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype })
     (onStep : Option (StreamCallback (device := device) batch))
     (generatedSoFar : Nat)
-    {curSeq : Nat}
     (curIds : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
     (hfit : curSeq + remaining ≤ maxLen)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
@@ -1179,7 +1200,7 @@ private partial def decodeLoopCached {batch maxLen : Nat}
     return ⟨curSeq + 1, appended⟩
   else
     let nextEmb : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := m.embedTokens nextCol
-    let (nextLogits, cache') ← decodeStepFromEmbedWithCache cfg m cosAll sinAll nextEmb curSeq (by omega) cache
+    let (nextLogits, cache') ← decodeStepFromEmbedWithCache cfg m cosAll sinAll nextEmb cache (by omega)
     decodeLoopCached cfg m cosAll sinAll strategy eosTokenIds finished' (remaining - 1) cache' nextLogits onStep (generatedSoFar + 1) appended (by omega)
 
 private partial def decodeLoopUncached {batch : Nat}

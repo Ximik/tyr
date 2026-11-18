@@ -210,8 +210,8 @@ structure Gemma4Attention (cfg : Config) (dtype : DType := .Float32) where
 
 namespace Gemma4Attention
 
-abbrev KVCache (cfg : Config) (batch cap : Nat) (dtype : DType := .Float32) :=
-  qwen.QwenAttention.KVCache (device := device) batch (Config.maxKVHeads cfg) (Config.maxHeadDim cfg) cap dtype
+abbrev KVCache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) :=
+  qwen.QwenAttention.KVCache (device := device) batch (Config.maxKVHeads cfg) (Config.maxHeadDim cfg) cap len dtype
 
 private def qProjSliding {batch seq : Nat}
     (cfg : Config)
@@ -325,8 +325,7 @@ private def padFullKVForCache {batch seq : Nat}
 
 private def cacheSliceSliding {batch kvLen cap : Nat}
     (cfg : Config)
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
-    (h : kvLen ≤ cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap kvLen)
     : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype }
       × Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
   let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cap, Config.maxHeadDim cfg], dtype := dtype } :=
@@ -334,17 +333,16 @@ private def cacheSliceSliding {batch kvLen cap : Nat}
   let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cap, Config.maxHeadDim cfg], dtype := dtype } :=
     cache.vStore
   let k0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    (kStore.slice 1 0 cfg.num_key_value_heads (_bounds := by simpa using Config.kvHeads_le_max cfg)).slice 2 0 kvLen
+    (kStore.slice 1 0 cfg.num_key_value_heads (_bounds := by simpa using Config.kvHeads_le_max cfg)).slice 2 0 kvLen (_bounds := by simpa using cache.len_le)
   let v0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    (vStore.slice 1 0 cfg.num_key_value_heads (_bounds := by simpa using Config.kvHeads_le_max cfg)).slice 2 0 kvLen
+    (vStore.slice 1 0 cfg.num_key_value_heads (_bounds := by simpa using Config.kvHeads_le_max cfg)).slice 2 0 kvLen (_bounds := by simpa using cache.len_le)
   let k : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := k0.slice 3 0 cfg.head_dim (_bounds := by simpa using Config.headDim_le_max cfg)
   let v : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := v0.slice 3 0 cfg.head_dim (_bounds := by simpa using Config.headDim_le_max cfg)
   (k, v)
 
 private def cacheSliceFull {batch kvLen cap : Nat}
     (cfg : Config)
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
-    (h : kvLen ≤ cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap kvLen)
     : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype }
       × Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
   let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cap, Config.maxHeadDim cfg], dtype := dtype } :=
@@ -352,9 +350,9 @@ private def cacheSliceFull {batch kvLen cap : Nat}
   let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cap, Config.maxHeadDim cfg], dtype := dtype } :=
     cache.vStore
   let k0 : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    (kStore.slice 1 0 (Config.fullNumKVHeads cfg) (_bounds := by simpa using Config.fullKVHeads_le_max cfg)).slice 2 0 kvLen
+    (kStore.slice 1 0 (Config.fullNumKVHeads cfg) (_bounds := by simpa using Config.fullKVHeads_le_max cfg)).slice 2 0 kvLen (_bounds := by simpa using cache.len_le)
   let v0 : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    (vStore.slice 1 0 (Config.fullNumKVHeads cfg) (_bounds := by simpa using Config.fullKVHeads_le_max cfg)).slice 2 0 kvLen
+    (vStore.slice 1 0 (Config.fullNumKVHeads cfg) (_bounds := by simpa using Config.fullKVHeads_le_max cfg)).slice 2 0 kvLen (_bounds := by simpa using cache.len_le)
   let k : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
     k0.slice 3 0 (Config.fullHeadDim cfg) (_bounds := by simpa using Config.fullHeadDim_le_max cfg)
   let v : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
@@ -371,9 +369,9 @@ private def attentionSlidingPrefillWithMask {batch seq cap : Nat}
     (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (attnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   let q0 := qProjSliding cfg m x
   let kRaw := kProjSliding cfg m x
   let vRaw := vProjSliding cfg m x
@@ -398,8 +396,9 @@ private def attentionSlidingPrefillWithMask {batch seq cap : Nat}
     cache.vStore
   let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
   let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
-  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
+  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap seq := {
     cap_pos := cache.cap_pos
+    len_le := hfit
     kStore := kStore'
     vStore := vStore'
   }
@@ -412,9 +411,9 @@ private def attentionFullPrefillWithMask {batch seq cap : Nat}
     (cos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (attnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   let q0 := qProjFull cfg m x
   let kRaw := kProjFull cfg m x
   let vRaw :=
@@ -443,8 +442,9 @@ private def attentionFullPrefillWithMask {batch seq cap : Nat}
     cache.vStore
   let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
   let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
-  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
+  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap seq := {
     cap_pos := cache.cap_pos
+    len_le := hfit
     kStore := kStore'
     vStore := vStore'
   }
@@ -510,10 +510,10 @@ private def attentionSlidingWithCache {batch seq cap : Nat}
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap seq) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   let q0 := qProjSliding cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight.2 q0 m.q_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary q1 cos sin
@@ -521,12 +521,12 @@ private def attentionSlidingWithCache {batch seq cap : Nat}
     Tensor.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   match sharedSource with
   | some src =>
-    let (kAll0, vAll0) := cacheSliceSliding (kvLen := seq) cfg src hfit
+    let (kAll0, vAll0) := cacheSliceSliding cfg src
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionWindow qh kAll0 vAll0 true true cfg.sliding_window (_heads := .ofDvd cfg.slidingKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
-    (oProjSliding cfg m out, cache)
+    (oProjSliding cfg m out, src)
   | none =>
     let kRaw := kProjSliding cfg m x
     let vRaw := vProjSliding cfg m x
@@ -543,8 +543,9 @@ private def attentionSlidingWithCache {batch seq cap : Nat}
       cache.vStore
     let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
     let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
-    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
+    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap seq := {
       cap_pos := cache.cap_pos
+      len_le := hfit
       kStore := kStore'
       vStore := vStore'
     }
@@ -560,10 +561,10 @@ private def attentionFullWithCache {batch seq cap : Nat}
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap seq) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   let q0 := qProjFull cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight.2 q0 m.q_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary q1 cos sin
@@ -571,12 +572,12 @@ private def attentionFullWithCache {batch seq cap : Nat}
     Tensor.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   match sharedSource with
   | some src =>
-    let (kAll, vAll) := cacheSliceFull (kvLen := seq) cfg src hfit
+    let (kAll, vAll) := cacheSliceFull cfg src
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQA qh kAll vAll true true (_heads := .ofDvd cfg.fullKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
-    (oProjFull cfg m out, cache)
+    (oProjFull cfg m out, src)
   | none =>
     let kRaw := kProjFull cfg m x
     let vRaw :=
@@ -597,8 +598,9 @@ private def attentionFullWithCache {batch seq cap : Nat}
       cache.vStore
     let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
     let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
-    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
+    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap seq := {
       cap_pos := cache.cap_pos
+      len_le := hfit
       kStore := kStore'
       vStore := vStore'
     }
@@ -608,16 +610,16 @@ private def attentionFullWithCache {batch seq cap : Nat}
       Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache')
 
-private def attentionSlidingStep {batch cap : Nat}
+private def attentionSlidingStep {batch cap len : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
-    (pos : Nat) (hpos : pos < cap)
-    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
-    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap len)
+    (hlen : len < cap)
+    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1)) := none)
+    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
   let q0 := qProjSliding cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight.2 q0 m.q_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary q1 cos sin
@@ -625,19 +627,18 @@ private def attentionSlidingStep {batch cap : Nat}
     Tensor.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   match sharedSource with
   | some src =>
-    -- The source layer is earlier in this step, so it already holds `pos + 1` entries.
-    let kvLen := pos + 1
+    let kvLen := len + 1
     let useLen := if kvLen > cfg.sliding_window then cfg.sliding_window else kvLen
     let start := kvLen - useLen
     have _hUse : useLen ≤ kvLen := by simp only [useLen]; split <;> omega
-    let (kAll0, vAll0) := cacheSliceSliding (kvLen := kvLen) cfg src hpos
+    let (kAll0, vAll0) := cacheSliceSliding cfg src
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := kAll0.slice 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := vAll0.slice 2 start useLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.slidingKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
-    (oProjSliding cfg m out, cache)
+    (oProjSliding cfg m out, src)
   | none =>
     let kRaw := kProjSliding cfg m x
     let vRaw := vProjSliding cfg m x
@@ -652,39 +653,40 @@ private def attentionSlidingStep {batch cap : Nat}
       cache.kStore
     let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cap, Config.maxHeadDim cfg], dtype := dtype } :=
       cache.vStore
-    let kStore' := Tensor.sliceScatter kStore 2 pos paddedK
-    let vStore' := Tensor.sliceScatter vStore 2 pos paddedV
-    let kvLen := pos + 1
+    let kStore' := Tensor.sliceScatter kStore 2 len paddedK
+    let vStore' := Tensor.sliceScatter vStore 2 len paddedV
+    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1) := {
+      cap_pos := cache.cap_pos
+      len_le := hlen
+      kStore := kStore'
+      vStore := vStore'
+    }
+    let kvLen := len + 1
     let useLen := if kvLen > cfg.sliding_window then cfg.sliding_window else kvLen
     let start := kvLen - useLen
     have _hUse : useLen ≤ kvLen := by simp only [useLen]; split <;> omega
     let kAll0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
-      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.1
+      (cacheSliceSliding cfg cache') |>.1
     let vAll0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
-      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.2
+      (cacheSliceSliding cfg cache') |>.2
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := kAll0.slice 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := vAll0.slice 2 start useLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.slidingKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
-    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
-      cap_pos := cache.cap_pos
-      kStore := kStore'
-      vStore := vStore'
-    }
     (oProjSliding cfg m out, cache')
 
-private def attentionFullStep {batch cap : Nat}
+private def attentionFullStep {batch cap len : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
-    (pos : Nat) (hpos : pos < cap)
-    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
-    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap len)
+    (hlen : len < cap)
+    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1)) := none)
+    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
   let q0 := qProjFull cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight.2 q0 m.q_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary q1 cos sin
@@ -692,14 +694,13 @@ private def attentionFullStep {batch cap : Nat}
     Tensor.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   match sharedSource with
   | some src =>
-    -- The source layer is earlier in this step, so it already holds `pos + 1` entries.
-    let kvLen := pos + 1
-    let (kAll, vAll) := cacheSliceFull (kvLen := kvLen) cfg src hpos
+    let kvLen := len + 1
+    let (kAll, vAll) := cacheSliceFull cfg src
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.fullKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
-    (oProjFull cfg m out, cache)
+    (oProjFull cfg m out, src)
   | none =>
     let kRaw := kProjFull cfg m x
     let vRaw :=
@@ -718,22 +719,23 @@ private def attentionFullStep {batch cap : Nat}
       cache.kStore
     let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cap, Config.maxHeadDim cfg], dtype := dtype } :=
       cache.vStore
-    let kStore' := Tensor.sliceScatter kStore 2 pos paddedK
-    let vStore' := Tensor.sliceScatter vStore 2 pos paddedV
-    let kvLen := pos + 1
+    let kStore' := Tensor.sliceScatter kStore 2 len paddedK
+    let vStore' := Tensor.sliceScatter vStore 2 len paddedV
+    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1) := {
+      cap_pos := cache.cap_pos
+      len_le := hlen
+      kStore := kStore'
+      vStore := vStore'
+    }
+    let kvLen := len + 1
     let kAll : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
-      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.1
+      (cacheSliceFull cfg cache') |>.1
     let vAll : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
-      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.2
+      (cacheSliceFull cfg cache') |>.2
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.fullKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
-    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
-      cap_pos := cache.cap_pos
-      kStore := kStore'
-      vStore := vStore'
-    }
     (oProjFull cfg m out, cache')
 
 def forward {batch seq : Nat}
@@ -759,15 +761,15 @@ def forwardWithCache {batch seq cap : Nat}
     (slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap seq) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   match layerType with
   | .slidingAttention => attentionSlidingWithCache cfg m x slidingCos slidingSin cache hfit sharedSource
   | .fullAttention => attentionFullWithCache cfg m x fullCos fullSin cache hfit sharedSource
 
-def forwardStep {batch cap : Nat}
+def forwardStep {batch cap len : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
@@ -776,13 +778,13 @@ def forwardStep {batch cap : Nat}
     (slidingSin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
     (fullCos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
-    (pos : Nat) (hpos : pos < cap)
-    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
-    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap len)
+    (hlen : len < cap)
+    (sharedSource : Option (KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1)) := none)
+    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
   match layerType with
-  | .slidingAttention => attentionSlidingStep cfg m x slidingCos slidingSin cache pos hpos sharedSource
-  | .fullAttention => attentionFullStep cfg m x fullCos fullSin cache pos hpos sharedSource
+  | .slidingAttention => attentionSlidingStep cfg m x slidingCos slidingSin cache hlen sharedSource
+  | .fullAttention => attentionFullStep cfg m x fullCos fullSin cache hlen sharedSource
 
 def forwardPrefillWithMask {batch seq cap : Nat}
     (cfg : Config)
@@ -795,9 +797,9 @@ def forwardPrefillWithMask {batch seq cap : Nat}
     (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (slidingAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (fullAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
-    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   match layerType with
   | .slidingAttention =>
     attentionSlidingPrefillWithMask cfg m x slidingCos slidingSin slidingAttnMask cache hfit
@@ -820,8 +822,10 @@ structure Gemma4Layer (cfg : Config) (dtype : DType := .Float32) where
   layer_scalar : Tensor { device := device, shape := #[1], dtype := dtype }
   deriving TensorStruct
 
-structure Gemma4Cache (cfg : Config) (batch cap : Nat) (dtype : DType := .Float32) where
-  attnCaches : Vector cfg.num_hidden_layers (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
+/-- One K/V cache per layer, each holding `len` tokens. A shared-KV layer's entry is its
+    source layer's cache. -/
+structure Gemma4Cache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) where
+  attnCaches : Vector cfg.num_hidden_layers (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap len)
 
 namespace Gemma4Layer
 
@@ -894,11 +898,11 @@ def forwardWithCache {batch seq cap : Nat}
     (slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 })
     (fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
-    (sharedSource : Option (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
+    (sharedSource : Option (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap seq) := none)
     (perLayerInput : Option (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size_per_layer_input], dtype := dtype }) := none)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let (attn, layerCache') :=
@@ -939,7 +943,7 @@ def forwardWithCache {batch seq cap : Nat}
     | _, _ => h4
   (applyLayerScalar cfg layer.layer_scalar h5, layerCache')
 
-def forwardStep {batch cap : Nat}
+def forwardStep {batch cap len : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
@@ -947,11 +951,11 @@ def forwardStep {batch cap : Nat}
     (slidingSin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 })
     (fullCos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
-    (pos : Nat) (hpos : pos < cap)
-    (sharedSource : Option (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap) := none)
+    (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap len)
+    (hlen : len < cap)
+    (sharedSource : Option (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1)) := none)
     (perLayerInput : Option (Tensor { device := device, shape := #[batch, 1, cfg.hidden_size_per_layer_input], dtype := dtype }) := none)
-    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let (attn, layerCache') :=
@@ -964,8 +968,7 @@ def forwardStep {batch cap : Nat}
       fullCos
       fullSin
       layerCache
-      pos
-      hpos
+      hlen
       sharedSource
   let h2 := Tensor.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
@@ -1002,10 +1005,10 @@ def forwardPrefillWithMask {batch seq cap : Nat}
     (fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (slidingAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (fullAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
-    (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (layerCache : Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap 0)
     (hfit : seq ≤ cap)
     (perLayerInput : Option (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size_per_layer_input], dtype := dtype }) := none)
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap seq :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let (attn, layerCache') :=
@@ -1126,6 +1129,24 @@ private def precomputeFullRotary {seq : Nat}
   ((Tensor.cat cosRot cosPass 1).reshape #[seq, fullHalf] (by simp [passHalf, Nat.add_sub_cancel' hRot]),
    (Tensor.cat sinRot sinPass 1).reshape #[seq, fullHalf] (by simp [passHalf, Nat.add_sub_cancel' hRot]))
 
+/-- Run the layers in order. `step` gets layer `i`'s cache and, for a shared-KV layer,
+    the new cache of its source layer; the cache it returns becomes layer `i`'s. -/
+private def runLayers {C C' H : Type} (cfg : Config)
+    (old : Vector cfg.num_hidden_layers C) (hidden : H)
+    (step : Fin cfg.num_hidden_layers → H → C → Option C' → H × C') :
+    H × Vector cfg.num_hidden_layers C' :=
+  go 0 (Nat.zero_le _) #[] rfl hidden
+where
+  go (i : Nat) (hi : i ≤ cfg.num_hidden_layers) (acc : Array C') (hacc : acc.size = i) (hidden : H) :
+      H × Vector cfg.num_hidden_layers C' :=
+    if hlt : i < cfg.num_hidden_layers then
+      let source := (Config.sharedSourceLayer? cfg i).map fun s => acc[s.val]'(by have := s.isLt; omega)
+      let (hidden', own) := step ⟨i, hlt⟩ hidden (old.get ⟨i, hlt⟩) source
+      go (i + 1) hlt (acc.push own) (by simp [hacc]) hidden'
+    else
+      (hidden, ⟨acc, by omega⟩)
+  termination_by cfg.num_hidden_layers - i
+
 def initCache {batch : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
@@ -1133,7 +1154,7 @@ def initCache {batch : Nat}
     (cacheDevice : Device)
     [DType.ConstantSupported dtype cacheDevice]
     (h : 0 < maxLen := by omega)
-    : Gemma4Cache (dtype := dtype) (device := cacheDevice) cfg batch maxLen :=
+    : Gemma4Cache (dtype := dtype) (device := cacheDevice) cfg batch maxLen 0 :=
   let layers : Vector cfg.num_hidden_layers Nat := ⟨Array.range cfg.num_hidden_layers, Array.size_range⟩
   { attnCaches := layers.map fun _ =>
       let kv := qwen.QwenAttention.initKVCache
@@ -1157,22 +1178,20 @@ private def forwardEmbedsCore {batch seq : Nat}
   let (slidingCos, slidingSin) := precomputeSlidingRotary cfg inputsEmbeds.device
   let (fullCos, fullSin) := precomputeFullRotary cfg inputsEmbeds.device
   -- An empty sequence has no K/V to share, and runs every layer uncached.
-  let mut caches := if h : cfg.num_kv_shared_layers > 0 ∧ 0 < seq then
-      some (initCache cfg m seq inputsEmbeds.device h.2).attnCaches else none
+  if h : cfg.num_kv_shared_layers > 0 ∧ 0 < seq then
+    let caches := (initCache cfg m seq inputsEmbeds.device h.2).attnCaches
+    let (hidden, _) := runLayers cfg caches inputsEmbeds
+      fun ⟨i, hi⟩ hidden layerCache sharedSource =>
+        Gemma4Layer.forwardWithCache cfg (m.layers.get ⟨i, hi⟩) hidden
+          slidingCos slidingSin fullCos fullSin layerCache (Nat.le_refl _) sharedSource
+          (extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩)
+    return m.norm.forward3d hidden
   let mut hidden := inputsEmbeds
   for hL : i in [:cfg.num_hidden_layers] do
     have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
     let layer := m.layers.get ⟨i, hi⟩
     let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-    match caches with
-    | some layerCaches =>
-      let sharedSource := (Config.sharedSourceLayer? cfg i).map layerCaches.get
-      let (next, nextCache) := Gemma4Layer.forwardWithCache cfg layer hidden
-        slidingCos slidingSin fullCos fullSin (layerCaches.get ⟨i, hi⟩) (Nat.le_refl _) sharedSource perLayer
-      hidden := next
-      if sharedSource.isNone then caches := some (layerCaches.set ⟨i, hi⟩ nextCache)
-    | none =>
-      hidden := Gemma4Layer.forward cfg layer hidden slidingCos slidingSin fullCos fullSin perLayer
+    hidden := Gemma4Layer.forward cfg layer hidden slidingCos slidingSin fullCos fullSin perLayer
   return m.norm.forward3d hidden
 
 def forward {batch seq : Nat}
@@ -1199,13 +1218,13 @@ def forwardWithCache {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen seq :=
   Id.run do
     let inputsEmbeds := embedTokens cfg m inputIds
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
@@ -1213,16 +1232,10 @@ def forwardWithCache {batch seq maxLen : Nat}
     let slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
     let fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
     let fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
-    let mut hidden := inputsEmbeds
-    let mut cache' := cache
-    for hL : i in [:cfg.num_hidden_layers] do
-      have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
-      let layer := m.layers.get ⟨i, hi⟩
-      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
-      let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-      let sharedSource :=
-        (Config.sharedSourceLayer? cfg i).map cache'.attnCaches.get
-      let (hiddenNext, layerCacheNext) :=
+    let (hidden, layerCaches) := runLayers cfg cache.attnCaches inputsEmbeds
+      fun ⟨i, hi⟩ hidden layerCache sharedSource =>
+        let layer := m.layers.get ⟨i, hi⟩
+        let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
         Gemma4Layer.forwardWithCache
           cfg
           layer
@@ -1235,39 +1248,30 @@ def forwardWithCache {batch seq maxLen : Nat}
           hfit
           sharedSource
           perLayer
-      hidden := hiddenNext
-      if sharedSource.isNone then
-        cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
-    return (m.norm.forward3d hidden, cache')
+    return (m.norm.forward3d hidden, { attnCaches := layerCaches })
 
 def forwardWithCacheEmbeds {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen seq :=
   Id.run do
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
     let slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
     let slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
     let fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
     let fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
-    let mut hidden := inputsEmbeds
-    let mut cache' := cache
-    for hL : i in [:cfg.num_hidden_layers] do
-      have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
-      let layer := m.layers.get ⟨i, hi⟩
-      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
-      let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-      let sharedSource :=
-        (Config.sharedSourceLayer? cfg i).map cache'.attnCaches.get
-      let (hiddenNext, layerCacheNext) :=
+    let (hidden, layerCaches) := runLayers cfg cache.attnCaches inputsEmbeds
+      fun ⟨i, hi⟩ hidden layerCache sharedSource =>
+        let layer := m.layers.get ⟨i, hi⟩
+        let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
         Gemma4Layer.forwardWithCache
           cfg
           layer
@@ -1280,10 +1284,7 @@ def forwardWithCacheEmbeds {batch seq maxLen : Nat}
           hfit
           sharedSource
           perLayer
-      hidden := hiddenNext
-      if sharedSource.isNone then
-        cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
-    return (m.norm.forward3d hidden, cache')
+    return (m.norm.forward3d hidden, { attnCaches := layerCaches })
 
 def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     (cfg : Config)
@@ -1291,29 +1292,23 @@ def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen seq :=
   Id.run do
     let _ := inputIds
     let slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
     let slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
     let fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
     let fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
-    let mut hidden := inputsEmbeds
-    let mut cache' := cache
-    for hL : i in [:cfg.num_hidden_layers] do
-      have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
-      let layer := m.layers.get ⟨i, hi⟩
-      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
-      let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-      let sharedSource :=
-        (Config.sharedSourceLayer? cfg i).map cache'.attnCaches.get
-      let (hiddenNext, layerCacheNext) :=
+    let (hidden, layerCaches) := runLayers cfg cache.attnCaches inputsEmbeds
+      fun ⟨i, hi⟩ hidden layerCache sharedSource =>
+        let layer := m.layers.get ⟨i, hi⟩
+        let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
         Gemma4Layer.forwardWithCache
           cfg
           layer
@@ -1326,10 +1321,7 @@ def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
           hfit
           sharedSource
           perLayer
-      hidden := hiddenNext
-      if sharedSource.isNone then
-        cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
-    return (m.norm.forward3d hidden, cache')
+    return (m.norm.forward3d hidden, { attnCaches := layerCaches })
 
 def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : Nat}
     (cfg : Config)
@@ -1337,7 +1329,7 @@ def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLe
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
@@ -1345,21 +1337,17 @@ def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLe
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (slidingAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (fullAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
-    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen :=
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen seq :=
   Id.run do
     let _ := inputIds
     let slidingCos : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 0 seq
     let slidingSin : Tensor { device := device, shape := #[seq, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 0 seq
     let fullCos : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 0 seq
     let fullSin : Tensor { device := device, shape := #[seq, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 0 seq
-    let mut hidden := inputsEmbeds
-    let mut cache' := cache
-    for hL : i in [:cfg.num_hidden_layers] do
-      have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
-      let layer := m.layers.get ⟨i, hi⟩
-      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
-      let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-      let (hiddenNext, layerCacheNext) :=
+    let (hidden, layerCaches) := runLayers cfg cache.attnCaches inputsEmbeds
+      fun ⟨i, hi⟩ hidden layerCache _sharedSource =>
+        let layer := m.layers.get ⟨i, hi⟩
+        let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
         Gemma4Layer.forwardPrefillWithMask
           cfg
           layer
@@ -1373,43 +1361,34 @@ def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLe
           layerCache
           hfit
           perLayer
-      hidden := hiddenNext
-      cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
-    return (m.norm.forward3d hidden, cache')
+    return (m.norm.forward3d hidden, { attnCaches := layerCaches })
 
-def forwardStep {batch cap : Nat}
+def forwardStep {batch cap len : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 })
-    (position : Nat) (hpos : position < cap)
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch cap)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch cap len) (hlen : len < cap)
     (slidingCosAll : Tensor { device := device, shape := #[cap, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[cap, cfg.half_head_dim], dtype := .Float32 })
     (fullCosAll : Tensor { device := device, shape := #[cap, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[cap, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch cap :=
+    : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
   Id.run do
     let inputsEmbeds := embedTokens cfg m inputIds
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let slidingCos : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 position 1
-    let slidingSin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 position 1
-    let fullCos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 position 1
-    let fullSin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 position 1
-    let mut hidden := inputsEmbeds
-    let mut cache' := cache
-    for hL : i in [:cfg.num_hidden_layers] do
-      have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
-      let layer := m.layers.get ⟨i, hi⟩
-      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
-      let perLayer :=
-        match perLayerInputs with
-        | some p =>
-          let one : Tensor { device := device, shape := #[batch, 1, 1, cfg.hidden_size_per_layer_input], dtype := dtype } := Tensor.slice p 2 i 1
-          some (Tensor.reshape one #[batch, 1, cfg.hidden_size_per_layer_input])
-        | none => none
-      let sharedSource :=
-        (Config.sharedSourceLayer? cfg i).map cache'.attnCaches.get
-      let (hiddenNext, layerCacheNext) :=
+    let slidingCos : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingCosAll 0 len 1
+    let slidingSin : Tensor { device := device, shape := #[1, cfg.half_head_dim], dtype := .Float32 } := Tensor.slice slidingSinAll 0 len 1
+    let fullCos : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullCosAll 0 len 1
+    let fullSin : Tensor { device := device, shape := #[1, Config.fullHalfHeadDim cfg], dtype := .Float32 } := Tensor.slice fullSinAll 0 len 1
+    let (hidden, layerCaches) := runLayers cfg cache.attnCaches inputsEmbeds
+      fun ⟨i, hi⟩ hidden layerCache sharedSource =>
+        let layer := m.layers.get ⟨i, hi⟩
+        let perLayer :=
+          match perLayerInputs with
+          | some p =>
+            let one : Tensor { device := device, shape := #[batch, 1, 1, cfg.hidden_size_per_layer_input], dtype := dtype } := Tensor.slice p 2 i 1
+            some (Tensor.reshape one #[batch, 1, cfg.hidden_size_per_layer_input])
+          | none => none
         Gemma4Layer.forwardStep
           cfg
           layer
@@ -1419,14 +1398,10 @@ def forwardStep {batch cap : Nat}
           fullCos
           fullSin
           layerCache
-          position
-          hpos
+          hlen
           sharedSource
           perLayer
-      hidden := hiddenNext
-      if sharedSource.isNone then
-        cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
-    return (m.norm.forward3d hidden, cache')
+    return (m.norm.forward3d hidden, { attnCaches := layerCaches })
 
 end Gemma4Model
 
@@ -1518,14 +1493,14 @@ private def prefillCaches {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen)
     (hseq : 0 < seq)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen seq) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCache
       (maxLen := maxLen)
@@ -1547,14 +1522,14 @@ private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen)
     (hseq : 0 < seq)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen seq) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCacheEmbeds
       (maxLen := maxLen)
@@ -1578,14 +1553,14 @@ private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen)
     (hseq : 0 < seq)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen seq) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCacheEmbedsWithPerLayerInputs
       (maxLen := maxLen)
@@ -1610,7 +1585,7 @@ private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch 
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen 0)
     (hfit : seq ≤ maxLen)
     (hseq : 0 < seq)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
@@ -1619,7 +1594,7 @@ private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch 
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (slidingAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
     (fullAttnMask : Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 })
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen seq) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision
       (maxLen := maxLen)
@@ -1640,25 +1615,23 @@ private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch 
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := capLogits cfg (Tensor.linear3d lastHidden m.lmHead)
   pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
-private def decodeStep {batch maxLen : Nat}
+private def decodeStep {batch maxLen len : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 })
-    (position : Nat) (hpos : position < maxLen)
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen len) (hlen : len < maxLen)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen) := do
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen (len + 1)) := do
   let (hidden, cache') :=
     Gemma4Model.forwardStep
       cfg
       m.model
       inputIds
-      position
-      hpos
       cache
+      hlen
       slidingCosAll
       slidingSinAll
       fullCosAll
@@ -1673,7 +1646,8 @@ private partial def decodeLoopCached {batch maxLen : Nat}
     (eosTokenIds : Array tokenizer.TokenId)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
     (remaining : Nat)
-    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
+    {curSeq : Nat}
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen curSeq)
     (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype })
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
@@ -1681,7 +1655,6 @@ private partial def decodeLoopCached {batch maxLen : Nat}
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
     (onStep : Option (StreamCallback (device := device) batch))
     (generatedSoFar : Nat)
-    {curSeq : Nat}
     (curIds : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
     (hfit : curSeq + remaining ≤ maxLen)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
@@ -1720,9 +1693,8 @@ private partial def decodeLoopCached {batch maxLen : Nat}
         cfg
         m
         nextCol
-        curSeq
-        (by omega)
         cache
+        (by omega)
         slidingCosAll
         slidingSinAll
         fullCosAll
