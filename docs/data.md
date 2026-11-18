@@ -22,9 +22,8 @@ unrelated roots:
 - `tokenizer` (global, no `Tyr` prefix) — the BPE stack in `Tyr/Tokenizer/`.
   Umbrella import: `import Tyr.Tokenizer` (re-exports all 13 submodules).
 - `torch.DataLoader` (`Tyr/DataLoader.lean`) and `torch.Data.*`
-  (`Tyr/Data/{Task,TaskClass,Tasks,Pipeline,Pretraining,Download,HuggingFace}.lean`).
-  Umbrella `import Tyr.Data` re-exports only Task/TaskClass/Tasks/Pipeline/
-  Pretraining, not Download or HuggingFace.
+  (`Tyr/Data/{Task,TaskClass,Tasks,Pretraining,Download,HuggingFace}.lean`).
+  Umbrella `import Tyr.Data` re-exports all of them.
 - `Tyr.Text` (`Tyr/Text/`) — streaming-ASR utilities; no umbrella module and
   not re-exported by `import Tyr`.
 
@@ -190,27 +189,13 @@ Mixtures come in three forms, all projecting to the function-closure
   with `entry`/`GenericTaskMixture.create`.
 - Built-in toy tasks in `Tyr/Data/Tasks.lean` (identity, math, spelling,
   multiple choice) and mixture presets `createMidtrainingMixture` /
-  `createSFTMixture` (`Tasks.lean:188,197`).
+  `createSFTMixture` (`Tasks.lean:173,182`).
 
 Consumers: `TaskIterator` (`Task.lean:391`) yields padded
 `[batch, maxLen]` batches with masks; `TaskTokenStream` (`Task.lean:454`)
 streams rank-strided rendered conversations into a token buffer and emits
 contiguous `batchSize * seqLen + 1` windows, split into `(inputs, targets)` by
 one-token shift — the nanochat midtraining data flow.
-
-### Multi-stage pipeline scheduling
-
-`torch.Data.Pipeline` (`Tyr/Data/Pipeline.lean`) is pure configuration and
-scheduling math — no data movement. `Stage` is
-`pretraining | midtraining | sft | rl` (`:30`); each stage has a
-`StageLRConfig` (per-parameter-group base LRs, warmup/warmdown ratios) and a
-`StageConfig` (steps/epochs, batch size, intervals, weight decay) with nanochat
-defaults (`pretrainingConfig`, `sftConfig`, ...). `getStageLRMultiplier`
-(`:187`) computes the warmup/plateau/warmdown multiplier,
-`computeStepLRs` (`:216`) applies it with square-root batch-size scaling, and
-`calculateIterations` (`:246`) derives step counts from a `TrainingDuration`
-(iterations/FLOPs/param-data ratio/epochs). `Pipeline.standard` (`:317`)
-assembles a pretraining → midtraining → SFT sequence.
 
 ### Streaming text utilities
 
@@ -287,7 +272,7 @@ assembles a pretraining → midtraining → SFT sequence.
 | `loadARC` / `loadGSM8K` / `loadMMLU` / `loadSmolTalk` | `... : IO (Array Lean.Json)` | `Tyr/Data/HuggingFace.lean:59,67,75,167` |
 | `loadJsonlFromUrl` / `loadJsonlFromFile` | `... : IO (Array Lean.Json)` | `HuggingFace.lean:179,195` |
 
-### Tasks and scheduling — `torch.Data.Task`, `torch.Data.TaskClass`, `torch.Data.Tasks`, `torch.Data.Pipeline`
+### Tasks — `torch.Data.Task`, `torch.Data.TaskClass`, `torch.Data.Tasks`
 
 | API | Signature | Location |
 | --- | --- | --- |
@@ -299,9 +284,7 @@ assembles a pretraining → midtraining → SFT sequence.
 | `TaskTokenStream.new` / `.nextGPTBatch` | rank-strided token windows; indexed Int64 input/target pairs with the stream dimensions | `Task.lean:470,521` |
 | `TaskMixture.create` / `.toConversationMixture` | `(entries : Array MixtureEntry) (seed := 42)` | `Task.lean:153,193` |
 | `EvalTask` class / `boxTask` / `entry` / `GenericTaskMixture.create` | open task typeclass + existential mixture | `Tyr/Data/TaskClass.lean:57,119,237,172` |
-| `createMidtrainingMixture` / `createSFTMixture` | `(modelName : String) : TaskMixture` | `Tyr/Data/Tasks.lean:188,197` |
-| `getStageLRMultiplier` / `computeStepLRs` | warmup/plateau/warmdown LR math | `Tyr/Data/Pipeline.lean:187,216` |
-| `calculateIterations` / `Pipeline.standard` | duration → steps; 3-stage pipeline | `Pipeline.lean:246,317` |
+| `createMidtrainingMixture` / `createSFTMixture` | `(modelName : String) : TaskMixture` | `Tyr/Data/Tasks.lean:173,182` |
 
 ### Streaming text — `namespace Tyr.Text`
 
@@ -406,8 +389,6 @@ Behavior verified against source that the module docs do not advertise:
   (the refill path returns `none`), and `tokenizeDocuments` is a byte-level
   placeholder (`Tyr/Data/Pretraining.lean:298-356,445`); the NanoChat pipeline
   drives the parquet FFI declarations directly.
-- `Tasks.loadJsonlTask` / `loadHFDataset` are stubs returning empty tasks
-  (`Tyr/Data/Tasks.lean:208,215`).
 - `allSpecialTokens` mixes control tokens with ordinary words ("theorem",
   "def", Greek letters); via `encodeWithSpecials` these match atomically
   anywhere in text (`Tyr/Tokenizer/SpecialTokens.lean:53-99`).
