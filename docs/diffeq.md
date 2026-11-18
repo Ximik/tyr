@@ -398,7 +398,7 @@ def adjointExample : IO Unit := do
 ```
 
 `Tyr/Model/BranchingFlows/DiffEq.lean` wraps `diffeqsolve` for
-generative modeling; `Examples/GPU/RunRKFusedSolve.lean` is a fused CUDA bench.
+generative modeling.
 
 ## Related guides
 
@@ -407,7 +407,6 @@ generative modeling; `Examples/GPU/RunRKFusedSolve.lean` is a fused CUDA bench.
 - [TensorStruct](core/tensorstruct.md) — model-tree states for neural ODEs
 - [Typed tensors](core/typed.md) — `Tensor σ` states with static shape/dtype specs
 - [Generative models](models/generative.md) — BranchingFlows, a downstream `diffeqsolve` consumer
-- [GPU kernels](gpu/kernels.md) — fused RK solve kernels
 - [Examples and testing](examples-and-testing.md) — the DiffEq parity test suites (`Tests/TestDiffEq*.lean`)
 
 Exhaustive, per-symbol API documentation is generated separately by doc-gen4

@@ -3,12 +3,11 @@
 ## Purpose & when to use
 
 `Examples/` is the collection of runnable end-to-end demonstrations: training
-scripts (char-GPT, NanoChat, discrete diffusion, branching flows), pretrained-model
-demos (Flux, Whisper, Qwen, Gemma, KittenTTS), and GPU kernel parity/benchmark
-harnesses. `Tests/` is the LeanTest-based test suite — unit tests, parity tests
-against reference implementations, and GPU end-to-end suites. Read this chapter
-when you want to run something rather than build it, or when you are adding a
-test or example of your own.
+scripts (char-GPT, NanoChat, discrete diffusion, branching flows) and
+pretrained-model demos (Flux, Whisper, Qwen, Gemma, KittenTTS). `Tests/` is the
+LeanTest-based test suite — unit tests and parity tests against reference
+implementations. Read this chapter when you want to run something rather than
+build it, or when you are adding a test or example of your own.
 
 ## Architecture & main abstractions
 
@@ -83,9 +82,8 @@ Tests are organized in three tiers:
    `Tyr/Model/BranchingFlows.lean` stabilizes (note at `Tests.lean:118`).
 3. **Standalone executables** — focused or heavy suites built and run
    individually: `TestDiffEq`, `TestDiffEqAdjoint`, `TestDiffEqAdjointCore`,
-   `TestDataLoader`, `TestGPUDSL`, `TestGPUKernels`, `TestGPUE2E`,
-   `TestGPUGB10E2E`, `TestGPUTileIR`, `TestTileIRGenerateMain`, `TestDiffusion`,
-   and `RunRiemannianNanoGPTTests`. Each is a thin runner module
+   `TestDataLoader`, `TestDiffusion`, and `RunRiemannianNanoGPTTests`. Each is
+   a thin runner module
    (`Tests/RunTest*.lean`, `Tests/Run*.lean` — the prefix split is historical)
    with a `parseArgs` → `runTestsAndExit` body in most runners. `TestDiffusion`
    has a dedicated `Tests/RunTestDiffusion.lean` driver. The SDE/underdamped order-parity runners
@@ -96,8 +94,8 @@ Hosted CI (`.github/workflows/cpu.yml`) builds and runs the manifest in
 `scripts/test_suites.json`: the main and experimental runners plus Laguna's
 config, tokenizer, NVFP4, MoE, model, reference parity, and rotary suites.
 These Laguna suites run CPU checks against tracked fixtures; their CUDA branches
-remain conditional. Diffusion and TileIR export-driver tests are in the main
-suite. Add new standalone CPU assertion suites to the same manifest.
+remain conditional. Diffusion tests are in the main suite. Add new standalone
+CPU assertion suites to the same manifest.
 
 CI also builds `BranchingFlowsMoleculeTrainGenerate` and runs
 `scripts/test_branching_checkpoint_resume.py` on its embedded CPU dataset. That
@@ -107,11 +105,8 @@ suite compare the next optimizer update after restoring a snapshot.
 
 GPU suites run on self-hosted hardware via `.github/workflows/gpu.yml`.
 That workflow sets `TYR_GPU_TEST_STRICT=1`: the linked LibTorch must have CUDA,
-the configured family must match, and the selected suite must execute tests
-with no skips. Blackwell uses `TestGPUGB10E2E`; Hopper runs `TestGPUE2E` filtered
-to `TorchParity`, then `RunMhaH100Decode` including cache parity. GPU test and
-example changes are included in the workflow path filters. Local GPU runs
-without strict mode retain optional skips and print executed/skipped counts.
+the configured GPU must match, and the selected suites must execute with no
+skips. It runs `scripts/test_native_attention.sh cuda` and `LagunaModelTest`.
 
 There is also `lean_exe ffi_crash_probe` (root
 `Tests/FfiCrashProbe.lean`), a probe of Tyr's fatal failure paths selected by
@@ -126,21 +121,8 @@ first two to abort (SIGABRT) with Tyr's report and the third to exit normally.
 - `Tests/fixtures/safetensors/` — `single.safetensors`, `sharded/`,
   `indexed.safetensors`, `indexed_dir/`, `provider_errors/` for the SafeTensors
   loader and type-provider tests (see [serialization.md](serialization.md)).
-- GPU kernel examples compare against `.pt` fixtures produced by libtorch
-  reference implementations; see `Examples/GPU/FixtureRunner.lean` below.
 
 ### Example organization
-
-Examples pair library modules with thin executable wrappers. The convention is
-a 4-line entrypoint module, e.g. `Examples/GPU/RunRMSNormExe.lean`:
-
-```lean
-import Examples.GPU.RunRMSNorm
-
-/-- Lake executable entrypoint for the fused residual + RMSNorm demo. -/
-def main (args : List String) : IO UInt32 :=
-  Examples.GPU.RunRMSNorm.main args
-```
 
 The root module `Examples.lean` imports only library modules (GPT, NanoChat) — executables are excluded by design because they define global
 `main`.
@@ -151,15 +133,6 @@ Shared infrastructure:
   pretrained-model demos: `resolveDevice : String → IO (Device × Option String)`
   (parses `auto`/`cpu`/`mps`/`cuda[:n]`, warns and falls back to CPU),
   `parseNatArg`, `loadPrompts`.
-- `Examples/GPU/Parity.lean` — parity-check helpers: `gpuTarget`/`gpuFamily`
-  (read `TYR_GPU_TARGET`/`TYR_GPU_FAMILY`), `isBlackwellFamily`, `requireCuda`,
-  `seedFixtures`, and `TensorCheck` (label/ok/mae/maxErr/rtol/atol) with
-  `compareTensors`.
-- `Examples/GPU/FixtureRunner.lean` — `FixtureSpec` (fixture dir + tensor
-  names), `CommonArgs`, `parseCommonArgs` (`--regen`, `--gen-only`, `--trials`,
-  `--seed`, `--regen-every-trial`), and `runWithFixtures`, which regenerates
-  missing `.pt` fixtures from libtorch references and then compares kernel
-  outputs against them.
 - `Examples/GPT/GPT.lean` — the canonical dependently-typed model demo:
   `torch.gpt.Config` with presets `Config.gpt2_small`, `gpt2_mini`,
   `gpt2_micro`, `tiny_shakespeare`, `nanogpt_cpu_shakespeare`,
@@ -175,9 +148,7 @@ Shared infrastructure:
   generation, and rejection of invalid raw inputs.
 
 Run any executable with `lake exe <Exe> [args...]` (builds it if needed) or,
-without rebuilding, `lake env .lake/build/bin/<Exe> [args...]`. GPU-backed
-targets build with the kernel modules chosen at configure time, e.g.
-`lake -R -Kcuda=/usr/local/cuda -Kgpu=H100 -Kkernels=Tyr.GPU.Kernels.MhaH100 build RunMhaH100 RunMhaH100Seq768`.
+without rebuilding, `lake env .lake/build/bin/<Exe> [args...]`.
 
 ## Key APIs: the example tour
 
@@ -191,7 +162,6 @@ and is the authoritative source for running them.
 | `Examples/Diffusion/` | Masked discrete diffusion on ASCII text, checkpoint save/load, terminal animation | `TrainDiffusion` |
 | `Examples/NanoChat/` | Modded-nanogpt port: NorMuon + DistAdam training, SFT (`ChatSFT`), GRPO, tool-augmented generation, eval tasks | `TrainNanoChat` (torchrun-capable), `NanoChatPipeline`, `NanoChatChat` |
 | `Examples/BranchingFlows/` | Branching-flow generative models: toy demos, QM9 molecule training/generation (`qm9_xyz/` data) | `BranchingFlows{Continuous,Molecule,MoleculeTransformer}Train`, `BranchingFlowsMoleculeGenerate`, `BranchingFlowsMoleculeTrainGenerate` |
-| `Examples/GPU/` | ThunderKittens-style kernel parity vs libtorch fixtures, H100 MHA, decode benchmarks, B200 GEMM | `RunCopy`, `RunRotary`, `RunLayerNorm`, `RunRMSNorm`, `RunFlashAttn{,3,Op,Bench}`, `RunMhaH100{,Decode,Train,Seq768}`, `RunDecodeBench`, `RunB200Bf16Gemm` |
 | `Examples/Flux/` | Flux Klein 4B image generation (text encode → diffusion → VAE decode) | `FluxDemo`, `FluxDebug` |
 | `Examples/Qwen35/`, `Qwen25Omni/`, `Gemma4/` | Pretrained HF-hub inference with a shared CLI (`--source`, `--prompt[-file]`, `--image`, `--video`, `--batch-size`, `--max-new-tokens`, `--stream`, `--device`, ...) | `Qwen35RunHF`, `Qwen25OmniRunHF`, `Gemma4RunHF` |
 | `Examples/Qwen3ASR/` | Speech transcription, live microphone streaming | `Qwen3ASRTranscribe`, `Qwen3ASRLiveMic`, `Qwen3ASRLiveMicTrueStream` |
@@ -201,10 +171,8 @@ and is the authoritative source for running them.
 
 Test-side executables: `test_runner`, `test_runner_experimental`,
 `RunRiemannianNanoGPTTests`, `ffi_crash_probe`, and the standalone suites
-listed under "Test tiers" above. Two codegen tools (`GenerateGpuKernels`,
-`GenerateTileIRKernels`) are covered in [gpu/dsl-codegen.md](gpu/dsl-codegen.md);
-`GenerateFfiHeader`, which writes `libTyrC`'s FFI header, is covered in
-[ffi-and-build.md](ffi-and-build.md).
+listed under "Test tiers" above. `GenerateFfiHeader`, which writes `libTyrC`'s
+FFI header, is covered in [ffi-and-build.md](ffi-and-build.md).
 
 ## Usage example
 
@@ -239,23 +207,19 @@ Running tests and examples:
 lake test                                  # main suite (test_runner)
 lake test -- --filter diffeq --fail-fast   # subset, stop on first failure
 lake exe test_runner_experimental          # experimental suite
-lake exe TestGPUE2E                        # standalone GPU suite (needs CUDA + fixtures)
 lake exe ffi_crash_probe                   # manual FFI failure-mode probe
 python3 scripts/test_inventory.py --build # build every required CPU suite
 lake env python3 scripts/test_inventory.py --run # run that same suite list
-TYR_GPU_TEST_STRICT=1 lake exe TestGPUGB10E2E --fail-fast
 
 lake exe TrainGPT                          # char-GPT on Shakespeare
 lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B --prompt "Summarize dependent types." --stream
 lake exe BranchingFlowsMoleculeTrainGenerate
-lake exe RunMhaH100 && lake exe RunMhaH100Seq768   # H100 MHA fixture checks
 ```
 
 ## What is covered vs uncovered
 
 The main suite (`Tests.lean`) is deepest in: differential equations (`TestDiffEq*` —
-`TestDiffEq.lean` alone is 3880 lines), GPU DSL/kernels/TileIR
-(`TestGPUDSL`, `TestGPUKernels`, `TestGPUTileIR` — these also run standalone),
+`TestDiffEq.lean` alone is 3880 lines),
 model configs and pretrained-weight loading (Qwen3/3.5/3.6, Qwen2.5-Omni,
 Gemma-era FLM, KittenTTS, Qwen3TTS, Qwen3ASR, SileroVAD), the SafeTensors type
 provider, checkpoints, manifolds/optimizers, and NanoChat tokenizer/tasks.
@@ -268,9 +232,6 @@ smoke-tested through the FFI surface in `Tests/TestModdedGPT.lean`.
 
 Caveats to be aware of when extending the suite:
 
-- GPU parity harnesses under `Examples/GPU/Run{BrownianSample,BrownianDescent,EulerMaruyamaFused,RKCombine,RKFusedSolve,MhaGB10}.lean`
-  are exercised through `TestGPUGB10E2E`; hosted CPU success does not validate
-  their numerical CUDA behavior.
 - `Tests/Test.lean` defines helpers (`encode`, `decode`, `charToInt`, ...) at
   global scope and imports `Examples.GPT.*`, so the test library depends on the
   examples library and those generic names leak into downstream test modules.
@@ -284,7 +245,6 @@ Caveats to be aware of when extending the suite:
 - [autodiff.md](autodiff.md), [modules.md](modules.md), [optimization.md](optimization.md) — subsystems under test
 - [distributed.md](distributed.md) — torchrun-based NanoChat training
 - [models/llms.md](models/llms.md), [models/generative.md](models/generative.md), [models/audio-speech.md](models/audio-speech.md) — models exercised by the RunHF/ASR/TTS demos
-- [gpu/dsl-codegen.md](gpu/dsl-codegen.md), [gpu/kernels.md](gpu/kernels.md) — the GPU suites and kernel examples
 - [diffeq.md](diffeq.md) — heavily tested subsystem
 - [ffi-and-build.md](ffi-and-build.md) — the C++ FFI layer probed by `ffi_crash_probe`
 

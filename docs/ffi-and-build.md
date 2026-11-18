@@ -115,7 +115,7 @@ versus borrowed arguments: `lean_obj_arg` and `b_lean_obj_arg` are both
 ### Generated FFI header
 
 Every `@[extern]` of `Tyr` lives in the `TyrFFI` library (`Tyr.Basic`,
-`Tyr.ConstantSupport`, `Tyr.RawTensor` and its submodules, `Tyr.Audio`'s
+`Tyr.Basic.Types`, `Tyr.ConstantSupport`, `Tyr.RawTensor` and its submodules, `Tyr.Audio`'s
 FloatBuffer and Apple I/O). It is not precompiled, so it builds before
 `libTyrC`. The `libtyr` target runs `GenerateFfiHeader` over it, writing
 `cc/src/generated/tyr_ffi.h` from Lean's compiled extern declarations, and
@@ -124,8 +124,8 @@ differs from its Lean declaration is a compile error.
 
 The header can only check definitions that Lean declares. After linking,
 `GenerateFfiHeader --check-exports` therefore lists the `lean_*` symbols that
-`libTyrC` exports (`nm`) and fails the build on any that is neither a `TyrFFI`
-extern nor a `TyrKernels` launcher. A native helper that Lean does not call
+`libTyrC` exports (`nm`) and fails the build on any that is not a `TyrFFI`
+extern. A native helper that Lean does not call
 must be `static` or carry a name outside the `lean_` prefixes that
 `cc/map/libTyrC.map` exports.
 
@@ -188,7 +188,7 @@ not accept a dropout probability. The typed adapters carry dtype and head
 requirements as types and proofs; a native error aborts through Tyr's fatal
 error report. Configurable attention dropout uses separate native IO exports
 and typed `attentionIO`, `attentionGQAIO`, `attentionGQAMaskIO`,
-`attentionGQAQKVIO`, `attentionWindowIO`, and `flashAttentionIO` adapters.
+`attentionGQAQKVIO`, and `attentionWindowIO` adapters.
 These take required dropout and training arguments after the tensor operands.
 Evaluation uses zero dropout; training retains the configured probability.
 The IO adapters validate the original probability as finite and in `[0, 1]`
@@ -242,9 +242,7 @@ Both Arrow-enabled and Arrow-disabled Parquet implementations use the guard,
 including error-message construction. Other native subsystems remain outside
 this source gate's reviewed scope.
 `RawTensor.transpose` returns `Except String RawTensor`; `Tensor.transpose`
-takes axis proofs instead. `RawTensor.flashAttention!` is unguarded; the typed
-`Tensor.flashAttention` requires a real floating dtype and an `AttentionHeads`
-proof and checks the result against the query specification.
+takes axis proofs instead.
 `Tensor.randint` reports invalid bounds and device failures through `IO.Error`.
 The native `randn`/`rand` factories and dropout also catch failures at their IO boundary;
 those random factories enable requested gradients after device transfer so their
@@ -355,7 +353,6 @@ setup/result errors without leaks, and fatal callback errors in separate process
 | File | Exports | Bound from |
 |---|---|---|
 | `tyr.cpp` (5378 lines) | 291 `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.RawTensor` and its adapter submodules |
-| `tyr_ops.cpp` | flash-attention router `tyr_ops::flash_attn_dispatch` + `lean_torch_tyr_flash_attn_4d` | `Tyr.RawTensor.Neural` |
 | `tyr_distributed.cpp` | 15 `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/RawTensor/Distributed.lean` |
 | `tyr_polar.cpp` | `lean_torch_xxt`, `ba_plus_cAA`, `newton_schulz_step`, `polar_express`, `muon_orthogonalize`, `cautious_update` | manifold/optimizer modules |
 | `tyr_parquet.cpp` | 6 `lean_parquet_*` Arrow/Parquet readers | `Tyr/RawTensor/Parquet.lean` |
@@ -363,28 +360,12 @@ setup/result errors without leaks, and fatal callback errors in separate process
 | `float_buffer.cpp` | `lean_float_buffer_*` streaming-audio ring buffer | `Tyr/Audio/FloatBuffer.lean` |
 | `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/Audio/Apple*.lean` |
 | `tyr_media_stub.cpp` | non-Apple error stubs for the media entry points | same |
-| `tk_vendor_mha_h100.cu` / `tk_vendor_stubs.cpp` | vendored ThunderKittens Hopper MHA kernels, or throwing stubs | `tyr_ops.cpp` |
-| `generated/tyr_gpu_kernel_stubs.cpp` | weak `lean_launch_Tyr_GPU_Kernels_*` launchers (generated) | GPU codegen |
 
 In total the tree exports ~280 `extern "C"` entry points; the Lean side has
 310 `@[extern]` declarations under `Tyr/`. Only `tyr_qwen35.cpp` includes
 `cc/include/tyr_tensor.h`; the other units forward-declare the three helpers
 themselves. `cc/lxla.cpp` (0 bytes) and `cc/plugin_init.cpp` are dead files,
 referenced by neither the Makefile nor the lakefile.
-
-### Kernel launcher stubs
-
-Every Lean GPU kernel declares a launcher, `@[extern "lean_launch_…"]`, which
-Lean code calls. Its real definition exists only when the kernel's generated
-CUDA is compiled, i.e. in a CUDA build and for the `-Kkernels` modules.
-Everywhere else, `libTyrC` provides a placeholder: the Lean build runs
-`GenerateGpuKernels --stubs` over every module of `TyrKernels`, which writes
-`cc/src/generated/tyr_gpu_kernel_stubs.cpp` with an `__attribute__((weak))`
-stub per launcher that returns a "kernel unavailable" error. A compiled
-kernel's strong definition replaces its stub. The launcher names come from the
-kernels' `@[extern]` declarations, and the file is rewritten only when they
-change. `tyr_ops.cpp` calls launchers only after a runtime Hopper check (`device_supports_tk_hopper`,
-`cc/src/tyr_ops.cpp:39-48`), routing everything else to portable SDPA.
 
 ### Build orchestration in `lakefile.lean`
 
@@ -398,36 +379,26 @@ change. `tyr_ops.cpp` calls launchers only after a runtime Hopper check (`device
    with the command to run. `-Kgpu` is required with `-Kcuda` and rejected
    without it. It then passes `CUDA_HOME` and `GPU` to every `make` call
    (unset for CPU); the Makefile does no CUDA detection of its own and derives
-   the GPU family and architecture flags from `GPU`.
-1. Writes the kernel launcher stubs (all builds; see "Kernel launcher stubs"
-   above), rerun when the generator or a `TyrKernels` module changes.
-2. GPU codegen, CUDA builds only: runs the `GenerateGpuKernels` executable over
-   the `-Kkernels` modules, writing `cc/src/generated/`. Both are ordinary
-   Lake dependencies of the target: the generator links no `libTyrC`
-   (`TyrCodegen`), and the kernel modules (`TyrKernels`) are not precompiled,
-   so their `.olean` files build without it. Lake reruns the generator when
-   it, a kernel module's `.olean` or `-Kkernels` changes. Without CUDA the
-   Makefile ignores generated `.cu` files and links the weak launcher stubs.
-3. Writes `cc/src/generated/tyr_ffi.h` (all builds; see "Generated FFI header"
+   the architecture flags from `GPU`.
+1. Writes `cc/src/generated/tyr_ffi.h` (all builds; see "Generated FFI header"
    above) by running the `GenerateFfiHeader` executable over every `TyrFFI`
-   module. Like the GPU generator, it imports only `Lean` and links no
-   `libTyrC`, and `TyrFFI` is not precompiled. Lake reruns it when it or a
-   `TyrFFI` module's `.olean` changes.
-4. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
+   module. It imports only `Lean` and links no `libTyrC`, and `TyrFFI` is not
+   precompiled. Lake reruns it when it or a `TyrFFI` module's `.olean` changes.
+2. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
    CPU count); a no-op run takes well under a second. Make alone decides what
    to recompile. The target's trace is the content of `libTyrC`, so if it is
    unchanged (e.g. after a comment-only edit) nothing downstream relinks.
-5. Checks `libTyrC`'s exports against the `TyrFFI` and `TyrKernels` externs
+3. Checks `libTyrC`'s exports against the `TyrFFI` externs
    (`GenerateFfiHeader --check-exports`; see "Generated FFI header" above).
 
 Make uses compiler dependency files for C, C++, Objective-C++, and CUDA, so
 header changes rebuild their consumers. `cc/build/build-flags.txt` lists every
-value that affects compiled output (compilers, flags, GPU, kernel set, selected
+value that affects compiled output (compilers, flags, GPU, selected
 objects); objects depend on it, and it is rewritten only when its content
 changes, so a changed flag rebuilds and an unchanged one does not. The inexpensive regression command
 `python3 .github/scripts/test_native_build.py` exercises these rules with tiny sources
-in a temporary checkout: header edits, architecture switches, renamed headers,
-clean/incremental output agreement, and launcher additions/removals. It does
+in a temporary checkout: header edits, architecture switches, renamed headers, and
+clean/incremental output agreement. It does
 not compile LibTorch or CUDA and does not modify workspace build artifacts.
 
 The Makefile takes every native dependency from `external/` — libtorch
@@ -437,19 +408,17 @@ PyTorch submodule revision), Arrow/Parquet (`external/wheels/pyarrow`, linked by
 wheel provides, e.g. `libarrow.so.2500`), and the CUDA runtime and NCCL (`external/wheels/nvidia`, CUDA
 variant only); `deps/fetch.sh` populates them. It probes only Lean
 (`lean --print-prefix`) and the CUDA toolkit (`nvcc`). GPU targets are a table
-in `cc/Makefile`: `GPU` (from `-Kgpu`) selects SASS and the family, which
-selects the ThunderKittens arch guards —
+in `cc/Makefile`: `GPU` (from `-Kgpu`) selects SASS —
 
-| `GPU` | family | compute / sm |
-|---|---|---|
-| `A100` | AMPERE | `compute_80a` / `sm_80a` |
-| `H100` (default) | HOPPER | `compute_90a` / `sm_90a` |
-| `B200` | BLACKWELL | `compute_100a` / `sm_100a` |
-| `B300` | BLACKWELL | `compute_103a` / `sm_103a` |
-| `GB10` | HOPPER | `compute_121` / `sm_121` |
+| `GPU` | compute / sm |
+|---|---|
+| `A100` | `compute_80a` / `sm_80a` |
+| `H100` (default) | `compute_90a` / `sm_90a` |
+| `B200` | `compute_100a` / `sm_100a` |
+| `B300` | `compute_103a` / `sm_103a` |
+| `GB10` | `compute_121` / `sm_121` |
 
-`tk_vendor_mha_h100.cu` (which emits sm_90a-only `wgmma`) is compiled only when
-`GPU=H100`; other targets get `tk_vendor_stubs.cpp` instead.
+A CUDA build compiles `cc/src/tyr_laguna_moe.cu` for the selected target.
 
 Lean code is compiled and linked with Lake's bundled clang, and `cc/` is
 built with the system compiler. The two meet at a shared library:
@@ -459,12 +428,9 @@ run paths relative to `cc/build`. It does not link the Lean runtime; its
 `lean_*` references resolve from the executable or the `lean` process that
 loads it (`-undefined dynamic_lookup` on macOS). Because the system glibc and
 libstdc++ stay behind `libTyrC`, the Lean toolchain's older glibc never has to
-resolve them. It exports only the functions Lean calls (`lean_torch_*`,
-`lean_launch_*` for the GPU kernel launchers, and a few other `lean_<prefix>_*`
-groups; a new FFI prefix must be added to both lists) and the `tyr_ops::`
-dispatch API used by
-`cc/tools/bench_flash_attn.cpp` (`cc/map/libTyrC.map`, `cc/map/libTyrC.exports` on
-macOS). Its copies of C++ template code and of soxr stay private, so they never
+resolve them. It exports only the functions Lean calls (`lean_torch_*` and a
+few other `lean_<prefix>_*` groups; a new FFI prefix must be added to both
+lists) (`cc/map/libTyrC.map`, `cc/map/libTyrC.exports` on macOS). Its copies of C++ template code and of soxr stay private, so they never
 stand in for libtorch's own.
 
 The package lists `` `@/libtyr `` in `moreLinkLibs`, so Lake links it into
@@ -477,11 +443,10 @@ keeps libgcc's exception unwinder (LLVM's crashes on libtorch exceptions), and
 `-Wl,--exclude-libs,libuv.a` keeps Lean's libuv from replacing the one bundled
 in `libtorch_cpu` (its TCPStore). The five
 `lean_lib`s are `Tyr` (default target, precompiled, links `libTyrC`),
-`TyrCodegen` (the GPU code generator: `Tyr.GPU.Codegen.*` and the pure modules
-it needs, including `Tyr.Basic.Types`; it does not link `libTyrC`, so neither do
-the generator executables), `Tests`, `TestsExperimental` and `Examples`, plus
-the `lean_exe` targets. `TyrCodegen` is declared after `Tyr` because Lake gives
-a module to the last declared library whose roots match it.
+`TyrFFI` (the `@[extern]` declarations; not precompiled), `Tests`,
+`TestsExperimental` and `Examples`, plus the `lean_exe` targets. `TyrFFI` is
+declared after `Tyr` because Lake gives a module to the last declared library
+whose roots match it.
 
 ### Running executables
 
@@ -508,7 +473,6 @@ replaces all of them:
 |---|---|
 | `-Kcuda=<toolkit>` | CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
 | `-Kgpu=<name>` | with `-Kcuda`, required: GPU to build kernels for, `H100`, `A100`, `B200`, `B300` or `GB10` |
-| `-Kkernels="<module> ..."` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
 
 Environment variables for a single build:
 
@@ -519,13 +483,6 @@ Environment variables for a single build:
 
 ### `scripts/` overview
 
-- `scripts/gpu/` — ~20 shell harnesses for H100/GB10/B200 E2E parity and
-  benchmarks (`test_*_e2e.sh`, `bench_flash_attn_matrix.sh`), plus
-  `setup_python_venv.sh` and a vendored-PyTorch reference runner.
-- `scripts/runpod/` — disposable-pod workflow (`create_or_resume.sh`,
-  `sync_repo.sh`, `bootstrap.sh`, `run_bench.sh`); see its `README.md`. Pods
-  are disposable, repo and network volume are the durable state, and
-  `RUNPOD_API_KEY` never enters tracked files.
 - `scripts/nanochat/` — `torchrun` launchers for distributed NanoChat training
   (`run_train_torchrun.sh`, `bench_distributed.sh`) and `ENV_INVENTORY.md`.
 - Conventional-commit hooks and their checker live in `.githooks/`.
@@ -558,11 +515,9 @@ opaque get_live_tensors : IO UInt64
 opaque manualSeed (seed : UInt64) : IO Unit
 ```
 
-Makefile targets: `all` (default) and `dylib` (both build `libTyrC`),
-`bench-flash-attn` (standalone C++ attention benchmark from
-`cc/tools/bench_flash_attn.cpp`), `soxr`, `clean`. `check-deps` runs first and
-fails early, pointing at `deps/fetch.sh`, when `external/git/soxr`,
-`external/git/ThunderKittens`, `external/wheels/torch` or the Arrow libraries are
+Makefile targets: `all` (default) and `dylib` (both build `libTyrC`), `soxr`,
+`clean`. `check-deps` runs first and fails early, pointing at `deps/fetch.sh`,
+when `external/git/soxr`, `external/wheels/torch` or the Arrow libraries are
 missing.
 
 ## Usage example
@@ -595,10 +550,10 @@ see [distributed training](distributed.md).
 Build and run through Lake:
 
 ```bash
-lake build                                  # target libtyr → codegen → make -C cc dylib
+lake build                                  # target libtyr → FFI header → make -C cc dylib
 lake exe TrainGPT                           # build if needed, then run
-# GPU build for a specific kernel module and target:
-lake -R -Kcuda=/usr/local/cuda -Kgpu=H100 -Kkernels=Tyr.GPU.Kernels.MhaH100 build RunMhaH100
+# CUDA build for a specific GPU target:
+lake -R -Kcuda=/usr/local/cuda -Kgpu=H100 build
 # Probes of the fatal failure paths (libtorch | admission | admission-ok):
 lake exe ffi_crash_probe admission
 ```
@@ -610,8 +565,6 @@ lake exe ffi_crash_probe admission
 - [Autodiff](autodiff.md) — gradient bindings (`lean_torch_backward_loss` and friends)
 - [Serialization](serialization.md) — safetensors handles and sharded loading
 - [Distributed training](distributed.md) — the `torch.dist` collectives over c10d
-- [GPU DSL codegen](gpu/dsl-codegen.md) — where the generated `.cu` kernels come from
-- [GPU kernels](gpu/kernels.md) — the `@[gpu_kernel]` side of the launcher stubs
 - [Data loading](data.md) — parquet readers and other data-path bindings
 - [Examples and testing](examples-and-testing.md) — the executables these link args serve
 

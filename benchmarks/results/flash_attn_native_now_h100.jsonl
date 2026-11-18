@@ -1,1 +1,0 @@
-{"cudaVisibleDevices":"0","event":"meta","gitSha":"f6e7f49","gpuName":"NVIDIA H100 NVL","hostname":"bamgpu19","repeats":3,"runId":"flash_attn_bench_3667860652","seed":20260422,"selectedBackends":["torch_sdpa","tyr_runtime"],"selectedCases":["native_dense_128x64","native_dense_768x64"],"timedIters":20,"warmupIters":5}

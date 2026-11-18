@@ -2,15 +2,12 @@
    copies of C++ template code (std::, torch::, arrow::) and of soxr never
    stand in for another library's.
 
-   lean_<prefix>_*  the functions Lean calls, including the GPU kernel launchers
-   tyr_ops::*       the C++ dispatch API used by cc/tools/bench_flash_attn.cpp */
+   lean_<prefix>_*  the functions Lean calls */
 {
   global:
     lean_torch_*;
-    lean_launch_*;
     lean_tyr_*;
     lean_float_buffer_*;
     lean_parquet_*;
-    extern "C++" { tyr_ops::*; };
   local: *;
 };

@@ -2,7 +2,6 @@ import LeanTest
 import Tests.Assertions
 import Tyr.Typed.Neural
 import Tyr.Torch
-import Tyr.GPU.Ops.FlashAttn
 
 namespace Tests.AttentionEffects
 
@@ -55,8 +54,7 @@ private abbrev AttentionTensor := Tensor ⟨#[1, 1, 16, 4], .Float32, .CPU⟩
     Tensor.attentionGQAIO q q v 1 false false,
     Tensor.attentionGQAMaskIO q q v mask 1 false false,
     Tensor.attentionGQAQKVIO q q v 1 false false,
-    Tensor.attentionWindowIO q q v 1 false true false 8,
-    Tensor.flashAttentionIO q q v 1 false].mapM id
+    Tensor.attentionWindowIO q q v 1 false true false 8].mapM id
   for output in outputs do
     LeanTest.assertEqual (← output.toFloatArray) (← pureOutput.toFloatArray)
   let actualNext ← Tensor.randn #[8]
@@ -107,8 +105,7 @@ private abbrev AttentionTensor := Tensor ⟨#[1, 1, 16, 4], .Float32, .CPU⟩
         Tensor.attentionGQAIO q q v p training false,
         Tensor.attentionGQAMaskIO q q v mask p training false,
         Tensor.attentionGQAQKVIO q q v p training false,
-        Tensor.attentionWindowIO q q v p training true false 8,
-        Tensor.flashAttentionIO q q v p training]
+        Tensor.attentionWindowIO q q v p training true false 8]
       for action in actions do
         let rejected ← try
           let _ ← action
@@ -123,19 +120,5 @@ private abbrev AttentionTensor := Tensor ⟨#[1, 1, 16, 4], .Float32, .CPU⟩
   LeanTest.assertEqual (← dropped.toFloatArray) (Array.replicate 64 0)
   let valid ← Tensor.attentionIO q q v 0 true false
   LeanTest.assertEqual (← valid.toFloatArray) (Array.replicate 64 1)
-
-@[test] def testFlashAdaptersHonorTrainingMode : IO Unit := do
-  let q : AttentionTensor := Tensor.zeros #[1, 1, 16, 4]
-  let v : AttentionTensor := Tensor.ones #[1, 1, 16, 4]
-  let (pureRoute, pureOutput) := Tyr.GPU.Ops.FlashAttn.flashAttnWithRoute q q v
-  let (evalRoute, evalOutput) ← Tyr.GPU.Ops.FlashAttn.flashAttnWithRouteIO q q v 1 false
-  LeanTest.assertTrue (evalRoute == pureRoute)
-  LeanTest.assertEqual (← evalOutput.toFloatArray) (← pureOutput.toFloatArray)
-  let (_, trainingOutput) ← Tyr.GPU.Ops.FlashAttn.flashAttnWithRouteIO q q v 1 true
-  LeanTest.assertEqual (← trainingOutput.toFloatArray) (Array.replicate 64 0)
-  let dynEval ← Tyr.GPU.Ops.FlashAttn.flashAttnDyn q.raw q.raw v.raw 1 false
-  LeanTest.assertEqual (← dynEval.2.2.2.2.2.toFloatArray) (← pureOutput.toFloatArray)
-  let dynTraining ← Tyr.GPU.Ops.FlashAttn.flashAttnDyn q.raw q.raw v.raw 1 true
-  LeanTest.assertEqual (← dynTraining.2.2.2.2.2.toFloatArray) (Array.replicate 64 0)
 
 end Tests.AttentionEffects

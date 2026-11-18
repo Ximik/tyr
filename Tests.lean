@@ -89,12 +89,6 @@ import Tests.TestDiffEqPathParity
 import Tests.TestDiffEqProgressMeterParity2
 import Tests.TestDiffEqSaveAtParity
 import Tests.TestDiffEqSteadyStateEventParity
-import Tests.TestGPUDSL
-import Tests.TestGPUKernels
-import Tests.TestGPUCoverage
-import Tests.TestGPUIndexedParity
-import Tests.TestGPUTileIR
-import Tests.TestTileIRGenerateMain
 import Tests.TestDiffusion
 import Tests.TestNanoChatTokens
 import Tests.TestNanoChatTasks

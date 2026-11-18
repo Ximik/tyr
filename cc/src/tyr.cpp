@@ -98,18 +98,6 @@
 #define TYR_HAS_CUDA_GENERATOR 0
 #endif
 
-namespace tyr_ops {
-torch::Tensor flash_attn_dispatch(
-    const torch::Tensor& query,
-    const torch::Tensor& key,
-    const torch::Tensor& value,
-    const c10::optional<torch::Tensor>& attn_mask,
-    double dropout_p,
-    bool is_causal,
-    const c10::optional<double>& scale,
-    bool enable_gqa);
-}
-
 #include <soxr.h>
 
 #if defined(__has_include)
@@ -2168,7 +2156,9 @@ static torch::Tensor groupedAttentionFromLean(b_lean_obj_arg query, b_lean_obj_a
     return tyr_ops::bounded_sdpa(q, k, v, mask_tensor, mask_kind,
         dropout_p, causal, c10::nullopt, gqa);
   }
-  return tyr_ops::flash_attn_dispatch(q, k, v, c10::nullopt,
+  TORCH_CHECK(q.size(3) == k.size(3) && k.size(3) == v.size(3),
+      "attention: head-dimension mismatch between Q/K/V");
+  return tyr_ops::bounded_sdpa(q, k, v, c10::nullopt, mask_kind,
       dropout_p, causal, c10::nullopt, gqa);
 }
 

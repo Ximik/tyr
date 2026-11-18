@@ -19,11 +19,10 @@ output.ppm
 .venv*/
 __pycache__/
 
-# Runtime artifacts (training logs, datasets, HF model cache, RunPod state)
+# Runtime artifacts (training logs, datasets, HF model cache)
 logs/
 data/
 .model-cache/
-.runpod-state/
 
 # Editor and agent tooling
 .vscode/

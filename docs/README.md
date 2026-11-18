@@ -21,8 +21,6 @@ Two kinds of documentation exist:
 - **Loading pretrained models:** [Serialization](serialization.md) →
   [LLMs](models/llms.md) / [Audio & speech models](models/audio-speech.md) /
   [Generative models](models/generative.md).
-- **Writing GPU kernels:** [GPU DSL & codegen](gpu/dsl-codegen.md) →
-  [GPU kernels & ops](gpu/kernels.md) → [FFI & build system](ffi-and-build.md).
 - **Training at scale:** [Data pipeline](data.md) → [Autodiff](autodiff.md) →
   [Distributed & orchestration](distributed.md).
 - **Scientific computing:** [DiffEq](diffeq.md).
@@ -32,7 +30,7 @@ Two kinds of documentation exist:
 ### Foundations
 
 - [Getting started](getting-started.md) — dependencies, build, environment,
-  tests, running examples and GPU parity suites.
+  tests, and running examples.
 - [Tensors and the torch FFI](core/tensors.md) — `Shape`, the shape-indexed
   tensor type `Tensor σ`, pure specification arithmetic, and checked native
   adapter boundaries.
@@ -67,16 +65,6 @@ Two kinds of documentation exist:
   Flux image generation, and the VAE.
 - [Audio & speech models](models/audio-speech.md) — KittenTTS, Qwen3-TTS,
   Qwen3-ASR, Silero VAD, and Whisper.
-
-### GPU
-
-- [GPU DSL & codegen](gpu/dsl-codegen.md) — tile types, the `KernelM` monad,
-  the `@[gpu_kernel]` attribute, CUDA emission, and TileIR.
-- [GPU kernels & ops](gpu/kernels.md) — the ThunderKittens-style kernel
-  catalog (MHA H100, decode, flash attention, norms), the high-level ops
-  bridge, and the parity-validation story.
-- [ThunderKittens porting status](gpu/thunderkittens-porting-status.md) —
-  pre-existing status note on the TK port.
 
 ### Scientific computing
 

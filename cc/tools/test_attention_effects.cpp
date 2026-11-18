@@ -36,12 +36,6 @@ lean_object* shape(std::initializer_list<uint64_t> dims) {
 Object full(std::initializer_list<uint64_t> dims, double value) {
   return Object(lean_torch_full(shape(dims), value, 0, lean_box(1)), lean_dec);
 }
-lean_object* someBorrowed(lean_object* value) {
-  auto* result = lean_alloc_ctor(1, 1, 0);
-  lean_inc(value);
-  lean_ctor_set(result, 0, value);
-  return result;
-}
 torch::Tensor state() {
   auto generator = at::detail::getDefaultCPUGenerator();
   std::lock_guard<std::mutex> lock(generator.mutex());
@@ -82,7 +76,7 @@ struct Inputs {
   }
 };
 
-enum class Family { Basic, GQA, Padding, QKV, Window, Flash, Gemma, Bias };
+enum class Family { Basic, GQA, Padding, QKV, Window, Gemma, Bias };
 const char* name(Family family) {
   switch (family) {
     case Family::Basic: return "attention";
@@ -90,7 +84,6 @@ const char* name(Family family) {
     case Family::Padding: return "attentionGQAMask";
     case Family::QKV: return "attentionGQAQKV";
     case Family::Window: return "attentionWindow";
-    case Family::Flash: return "flashAttention";
     case Family::Gemma: return "gemma4MaskedAttention";
     case Family::Bias: return "branchingAttentionBias";
   }
@@ -105,7 +98,6 @@ Object pureCall(Family family, const Inputs& x) {
     case Family::Padding: result = lean_torch_sdpa_gqa_mask(q, q, v, x.padding.get(), 0, 0); break;
     case Family::QKV: result = lean_torch_sdpa_gqa_qkv(q, q, v, 0, 0); break;
     case Family::Window: result = lean_torch_sdpa_gqa_window(q, q, v, 1, 0, Nat(8)); break;
-    case Family::Flash: result = lean_torch_tyr_flash_attn_4d(q, q, v, someBorrowed(x.padding.get()), 0, lean_box(0), 0); break;
     case Family::Gemma: result = lean_torch_sdpa_gqa_mask_qkv(q, q, v, x.edges.get(), 0); break;
     case Family::Bias: result = lean_torch_sdpa_4d_bias(q, q, v, x.bias.get(), 0); break;
   }
@@ -120,7 +112,6 @@ Object ioCall(Family family, const Inputs& x, double p) {
     case Family::Padding: result = lean_torch_sdpa_gqa_mask_io(q, q, v, x.padding.get(), p, 0, 0); break;
     case Family::QKV: result = lean_torch_sdpa_gqa_qkv_io(q, q, v, p, 0, 0); break;
     case Family::Window: result = lean_torch_sdpa_gqa_window_io(q, q, v, p, 1, 0, Nat(8)); break;
-    case Family::Flash: result = lean_torch_tyr_flash_attn_4d_io(q, q, v, someBorrowed(x.padding.get()), p, 0, lean_box(0), 0); break;
     case Family::Gemma: result = lean_torch_sdpa_gqa_mask_qkv_io(q, q, v, x.edges.get(), p, 0); break;
     case Family::Bias: result = lean_torch_sdpa_4d_bias_io(q, q, v, x.bias.get(), p, 0); break;
   }
@@ -170,7 +161,7 @@ int main() {
   lean_initialize();
   int failures = 0;
   for (auto family : {Family::Basic, Family::GQA, Family::Padding, Family::QKV,
-                     Family::Window, Family::Flash, Family::Gemma, Family::Bias}) {
+                     Family::Window, Family::Gemma, Family::Bias}) {
     try { check(family); std::cout << "PASS " << name(family) << " effects\n"; }
     catch (const std::exception& error) {
       ++failures;

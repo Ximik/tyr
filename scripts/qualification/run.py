@@ -11,11 +11,9 @@ import sys
 import time
 
 from prepare import MANIFEST, prepare
-from gpu_plan import configuration as gpu_configuration
 from cuda_runtime import LIBRARIES, library_path, loader_libraries
 
 REPO = Path(__file__).resolve().parents[2]
-COVERAGE = re.compile(r"\[gpu-coverage\] executed=(\d+) skipped=(\d+) failed=(\d+).*strict=true")
 
 
 def wait_for_idle_gpu(timeout=600.0, interval=5.0):
@@ -38,15 +36,7 @@ def validate_result(kind, output, code):
         raise ValueError(f"Process exited with {code}")
     if re.search(r"(?m)^\s*SKIP(?:\s|:)|\[skip\]|\bSKIP:|\bskipped CUDA\b|skipped due to", output, re.IGNORECASE):
         raise ValueError("Strict qualification reported a skipped case")
-    if kind == "gpu":
-        matches = COVERAGE.findall(output)
-        if not matches:
-            raise ValueError("GPU runner did not produce strict executed/skipped accounting")
-        executed, skipped, failed = map(int, matches[-1])
-        if executed == 0 or skipped or failed:
-            raise ValueError(f"Insufficient GPU coverage: {executed=}, {skipped=}, {failed=}")
-        return executed
-    marker = {"decode": "cache_parity: ok=true", "native": "backend checks passed on cuda",
+    marker = {"native": "backend checks passed on cuda",
               "laguna": "All Laguna model tests passed.", "parity": "[qwen3tts-parity] PASS",
               "asr": "[qwen3tts-asr] PASS"}[kind]
     if marker not in output:
@@ -147,15 +137,9 @@ def main():
             return 0
         if args.kind == "gpu":
             gpu = env.get("TYR_GPU_TARGET", env.get("GPU", "GB10"))
-            plan = gpu_configuration(gpu)
-            report["gpu_plan"] = plan
             if not any(gpu in device["name"] for device in report["runtime"]["devices"]):
                 raise ValueError(f"Configured GPU {gpu} does not match the detected devices")
-            suite = plan["runner"]
-            arguments = ["--filter", "TorchParity", "--fail-fast"] if gpu == "H100" else ["--fail-fast"]
-            commands = [("gpu", ["lake", "env", f"./.lake/build/bin/{suite}", *arguments]),
-                        ("decode", ["lake", "env", "./.lake/build/bin/RunMhaH100Decode", "--regen"]),
-                        ("native", ["bash", "scripts/test_native_attention.sh", "cuda"]),
+            commands = [("native", ["bash", "scripts/test_native_attention.sh", "cuda"]),
                         ("laguna", ["lake", "env", "./.lake/build/bin/LagunaModelTest"])]
         else:
             if args.cache is None:
@@ -177,8 +161,6 @@ def main():
                         ("asr", ["bash", "scripts/qwen3tts_asr_regression.sh"])]
         for name, command in commands:
             item = {"name": name, "status": "failed", "command": command}
-            if name == "decode":
-                item["production_route"] = report["gpu_plan"]["decode_route"]
             report["suites"].append(item)
             item["gpu_wait_seconds"] = wait_for_idle_gpu()
             start = time.monotonic()
@@ -202,21 +184,13 @@ def main():
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 item["library_evidence_error"] = str(error)
             output = "".join(output)
-            counts = COVERAGE.findall(output) if name == "gpu" else []
-            if counts:
-                executed, skipped, failed = map(int, counts[-1])
-                item.update(executed=executed, skipped=skipped, failed=failed)
-                report["executed"] += executed
-                report["skipped"] += skipped
-                report["failed"] += failed
             executed = validate_result(name, output, code)
             if "library_evidence_error" in item:
                 raise ValueError(f"CUDA library evidence failed for {name}: {item['library_evidence_error']}")
             if any(not any(Path(path).name.startswith(lib) for path in paths) for lib in LIBRARIES):
                 raise ValueError(f"Incomplete CUDA loader evidence for {name}")
             item.update(status="passed", executed=executed, skipped=0)
-            if not counts:
-                report["executed"] += executed
+            report["executed"] += executed
         report["status"] = "passed"
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:

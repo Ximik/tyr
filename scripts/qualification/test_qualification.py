@@ -12,7 +12,6 @@ import wave
 
 from prepare import ensure_file, ensure_pcm16, safe_path, verify
 from audio_fixture import TRANSFORM, pcm16_wav
-from gpu_plan import configuration as gpu_configuration
 from cuda_runtime import library_path, loader_libraries
 from run import validate_result, wait_for_idle_gpu
 from summarize import summarize
@@ -124,36 +123,8 @@ class QualificationTests(unittest.TestCase):
                 wait_for_idle_gpu()
             sleep.assert_not_called()
 
-    def test_decode_build_inputs_match_hardware_and_production_dispatch(self):
-        hopper = gpu_configuration("H100")
-        self.assertIn("Tyr.GPU.Kernels.MhaH100Decode", hopper["modules"])
-        self.assertEqual(hopper["decode_route"], "hopper_custom_kernel_when_eligible")
-        for gpu in ("GB10", "B200", "B300"):
-            with self.subTest(gpu=gpu):
-                plan = gpu_configuration(gpu)
-                self.assertNotIn("Tyr.GPU.Kernels.MhaH100Decode", plan["modules"])
-                self.assertNotIn("Tyr.GPU.Kernels.MhaH100", plan["modules"])
-                self.assertEqual(plan["runner"], "TestGPUGB10E2E")
-                self.assertEqual(plan["decode_route"], "sdpa_fallback")
-        with self.assertRaises(ValueError):
-            gpu_configuration("A100")
-
-    def test_empty_skipped_and_failed_gpu_runs_cannot_qualify(self):
-        for output, code in [
-            ("", 0), ("all good", 0),
-            ("[gpu-coverage] executed=0 skipped=0 failed=0 selected=0 strict=true", 0),
-            ("[gpu-coverage] executed=4 skipped=1 failed=0 selected=5 strict=true", 0),
-            ("[gpu-coverage] executed=4 skipped=0 failed=1 selected=4 strict=true", 0),
-            ("[gpu-coverage] executed=4 skipped=0 failed=0 selected=4 strict=true", 1),
-            ("[gpu-coverage] executed=4 skipped=0 failed=0 selected=4 strict=false", 0),
-        ]:
-            with self.subTest(output=output, code=code), self.assertRaises(ValueError):
-                validate_result("gpu", output, code)
-        self.assertEqual(validate_result("gpu",
-            "[gpu-coverage] executed=10 skipped=0 failed=0 selected=10 strict=true", 0), 10)
-
     def test_model_and_cache_checks_require_actual_success_markers(self):
-        for kind in ("parity", "asr", "decode", "laguna", "native"):
+        for kind in ("parity", "asr", "laguna", "native"):
             with self.subTest(kind=kind), self.assertRaises(ValueError):
                 validate_result(kind, "", 0)
         with self.assertRaises(ValueError):

@@ -55,8 +55,6 @@ import Tyr.Train.RunLedger
 import Tyr.Train.ChatSFT
 import Tyr.RL.GRPO
 
--- GPU kernel abstraction
-import Tyr.GPU
 
 /-!
 # Tyr
@@ -85,7 +83,6 @@ This root module re-exports the core, general-purpose surface area:
 - `Tyr.Text`: streaming text consensus and voice-activity (VAD) providers.
 - `Tyr.Checkpoint`: model/optimizer checkpoint save and restore.
 - `Tyr.Pipeline`: training/inference orchestration helpers.
-- `Tyr.GPU`: GPU kernel abstractions.
 
 ## Example
 

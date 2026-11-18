@@ -133,15 +133,6 @@ private def sdpaGQAMask {batch n_head n_kv_head seq head_dim : Nat} {d dm : DTyp
     : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
   Tensor.attentionGQAMask query key value mask isCausal true (_heads := .ofDvd hkv)
 
-/-- Experimental Tyr FlashAttention entry point; output shares the query spec. -/
-private def flashAttn4d {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
-    (hkv : nKvHead ∣ nHead)
-    (query : Tensor ⟨#[batch, nHead, qSeq, headDim], d, dev⟩)
-    (key : Tensor ⟨#[batch, nKvHead, kvSeq, headDim], d, dev⟩)
-    (value : Tensor ⟨#[batch, nKvHead, kvSeq, headDim], d, dev⟩)
-    : Tensor ⟨#[batch, nHead, qSeq, headDim], d, dev⟩ :=
-  Tensor.flashAttention query key value true (_heads := .ofDvd hkv)
-
 /-- `sliceScatter`: replace a slice of `input` along `dim` at `start` with
     `src`; the result preserves the input spec. -/
 private def sliceScatterAlong {s srcShape : Shape} {d : DType} {dev : Device}
@@ -215,14 +206,7 @@ def forward {batch seq hidden_size num_heads num_kv_heads half : Nat}
   Tensor.linear3d attn_out attn.o_proj
 
 /-- Incremental attention step with KV cache.
-    Input query is one token `[batch,1,hidden]`; cache grows by one KV step.
-
-    When `useTyrFlashAttn` is true (default false), routes the cached
-    attention through `Tensor.flashAttention` instead of `scaledDotProductAttentionGQAQKV`.
-    The C++ `tyr::flash_attn` dispatcher then routes shape-eligible decode
-    problems (BF16 + qSeq=1 + head_dim=128 or 64 + GQA-valid) to the native
-    TK kernel `tkMhaH100DecodeFwd[64]`, and falls back to PyTorch SDPA
-    otherwise — so this flag is safe to flip on for any shape. -/
+    Input query is one token `[batch,1,hidden]`; cache grows by one KV step. -/
 def forwardStep {batch hidden_size num_heads num_kv_heads half cap len : Nat}
     (attn : QwenAttention (device := device) hidden_size num_heads num_kv_heads (2 * half) dtype)
     (hkv : num_kv_heads ∣ num_heads)
@@ -231,7 +215,6 @@ def forwardStep {batch hidden_size num_heads num_kv_heads half cap len : Nat}
     (sin : Tensor { device := device, shape := #[1, half], dtype := .Float32 })
     (cache : KVCache (device := device) batch num_kv_heads (2 * half) cap len dtype)
     (hlen : len < cap)
-    (useTyrFlashAttn : Bool := false)
     : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × KVCache (device := device) batch num_kv_heads (2 * half) cap (len + 1) dtype :=
   -- Project current token to Q/K/V.
   let q0 := Tensor.linear3d x attn.q_proj
@@ -273,11 +256,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads half cap len : Nat}
     vStore'.slice 2 0 kvLen
 
   -- Use q_len=1, kv_len=(len+1). Causal masking is unnecessary because KV has no future tokens.
-  let attnOut :=
-    if useTyrFlashAttn then
-      flashAttn4d hkv qh kAll vAll
-    else
-      sdpaGQAQKV hkv qh kAll vAll false
+  let attnOut := sdpaGQAQKV hkv qh kAll vAll false
   let attnOut := transposeFromAttention attnOut
   let attnOut := attnOut.reshape #[batch, 1, num_heads * (2 * half)]
   let out := Tensor.linear3d attnOut attn.o_proj

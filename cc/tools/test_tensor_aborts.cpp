@@ -56,8 +56,8 @@ void indexSelect(Object indices) {
   Object result(lean_torch_index_select(input.get(), Nat(0), indices.get()), lean_dec);
 }
 
-void flash(Object q) {
-  Object result(lean_torch_tyr_flash_attn_4d(q.get(), q.get(), q.get(), lean_box(0), 0, lean_box(0), 0), lean_dec);
+void attention(Object q) {
+  Object result(lean_torch_sdpa_gqa_qkv(q.get(), q.get(), q.get(), 0, 0), lean_dec);
 }
 
 void affineDType(bool weight) {
@@ -151,8 +151,8 @@ std::vector<AbortCase> cases() {
     auto input = cast(full({2, 2}, 1).get(), tyr::lean::DType::Complex32);
     Object r(lean_torch_svd_try(input.get()), lean_dec);
   });
-  add("flashAttention-rank", "rank-4", [] { flash(full({2, 2}, 1)); });
-  add("flashAttention-dtype", "expected scalar type Float but found Long", [] { flash(Object(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec)); });
+  add("attention-rank", "rank-4", [] { attention(full({2, 2}, 1)); });
+  add("attention-dtype", "expected scalar type Float but found Long", [] { attention(Object(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec)); });
   add("affine-weight-dtype", "must have the same dtype", [] { affineDType(true); });
   add("affine-bias-dtype", "must have the same dtype", [] { affineDType(false); });
   add("spectralNorm-integral", "floating point or complex", [] {
