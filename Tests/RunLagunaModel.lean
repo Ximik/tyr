@@ -517,8 +517,8 @@ private def expectRejected (action : IO α) (label : String) : IO Unit := do
   catch _ => pure true
   check rejected label
 
-/-- Covers partial and over-window prefill, repeated ring wrap, independent
-forks, preserved functional snapshots, capacity checks, and inference graphs.
+/-- Covers partial and over-window prefill, repeated ring wrap, earlier session
+values kept intact, preserved functional snapshots, capacity checks, and inference graphs.
 BF16 MoE uses stable expert selection and compares identical decode positions
 against the functional cache. The 0.1 bound permits BF16 reduction rounding
 when ring order permutes paired keys/values; FP32 retains the tight bound. -/
@@ -536,7 +536,7 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
   let tables ← precomputeRotaryTables cfg 20 device
   for hp : promptLen in #[5, 12] do
     let session ← model.model.initCacheSession (batch := 1) cfg 20 device
-    let capacities ← session.capacities
+    let capacities := session.capacities
     check (capacities == #[20, 8, 8, 8]) s!"(d) [{lbl}] sliding caches allocate only one window"
     let promptLenIds : Tensor { shape := #[1, promptLen], dtype := .Int64, device := device } := Tensor.slice! ids 1 0 promptLen
     let embeds := model.embedTokens promptLenIds
@@ -545,7 +545,7 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
       "session rejects short rotary tables without damaging state"
     let functional0 := model.model.initCache cfg 20 device
     let (expected, functional) ← model.prefill cfg tables embeds functional0 (by simp at hp; omega) (by simp at hp; omega)
-    let actual ← model.prefillSession cfg tables embeds session
+    let (actual, session) ← model.prefillSession cfg tables embeds session
     let prefillDiff ← maxAbsDiff (actual) (expected)
     check (prefillDiff == 0.0) s!"(d) [{lbl}] owned prefill {promptLen} matches functional exactly"
     check (!hasGradFn actual) s!"(d) [{lbl}] inference output has no autograd graph"
@@ -553,7 +553,8 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
     let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice! ids 1 promptLen 1
     expectRejected (model.decodeSession cfg tables (model.embedTokens tok) (promptLen + 1) session)
       "session rejects skipped positions without damaging state"
-    let forked ← session.fork
+    let earlier := session
+    let mut session := session
     let mut functional := functional
     let mut firstLogits : Option (Tensor { shape := #[1, cfg.vocab_size], device := device, dtype := if bf16 then .BFloat16 else .Float32 }) := none
     let mut maxDiff := 0.0
@@ -567,18 +568,19 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
       let emb := model.embedTokens tok
       let (expected, next) ← model.decodeStep cfg tables emb pos h.upper functional
       functional := next
-      let actual ← model.decodeSession cfg tables emb pos session
+      let (actual, next) ← model.decodeSession cfg tables emb pos session
+      session := next
       let diff ← maxAbsDiff (actual) (expected)
       maxDiff := max maxDiff diff
       if pos == promptLen then firstLogits := some actual
-    IO.println s!"  [{lbl}] owned decode maxAbs={maxDiff} before fork comparison"
+    IO.println s!"  [{lbl}] owned decode maxAbs={maxDiff} before the earlier-value comparison"
     check ((← maxAbsDiff oldK oldKCopy) == 0.0) "functional decode preserves earlier cache snapshots"
-    -- Original ring has wrapped repeatedly. A shallow fork would now read
-    -- overwritten prompt slots and disagree at the fork's first decode step.
-    let forkLogits ← model.decodeSession cfg tables (model.embedTokens tok) promptLen forked
+    -- The ring has wrapped repeatedly. Had the decodes written into the earlier
+    -- value's buffers, it would read overwritten prompt slots here.
+    let (earlierLogits, _) ← model.decodeSession cfg tables (model.embedTokens tok) promptLen earlier
     let some first := firstLogits | throw <| IO.userError "missing first decode output"
-    check ((← maxAbsDiff (forkLogits) (first)) == 0.0)
-      s!"(d) [{lbl}] fork owns independent cache storage after ring wrap"
+    check ((← maxAbsDiff (earlierLogits) (first)) == 0.0)
+      s!"(d) [{lbl}] an earlier session value keeps its cache after ring wrap"
     expectRejected (model.decodeSession cfg tables (model.embedTokens tok) 20 session)
       "session rejects capacity overflow"
     IO.println s!"  [{lbl}] owned cache promptLen={promptLen} decode maxAbs={maxDiff} (tol={tol}), capacities={capacities}"
@@ -616,13 +618,15 @@ private def runCacheBenchmark (device : Device) : IO Unit := do
       synchronize
       functionalMs := functionalMs + ((← IO.monoMsNow) - start)
       let session ← model.model.initCacheSession (batch := 1) cfg capacity device
-      ownedCapacity := (← session.capacities).foldl (· + ·) 0
-      let _ ← model.prefillSession cfg tables (model.embedTokens prompt) session
+      ownedCapacity := session.capacities.foldl (· + ·) 0
+      let (_, prefilled) ← model.prefillSession cfg tables (model.embedTokens prompt) session
+      let mut session := prefilled
       synchronize
       let start ← IO.monoMsNow
       for pos in [12:20] do
         let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := Tensor.slice! ids 1 pos 1
-        let _ ← model.decodeSession cfg tables (model.embedTokens tok) pos session
+        let (_, next) ← model.decodeSession cfg tables (model.embedTokens tok) pos session
+        session := next
       synchronize
       ownedMs := ownedMs + ((← IO.monoMsNow) - start)
     let bytesPerPosition := 2 * cfg.num_key_value_heads * cfg.head_dim * 4
