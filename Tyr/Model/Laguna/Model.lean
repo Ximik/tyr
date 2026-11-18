@@ -51,7 +51,6 @@
 -/
 import Tyr.Model.Laguna.TypedOps
 import Tyr.Inference.OwnedKV
-import Std.Sync.Mutex
 import Tyr.TensorStruct
 import Tyr.TensorStruct.DeriveCast
 import Tyr.TensorStruct.Indexed
@@ -364,9 +363,9 @@ private def forwardOwned {batch seq rotaryHalf numHeads cap : Nat}
   let kh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k
   let vh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
   let mut kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
-    Tensor.castLike kh (cache.kStore)
+    cache.kStore
   let mut vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
-    Tensor.castLike vh (cache.vStore)
+    cache.vStore
   if hp : prefill then
     -- Retain only the prompt tail, placing each entry at its absolute ring slot.
     let retained := min seq cap
@@ -411,40 +410,19 @@ end LagunaAttention
 structure LagunaCache (cfg : Config) (batch cap : Nat) (dtype : DType := .Float32) where
   kvCaches : Array (LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
 
-/-- Session storage: sliding layers reserve one window, so each layer carries its
-    own capacity. Ring writes take it modulo, and the session's `maxLen` bounds
-    the full layers. -/
-structure LagunaSessionCache (cfg : Config) (batch : Nat) (dtype : DType := .Float32) where
-  kvCaches : Array (Σ cap, LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
-  position : Nat := 0
-
-/-- An inference cache with private, mutable storage. Aliases refer to the same
-serialized session; `fork` creates independent storage. Failed transitions
-invalidate the session. Use the functional `LagunaCache` API for training or
-persistent tensor snapshots. Sliding layers allocate only one window. -/
+/-- An inference cache. Sliding layers reserve one window, so each layer carries its
+own capacity; ring writes take it modulo, and `maxLen` bounds the full layers. A step
+reuses the K/V buffers in place when the caller holds the only reference to the session;
+an earlier value the caller keeps is copied on write and keeps its contents. Use the
+functional `LagunaCache` API for training. -/
 structure LagunaCacheSession (cfg : Config) (batch maxLen : Nat) (dtype : DType := .Float32) where
   private mk ::
-  private state : Std.Mutex (Option (LagunaSessionCache (device := device) (dtype := dtype) cfg batch))
+  private kvCaches : Array (Σ cap, LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
+  private position : Nat := 0
 
-namespace LagunaCacheSession
-
-/-- Copy a session at its current position, including independent K/V buffers. -/
-def fork (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) : IO (LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) :=
-  session.state.atomically do
-    let some cache ← get | throw <| IO.userError "Laguna cache session is invalid"
-    let copied ← cache.kvCaches.mapM fun ⟨n, kv⟩ => do
-      let k ← data.cloneInferenceIO kv.kStore
-      let v ← data.cloneInferenceIO kv.vStore
-      return ⟨n, { kv with kStore := k, vStore := v }⟩
-    return ⟨← Std.Mutex.new (some { cache with kvCaches := copied })⟩
-
-/-- Layer capacities, for memory accounting without exposing mutable tensors. -/
-def capacities (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) : IO (Array Nat) :=
-  session.state.atomically do
-    let some cache ← get | throw <| IO.userError "Laguna cache session is invalid"
-    return cache.kvCaches.map (·.1)
-
-end LagunaCacheSession
+/-- Layer capacities, for memory accounting without exposing the cache tensors. -/
+def LagunaCacheSession.capacities (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) : Array Nat :=
+  session.kvCaches.map (·.1)
 
 /-! ## Decoder layer -/
 
@@ -771,17 +749,16 @@ def initCacheSession {batch : Nat} (cfg : Config) (_m : LagunaModel (device := d
     let k ← data.cloneInferenceIO template.kStore
     let v ← data.cloneInferenceIO template.vStore
     caches := caches.push ⟨capacity, { template with kStore := k, vStore := v }⟩
-  return ⟨← Std.Mutex.new (some { kvCaches := caches })⟩
+  return { kvCaches := caches }
 
-/-- Execute one serialized inference transition, invalidating on partial failure.
-Only fresh prefill and subsequent single-token steps are supported. -/
+/-- Execute one inference transition. Only fresh prefill and subsequent single-token
+steps are supported. -/
 private def forwardSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaModel (device := device) (dtype := dtype) cfg)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (position : Nat) (prefill : Bool) (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen)
     -- Ring writes cannot overflow; this keeps full layers from wrapping.
     (_hfit : 0 < seq ∧ position + seq ≤ maxLen)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) := session.state.atomically do
-  let some cache ← get | throw <| IO.userError "Laguna cache session is invalid"
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) := do
   if x.runtimeShape != #[batch, seq, cfg.hidden_size] then
     throw <| IO.userError "Laguna cache input shape mismatch"
   let ⟨hcover⟩ ← if h : position + seq ≤ tableLen then pure (PLift.up h) else
@@ -790,25 +767,21 @@ private def forwardSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaMo
       tables.slidingSin.device] do
     if tableDevice != x.device then
       throw <| IO.userError "Laguna cache rotary table device mismatch"
-  if cache.kvCaches.size != cfg.num_hidden_layers then
+  if session.kvCaches.size != cfg.num_hidden_layers then
     throw <| IO.userError "Laguna cache layer count mismatch"
   let ⟨hDecode⟩ ← if h : (prefill = true → position = 0) ∧ (prefill = false → seq = 1) then pure (PLift.up h.2) else
     throw <| IO.userError "Laguna cache expects fresh prefill or single-token decode"
-  if cache.position != position || (!prefill && position == 0) then
+  if session.position != position || (!prefill && position == 0) then
     throw <| IO.userError "Laguna cache position mismatch; prefill once before decode"
-  -- Validation failures above leave the session usable. Any failure below may
-  -- have mutated a subset of layers, so no partially updated state is reusable.
-  set (none : Option (LagunaSessionCache (device := device) (dtype := dtype) cfg batch))
-  let (hidden, updated) ← do
-    let m := TensorStruct.detach m
-    let tables := tables.detach
-    let (h, caches) ← m.layers.foldlM (fun (h, caches) i layer => do
-      let some ⟨n, cached⟩ := caches[i]? | throw <| IO.userError "missing Laguna cache"
+  let m := TensorStruct.detach m
+  let tables := tables.detach
+  -- Each layer's cache leaves the list before its write, so a unique session's buffers stay unique.
+  let (h, _, caches) ← m.layers.foldlM (fun (h, rest, caches) _ layer => do
+      let ⟨n, cached⟩ :: rest := rest | throw <| IO.userError "missing Laguna cache"
       let (next, kv) ← layer.forwardOwned cfg h tables position prefill hDecode cached hcover
-      pure (next, caches.set! i ⟨n, kv⟩)) (x.detach, cache.kvCaches)
-    pure (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { kvCaches := caches, position := position + seq : LagunaSessionCache (device := device) (dtype := dtype) cfg batch })
-  set (some updated)
-  return hidden
+      pure (next, rest, caches.push ⟨n, kv⟩))
+    (x.detach, session.kvCaches.toList, Array.mkEmpty session.kvCaches.size)
+  return (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { kvCaches := caches, position := position + seq })
 
 end LagunaModel
 
@@ -882,25 +855,25 @@ private def capacityError : IO.Error :=
 /-- Inference-only prefill into an owned cache session. The session must be fresh. -/
 def prefillSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
     {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen) (inputsEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] }) := do
+    (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] } × LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) := do
   let ⟨hfit⟩ ← if h : 0 < seq ∧ 0 + seq ≤ maxLen then pure (PLift.up h) else throw capacityError
-  let hidden ← m.model.forwardSession cfg inputsEmbeds tables 0 true session hfit
+  let (hidden, session) ← m.model.forwardSession cfg inputsEmbeds tables 0 true session hfit
   let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := Tensor.slice hidden 1 (seq - 1) 1
-  return Tensor.reshape (Tensor.linear3d lastHidden m.lmHead.detach) #[batch, cfg.vocab_size]
+  return (Tensor.reshape (Tensor.linear3d lastHidden m.lmHead.detach) #[batch, cfg.vocab_size], session)
 
 private def decodeSessionFit {batch maxLen : Nat} (cfg : Config) (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
     {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen) (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (position : Nat) (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen)
     (hfit : position + 1 ≤ maxLen)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] }) := do
-  let hidden ← m.model.forwardSession cfg tokenEmbed tables position false session ⟨by decide, hfit⟩
-  return Tensor.reshape (Tensor.linear3d hidden m.lmHead.detach) #[batch, cfg.vocab_size]
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] } × LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) := do
+  let (hidden, session) ← m.model.forwardSession cfg tokenEmbed tables position false session ⟨by decide, hfit⟩
+  return (Tensor.reshape (Tensor.linear3d hidden m.lmHead.detach) #[batch, cfg.vocab_size], session)
 
-/-- Append one token at the next absolute position without copying cache buffers. -/
+/-- Append one token at the next absolute position. -/
 def decodeSession {batch maxLen : Nat} (cfg : Config) (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
     {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen) (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (position : Nat) (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] }) := do
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] } × LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) := do
   let ⟨hfit⟩ ← if h : position + 1 ≤ maxLen then pure (PLift.up h) else throw capacityError
   decodeSessionFit cfg m tables tokenEmbed position session hfit
 
@@ -955,7 +928,7 @@ private partial def decodeLoopCached {batch : Nat}
       have h1 : remaining ≠ 1 := fun h => hStop (by simp [h])
       omega
     let nextEmb : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := m.embedTokens nextCol
-    let nextLogits ← decodeSessionFit cfg m tables nextEmb curSeq cache (by omega)
+    let (nextLogits, cache) ← decodeSessionFit cfg m tables nextEmb curSeq cache (by omega)
     decodeLoopCached cfg m tables strategy eosTokenIds finished' (remaining - 1) cache
       nextLogits onStep (generatedSoFar + 1) appended (by omega)
 
@@ -980,7 +953,7 @@ private def generateCore {batch seq : Nat}
   let maxLen := seq + maxNewTokens
   let tables ← precomputeRotaryTables cfg maxLen inputsEmbeds.device
   let cache ← LagunaModel.initCacheSession cfg m.model maxLen inputsEmbeds.device
-  let logits ← prefillSession cfg m tables inputsEmbeds cache
+  let (logits, cache) ← prefillSession cfg m tables inputsEmbeds cache
   let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := falseMaskTyped (n := batch) inputIds.device
   decodeLoopCached cfg m tables strategy eosTokenIds finished0 maxNewTokens
     cache logits onStep 0 inputIds (Nat.le_refl _)
