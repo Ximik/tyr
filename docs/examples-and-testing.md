@@ -3,7 +3,7 @@
 ## Purpose & when to use
 
 `Examples/` is the collection of runnable end-to-end demonstrations: training
-scripts (char-GPT, NanoChat, discrete diffusion, branching flows) and
+scripts (char-GPT, NanoChat, discrete diffusion) and
 pretrained-model demos (Flux, Whisper, Qwen, Gemma, KittenTTS). `Tests/` is the
 LeanTest-based test suite — unit tests and parity tests against reference
 implementations. Read this chapter when you want to run something rather than
@@ -16,10 +16,10 @@ build it, or when you are adding a test or example of your own.
 Everything is declared in `lakefile.lean`:
 
 - `lean_lib Tests` (roots `Tests`, no precompile),
-  `lean_lib TestsExperimental` (`:586`), `lean_lib Examples` (`:591`).
+  `lean_lib Examples` (`:170`).
 - Test-side `lean_exe` targets root under `Tests/`, example
   executables root under `Examples/`.
-- `@[test_driver] lean_exe test_runner` (`:598`) is Lake's test driver, so
+- `@[test_driver] lean_exe test_runner` (`:178`) is Lake's test driver, so
   `lake test` builds and runs it.
 - The test framework is an external dependency
   (`lakefile.lean`): `require LeanTest from git "https://github.com/cpehle/lean_test.git"`.
@@ -68,19 +68,14 @@ standalone test executables for a `main` and an assigned suite.
 
 ### Test tiers
 
-Tests are organized in three tiers:
+Tests are organized in two tiers:
 
 1. **Main suite** — `lake test`. `test_runner`'s root is
    `Tests/RunTests.lean`, which imports the umbrella module `Tests.lean`
    plus `Tests.TestAdditionalManifolds` (special-cased there, not
    in `Tests.lean`). It parses `--filter PATTERN`, `--ignored`, `--fail-fast`,
    `--help` into a `LeanTest.RunConfig`.
-2. **Experimental suite** — `lake exe test_runner_experimental`, root
-   `Tests/RunTestsExperimental.lean`, which imports `TestsExperimental.lean`.
-   That umbrella currently contains exactly one module,
-   `Tests.TestBranchingFlows`, parked there until
-   `Tyr/Model/BranchingFlows.lean` stabilizes (note at `Tests.lean:118`).
-3. **Standalone executables** — focused or heavy suites built and run
+2. **Standalone executables** — focused or heavy suites built and run
    individually: `TestDiffEq`, `TestDiffEqAdjoint`, `TestDiffEqAdjointCore`,
    `TestDataLoader`, `TestDiffusion`, and `RunRiemannianNanoGPTTests`. Each is
    a thin runner module
@@ -91,17 +86,14 @@ Tests are organized in three tiers:
    which just call a `run` function.
 
 Hosted CI (`.github/workflows/cpu.yml`) builds and runs the manifest in
-`scripts/test_suites.json`: the main and experimental runners plus Laguna's
+`scripts/test_suites.json`: the main runner plus Laguna's
 config, tokenizer, NVFP4, MoE, model, reference parity, and rotary suites.
 These Laguna suites run CPU checks against tracked fixtures; their CUDA branches
 remain conditional. Diffusion tests are in the main suite. Add new standalone
 CPU assertion suites to the same manifest.
 
-CI also builds `BranchingFlowsMoleculeTrainGenerate` and runs
-`scripts/test_branching_checkpoint_resume.py` on its embedded CPU dataset. That
-regression checks save/resume counts, retained snapshots, and rejection of
-missing or mismatched optimizer state. NanoChat checkpoint tests in the main
-suite compare the next optimizer update after restoring a snapshot.
+NanoChat checkpoint tests in the main suite compare the next optimizer update
+after restoring a snapshot.
 
 GPU suites run on self-hosted hardware via `.github/workflows/gpu.yml`.
 That workflow sets `TYR_GPU_TEST_STRICT=1`: the linked LibTorch must have CUDA,
@@ -161,7 +153,6 @@ and is the authoritative source for running them.
 | `Examples/GPT/` | Char-level GPT-2 on Shakespeare (nanoGPT configs), shape-indexed model code, Riemannian variant | `TrainGPT`, `RunRiemannianNanoGPT` |
 | `Examples/Diffusion/` | Masked discrete diffusion on ASCII text, checkpoint save/load, terminal animation | `TrainDiffusion` |
 | `Examples/NanoChat/` | Modded-nanogpt port: NorMuon + DistAdam training, SFT (`ChatSFT`), GRPO, tool-augmented generation, eval tasks | `TrainNanoChat` (torchrun-capable), `NanoChatPipeline`, `NanoChatChat` |
-| `Examples/BranchingFlows/` | Branching-flow generative models: toy demos, QM9 molecule training/generation (`qm9_xyz/` data) | `BranchingFlows{Continuous,Molecule,MoleculeTransformer}Train`, `BranchingFlowsMoleculeGenerate`, `BranchingFlowsMoleculeTrainGenerate` |
 | `Examples/Flux/` | Flux Klein 4B image generation (text encode → diffusion → VAE decode) | `FluxDemo`, `FluxDebug` |
 | `Examples/Qwen35/`, `Qwen25Omni/`, `Gemma4/` | Pretrained HF-hub inference with a shared CLI (`--source`, `--prompt[-file]`, `--image`, `--video`, `--batch-size`, `--max-new-tokens`, `--stream`, `--device`, ...) | `Qwen35RunHF`, `Qwen25OmniRunHF`, `Gemma4RunHF` |
 | `Examples/Qwen3ASR/` | Speech transcription, live microphone streaming | `Qwen3ASRTranscribe`, `Qwen3ASRLiveMic`, `Qwen3ASRLiveMicTrueStream` |
@@ -169,7 +160,7 @@ and is the authoritative source for running them.
 | `Examples/Whisper/` | Whisper transcription (file and in-memory), voice-mode loop | `WhisperTranscribe`, `WhisperTranscribeInMem`, `WhisperVoiceMode` |
 | `Examples/` (root) | KittenTTS pretrained synthesis and duration/debug harnesses; `TestGuard.lean` is a Widget display demo despite the name | `KittenTTSPretrained`, `KittenTTSDurations`, `KittenTTSDebug`, `KittenTTSCompare` |
 
-Test-side executables: `test_runner`, `test_runner_experimental`,
+Test-side executables: `test_runner`,
 `RunRiemannianNanoGPTTests`, `ffi_crash_probe`, and the standalone suites
 listed under "Test tiers" above. `GenerateFfiHeader`, which writes `libTyrC`'s
 FFI header, is covered in [ffi-and-build.md](ffi-and-build.md).
@@ -206,14 +197,12 @@ Running tests and examples:
 ```bash
 lake test                                  # main suite (test_runner)
 lake test -- --filter diffeq --fail-fast   # subset, stop on first failure
-lake exe test_runner_experimental          # experimental suite
 lake exe ffi_crash_probe                   # manual FFI failure-mode probe
 python3 scripts/test_inventory.py --build # build every required CPU suite
 lake env python3 scripts/test_inventory.py --run # run that same suite list
 
 lake exe TrainGPT                          # char-GPT on Shakespeare
 lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B --prompt "Summarize dependent types." --stream
-lake exe BranchingFlowsMoleculeTrainGenerate
 ```
 
 ## What is covered vs uncovered

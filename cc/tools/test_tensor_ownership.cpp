@@ -181,11 +181,6 @@ void testModelArguments(lean_object* tensor) {
   ObservedArg size(shape({6, 6})), mode(lean_mk_string("nearest"));
   lean_dec(lean_torch_interpolate(input.get(), size.transfer(), mode.transfer(), 0));
   size.consumed("interpolate size"); mode.consumed("interpolate mode");
-
-  ObservedArg optionalWeight(some(retain(tensor))), reduction(lean_mk_string("mean"));
-  lean_dec(lean_torch_binary_cross_entropy(tensor, tensor,
-    optionalWeight.transfer(), reduction.transfer()));
-  optionalWeight.consumed("BCE optional weight"); reduction.consumed("BCE reduction");
 }
 } // namespace
 

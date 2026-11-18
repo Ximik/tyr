@@ -222,11 +222,7 @@ Lean aliases, native aliases, storage views, weak observers, and saved autograd
 inputs. It also verifies unique CPU reuse and gradient snapshot stability.
 The Lean regressions cover returned-value use, metadata checks, and effect order.
 
-The BranchingFlows molecule training CUDA-graph option currently uses its eager
-training path with a notice: replay requires stable mutable buffer addresses,
-which returned-value updates do not promise. A future graph implementation needs
-an explicit mutable-buffer API. GPU benchmark kernels still require separate
-hardware qualification.
+GPU benchmark kernels still require separate hardware qualification.
 
 ### Error strategy
 
@@ -273,8 +269,8 @@ narrowing it or allocating output storage, and its native body returns C++ failu
 `IO.Error`. The runtime-service exports in `Tyr.Torch` use the same exception
 guard. `scripts/test_native_torch_recovery.sh` exercises the
 resampler size failures, borrowed arrays, and runtime error carriers. This
-exception guard does not establish CUDA graph lifecycle or stream correctness;
-those GPU-specific contracts still require repair and qualification.
+exception guard does not establish CUDA stream correctness; that GPU-specific
+contract still requires repair and qualification.
 
 All distributed and polar IO exports enter the common guard. Process-group initialization checks port, rank, world size,
 and backend availability before rendezvous, then publishes state only after
@@ -441,10 +437,10 @@ every library the Lean runtime links statically is exported and would override
 libtorch's copy: `-l:libgcc_s.so.1` ahead of the bundled linker's `-lunwind`
 keeps libgcc's exception unwinder (LLVM's crashes on libtorch exceptions), and
 `-Wl,--exclude-libs,libuv.a` keeps Lean's libuv from replacing the one bundled
-in `libtorch_cpu` (its TCPStore). The five
+in `libtorch_cpu` (its TCPStore). The four
 `lean_lib`s are `Tyr` (default target, precompiled, links `libTyrC`),
-`TyrFFI` (the `@[extern]` declarations; not precompiled), `Tests`,
-`TestsExperimental` and `Examples`, plus the `lean_exe` targets. `TyrFFI` is
+`TyrFFI` (the `@[extern]` declarations; not precompiled), `Tests`
+and `Examples`, plus the `lean_exe` targets. `TyrFFI` is
 declared after `Tyr` because Lake gives a module to the last declared library
 whose roots match it.
 
@@ -486,8 +482,7 @@ Environment variables for a single build:
 - `scripts/nanochat/` — `torchrun` launchers for distributed NanoChat training
   (`run_train_torchrun.sh`, `bench_distributed.sh`) and `ENV_INVENTORY.md`.
 - Conventional-commit hooks and their checker live in `.githooks/`.
-- Python converters — `kokoro_to_safetensors.py`,
-  `qm9_{sdf,xyz}_to_branching_jsonl.py`, `qwen3tts_*.py`,
+- Python converters — `kokoro_to_safetensors.py`, `qwen3tts_*.py`,
   `kittentts_reference_synthesize.py` (dataset prep and parity references;
   run them in the repo's `.venv`, not a global Python).
 

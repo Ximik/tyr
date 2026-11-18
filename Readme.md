@@ -84,9 +84,6 @@ lake exe TrainGPT
 ```bash
 lake test                            # builds and runs test_runner
 lake exe test_runner --filter GPT    # with arguments
-
-# Experimental/in-progress suites
-lake exe test_runner_experimental
 ```
 
 ## Environment Variables
@@ -140,7 +137,6 @@ See [Examples/README.md](Examples/README.md) for detailed per-example documentat
 | **TrainDiffusion** | Discrete masked diffusion on ASCII text | `lake build TrainDiffusion` |
 | **TrainNanoChat** | Modded-nanogpt distributed training | `lake build TrainNanoChat` |
 | **FluxDemo** | Flux Klein 4B image generation | `lake build FluxDemo` |
-| **BranchingFlows** | Dataset-backed molecule branching-flow training and generation | `lake build BranchingFlowsMoleculeTrainGenerate` |
 | **NanoProof** | Transformer theorem prover (model only) | Part of `Examples` lib |
 
 ### Distributed NanoChat (GPU Node)

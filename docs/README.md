@@ -61,8 +61,7 @@ Two kinds of documentation exist:
 
 - [LLMs](models/llms.md) — shared generation infrastructure (sampling, KV
   caches) and the Qwen lineage, Gemma4, and FLM.
-- [Generative models](models/generative.md) — BranchingFlows, Flowfusion,
-  Flux image generation, and the VAE.
+- [Generative models](models/generative.md) — Flux image generation and the VAE.
 - [Audio & speech models](models/audio-speech.md) — KittenTTS, Qwen3-TTS,
   Qwen3-ASR, Silero VAD, and Whisper.
 

@@ -99,7 +99,6 @@ std::vector<AbortCase> cases() {
   add("sub-shape", "must match the size", [] { binaryShapes(lean_torch_tensor_sub); });
   add("mul-shape", "must match the size", [] { binaryShapes(lean_torch_tensor_mul); });
   add("div-shape", "must match the size", [] { binaryShapes(lean_torch_div); });
-  add("mulTensorScalar-shape", "must match the size", [] { binaryShapes(lean_torch_mul_tensor_scalar); });
   add("addScalar-float8", "not implemented for 'Float8_e4m3fn'", [] { scalarFloat8(lean_torch_add_scalar); });
   add("subScalar-float8", "not implemented for 'Float8_e4m3fn'", [] { scalarFloat8(lean_torch_sub_scalar); });
   add("mulScalar-float8", "not implemented for 'Float8_e4m3fn'", [] { scalarFloat8(lean_torch_mul_scalar); });

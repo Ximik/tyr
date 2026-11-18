@@ -68,15 +68,14 @@ struct Inputs {
   Object v = full({1, 1, 16, 4}, 1);
   Object padding = full({1, 16}, 1);
   Object edges = full({1, 16, 16}, 1);
-  Object bias = full({1, 1, 16, 16}, 0);
 
   void referencesUnchanged() const {
     require(q->m_rc == 1 && v->m_rc == 1 && padding->m_rc == 1 &&
-            edges->m_rc == 1 && bias->m_rc == 1, "Attention changed borrowed references");
+            edges->m_rc == 1, "Attention changed borrowed references");
   }
 };
 
-enum class Family { Basic, GQA, Padding, QKV, Window, Gemma, Bias };
+enum class Family { Basic, GQA, Padding, QKV, Window, Gemma };
 const char* name(Family family) {
   switch (family) {
     case Family::Basic: return "attention";
@@ -85,7 +84,6 @@ const char* name(Family family) {
     case Family::QKV: return "attentionGQAQKV";
     case Family::Window: return "attentionWindow";
     case Family::Gemma: return "gemma4MaskedAttention";
-    case Family::Bias: return "branchingAttentionBias";
   }
   throw std::runtime_error("Unknown attention family");
 }
@@ -99,7 +97,6 @@ Object pureCall(Family family, const Inputs& x) {
     case Family::QKV: result = lean_torch_sdpa_gqa_qkv(q, q, v, 0, 0); break;
     case Family::Window: result = lean_torch_sdpa_gqa_window(q, q, v, 1, 0, Nat(8)); break;
     case Family::Gemma: result = lean_torch_sdpa_gqa_mask_qkv(q, q, v, x.edges.get(), 0); break;
-    case Family::Bias: result = lean_torch_sdpa_4d_bias(q, q, v, x.bias.get(), 0); break;
   }
   return Object(result, lean_dec);
 }
@@ -113,7 +110,6 @@ Object ioCall(Family family, const Inputs& x, double p) {
     case Family::QKV: result = lean_torch_sdpa_gqa_qkv_io(q, q, v, p, 0, 0); break;
     case Family::Window: result = lean_torch_sdpa_gqa_window_io(q, q, v, p, 1, 0, Nat(8)); break;
     case Family::Gemma: result = lean_torch_sdpa_gqa_mask_qkv_io(q, q, v, x.edges.get(), p, 0); break;
-    case Family::Bias: result = lean_torch_sdpa_4d_bias_io(q, q, v, x.bias.get(), p, 0); break;
   }
   return Object(result, lean_dec);
 }
@@ -161,7 +157,7 @@ int main() {
   lean_initialize();
   int failures = 0;
   for (auto family : {Family::Basic, Family::GQA, Family::Padding, Family::QKV,
-                     Family::Window, Family::Gemma, Family::Bias}) {
+                     Family::Window, Family::Gemma}) {
     try { check(family); std::cout << "PASS " << name(family) << " effects\n"; }
     catch (const std::exception& error) {
       ++failures;

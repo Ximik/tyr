@@ -409,7 +409,6 @@ int main() {
   run("sub-success", [] { binary(lean_torch_tensor_sub, 4); });
   run("mul-success", [] { binary(lean_torch_tensor_mul, 12); });
   run("div-success", [] { binary(lean_torch_div, 3); });
-  run("mulTensorScalar-success", [] { binary(lean_torch_mul_tensor_scalar, 12); });
   run("addScalar-success", [] { scalar(lean_torch_add_scalar, 8); });
   run("subScalar-success", [] { scalar(lean_torch_sub_scalar, 4); });
   run("mulScalar-success", [] { scalar(lean_torch_mul_scalar, 12); });

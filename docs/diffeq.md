@@ -397,16 +397,12 @@ def adjointExample : IO Unit := do
   | none => IO.println "adjoint solve failed"
 ```
 
-`Tyr/Model/BranchingFlows/DiffEq.lean` wraps `diffeqsolve` for
-generative modeling.
-
 ## Related guides
 
 - [Automatic differentiation](autodiff.md) — the `autograd.grad` engine behind `Adjoint/Torch.lean`
 - [Tensors](core/tensors.md) — `Tensor σ`, the indexed tensor state type
 - [TensorStruct](core/tensorstruct.md) — model-tree states for neural ODEs
 - [Typed tensors](core/typed.md) — `Tensor σ` states with static shape/dtype specs
-- [Generative models](models/generative.md) — BranchingFlows, a downstream `diffeqsolve` consumer
 - [Examples and testing](examples-and-testing.md) — the DiffEq parity test suites (`Tests/TestDiffEq*.lean`)
 
 Exhaustive, per-symbol API documentation is generated separately by doc-gen4

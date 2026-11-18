@@ -1,7 +1,6 @@
 {
   "required": {
     "test_runner": ["--fail-fast"],
-    "test_runner_experimental": [],
     "LagunaConfigTest": [],
     "LagunaTokenizerTest": [],
     "LagunaNvFp4Test": [],

@@ -1,7 +1,7 @@
 import Tyr.Basic
 
-/-! Native runtime services: device acquisition, CUDA streams, events and
-graphs, file helpers, and the global RNG seed. Re-exported by `Tyr.Torch`. -/
+/-! Native runtime services: device acquisition, CUDA streams and events,
+file helpers, and the global RNG seed. Re-exported by `Tyr.Torch`. -/
 
 namespace torch
 
@@ -49,28 +49,6 @@ opaque cuda_event_elapsed_ms (start stop : CudaEvent) : IO Float
 
 @[extern "lean_torch_cuda_event_destroy"]
 opaque cuda_event_destroy (event : CudaEvent) : IO Unit
-
-
-/-- Begin CUDA graph capture into the process-wide graph slot. Subsequent
-    CUDA work (including autograd backward) is recorded until
-    `cudaGraphCaptureEnd`. Capture requires static shapes and stable buffer
-    addresses; copy fresh inputs into the captured buffers before each
-    `cudaGraphReplay`. Throws an IO error if capture is not possible
-    (e.g. an op synchronizes or allocates illegally inside the region). -/
-@[extern "lean_torch_cuda_graph_capture_begin"]
-opaque cudaGraphCaptureBegin : IO Unit
-
-/-- End the active CUDA graph capture. -/
-@[extern "lean_torch_cuda_graph_capture_end"]
-opaque cudaGraphCaptureEnd : IO Unit
-
-/-- Replay the captured CUDA graph. -/
-@[extern "lean_torch_cuda_graph_replay"]
-opaque cudaGraphReplay : IO Unit
-
-/-- Free the captured CUDA graph. -/
-@[extern "lean_torch_cuda_graph_reset"]
-opaque cudaGraphReset : IO Unit
 
 /-- Check if MPS (Metal Performance Shaders) is available -/
 @[extern "lean_torch_mps_is_available"]

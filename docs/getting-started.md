@@ -15,7 +15,7 @@ Everything is driven by `lakefile.lean` (Lake DSL). The pieces that matter on
 day one:
 
 - **Lean libraries** — `Tyr` (`@[default_target]`, precompiled; everything under
-  `Tyr.*`), `Tests`, `TestsExperimental`, and `Examples`.
+  `Tyr.*`), `Tests`, and `Examples`.
 - **C++ bridge** — `target libtyr` in `lakefile.lean` wraps the Makefile
   build: it generates the FFI header `cc/src/generated/tyr_ffi.h` and then
   runs `make -C cc dylib`, producing the shared library `cc/build/libTyrC.so`
@@ -132,14 +132,6 @@ lake exe test_runner --ignored              # include tests marked ignored
 lake exe test_runner --fail-fast            # stop at first failure
 ```
 
-The experimental suite tracks in-progress modules and is expected to be less
-stable:
-
-```bash
-lake build test_runner_experimental
-.lake/build/bin/test_runner_experimental
-```
-
 Focused suites exist as separate executables:
 `TestDataLoader`, `TestDiffusion`, `TestDiffEq`, `TestDiffEqAdjoint`, plus
 `RunRiemannianNanoGPTTests`. Build and run them the same way
@@ -157,7 +149,6 @@ Per-example details live in `Examples/README.md`; the common pattern is
 | `TrainNanoChat` | modded-nanogpt distributed training | flags `--data`, `--val`, `--checkpoint-dir`, `--resume`, `--debug` |
 | `NanoChatPipeline` / `NanoChatChat` | multi-stage pipeline / checkpoint chat | configured via env, see `scripts/nanochat/ENV_INVENTORY.md` |
 | `FluxDemo` | Flux Klein 4B image generation | needs weights under `weights/`; writes `output.ppm` |
-| `BranchingFlowsMoleculeTrainGenerate` | dataset-backed molecule training + generation | |
 
 ## Distributed NanoChat scripts
 

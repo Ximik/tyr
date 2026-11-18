@@ -352,12 +352,6 @@ def resume (initParams : α) [TensorStruct α] :
   loadTrainingCheckpoint initParams "checkpoints/gpt"
 ```
 
-The molecule BranchingFlows executable publishes model parameters, metadata,
-Muon momentum leaves (`optim_muon_momentum_*`), and `optim_muon_count.txt`
-together. Resume pins that snapshot and checks the optimizer step against the
-metadata. Its generation launcher also pins the snapshot before hashing and
-loading it.
-
 NanoChat publishes its heterogeneous optimizer state with the same protocol.
 Its versioned `state_meta.json` preserves exact scalar values, per-parameter
 optimizer counters, and optional buffer layout. New snapshots reject missing or

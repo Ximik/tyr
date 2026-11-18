@@ -264,31 +264,6 @@ Useful flags:
 - `--enable-thinking` use the Gemma 4 thinking-enabled chat template
 - `--debug-ids` print generated token ids alongside decoded text
 
-## BranchingFlows
-
-Combinatorial branching flow sampler -- a port of branching flow networks to Lean. Includes continuous, discrete, and mixed training demos. No external data needed.
-
-```bash
-lake exe BranchingFlowsContinuousTrain
-lake exe BranchingFlowsMoleculeTrain
-lake exe BranchingFlowsMoleculeTransformerTrain
-lake exe BranchingFlowsMoleculeTrainGenerate
-```
-
-Demo files:
-- `BranchingFlowsDemo.lean` -- Minimal deterministic demo
-- `ContinuousTrainDemo.lean` -- Continuous state training with an overfit loss-decrease check
-- `DiscreteTrainDemo.lean` -- Discrete state training
-- `MixedTrainDemo.lean` -- Mixed continuous/discrete training
-- `MoleculeTrainDemo.lean` -- QM9-shaped coordinate/label training with an overfit loss-decrease check
-- `MoleculeTransformerTrainDemo.lean` -- QM9-shaped transformer training with coordinate, label, split, and deletion loss checks
-- `MoleculeGenerationDemo.lean` -- Oracle molecule bridge/generation example with XYZ export
-- `MoleculeTrainGenerate.lean` -- Dataset-backed molecule transformer training, evaluation, and learned XYZ generation
-
-Torch-backed training demos should run through Lake executables or compiled
-targets so Tyr's native Torch bridge is linked. The training executables print
-initial/final losses and fail if the tiny model does not improve.
-
 ## NanoProof
 
 Transformer architecture for theorem proving with dual policy/value heads for MCTS integration. Currently model-only; RL training loop depends on MCTS/Prover modules that need to be recreated.

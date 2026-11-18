@@ -166,11 +166,6 @@ lean_lib Tests where
   roots := #[`Tests]
   precompileModules := false
 
-/-- Experimental tests that track in-progress modules. -/
-lean_lib TestsExperimental where
-  roots := #[`TestsExperimental]
-  precompileModules := false
-
 /-- Examples library -/
 lean_lib Examples where
   roots := #[`Examples]
@@ -197,46 +192,6 @@ lean_exe diffeq_glue_bench where
     `Lean`, so it does not link `libTyrC`. -/
 lean_exe GenerateFfiHeader where
   root := `Tyr.GenerateFfiHeader
-
-/-- Experimental test runner for unstable/in-progress modules. -/
-lean_exe test_runner_experimental where
-  root := `Tests.RunTestsExperimental
-  supportInterpreter := true
-
-/-- BranchingFlows discrete-token training demonstration. -/
-lean_exe BranchingFlowsDiscreteTrain where
-  root := `Examples.BranchingFlows.DiscreteTrainDemo
-  supportInterpreter := true
-
-/-- BranchingFlows mixed continuous/token training demonstration. -/
-lean_exe BranchingFlowsMixedTrain where
-  root := `Examples.BranchingFlows.MixedTrainDemo
-  supportInterpreter := true
-
-/-- BranchingFlows continuous overfit training check. -/
-lean_exe BranchingFlowsContinuousTrain where
-  root := `Examples.BranchingFlows.ContinuousTrainDemo
-  supportInterpreter := true
-
-/-- BranchingFlows molecule overfit training check. -/
-lean_exe BranchingFlowsMoleculeTrain where
-  root := `Examples.BranchingFlows.MoleculeTrainDemo
-  supportInterpreter := true
-
-/-- Molecule-shaped oracle generation with branch-event trajectory export. -/
-lean_exe BranchingFlowsMoleculeGenerate where
-  root := `Examples.BranchingFlows.MoleculeGenerationDemo
-  supportInterpreter := true
-
-/-- BranchingFlows molecule transformer overfit training check. -/
-lean_exe BranchingFlowsMoleculeTransformerTrain where
-  root := `Examples.BranchingFlows.MoleculeTransformerTrainDemo
-  supportInterpreter := true
-
-/-- Dataset-backed BranchingFlows molecule transformer training and generation. -/
-lean_exe BranchingFlowsMoleculeTrainGenerate where
-  root := `Examples.BranchingFlows.MoleculeTrainGenerate
-  supportInterpreter := true
 
 /-- Manual FFI failure-mode probe (intentionally crashes; not in the suite).
     Run it to check that an uncaught libtorch exception terminates with an
