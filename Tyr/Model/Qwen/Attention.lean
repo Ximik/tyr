@@ -34,6 +34,10 @@ structure QwenAttention (hidden_size num_heads num_kv_heads head_dim : Nat) (dty
   q_norm : Option (Tensor { device := device, shape := #[head_dim], dtype := dtype }) := none
   /-- Optional K norm (per-head normalization for Flux Klein text encoder) -/
   k_norm : Option (Tensor { device := device, shape := #[head_dim], dtype := dtype }) := none
+  /-- Optional Q/K/V projection biases. -/
+  q_bias : Option (Tensor { device := device, shape := #[num_heads * head_dim], dtype := dtype }) := none
+  k_bias : Option (Tensor { device := device, shape := #[num_kv_heads * head_dim], dtype := dtype }) := none
+  v_bias : Option (Tensor { device := device, shape := #[num_kv_heads * head_dim], dtype := dtype }) := none
   deriving TensorStruct
 
 namespace QwenAttention
@@ -89,6 +93,15 @@ Typed wrappers over existing attention externs that have no counterpart in
 produce (see `Tyr/Inference/KVCache.lean` for the same pattern). -/
 
 /-- [batch, seq, n_head, head_dim] → [batch, n_head, seq, head_dim] (contiguous). -/
+private def project {batch seq inDim outDim : Nat}
+    (x : Tensor { device := device, shape := #[batch, seq, inDim], dtype := dtype })
+    (weight : Tensor { device := device, shape := #[outDim, inDim], dtype := dtype })
+    (bias : Option (Tensor { device := device, shape := #[outDim], dtype := dtype }))
+    : Tensor { device := device, shape := #[batch, seq, outDim], dtype := dtype } :=
+  match bias with
+  | some b => Tensor.affine3d x weight b
+  | none => Tensor.linear3d x weight
+
 private def transposeForAttention {batch seq n_head head_dim : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩)
     : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
@@ -167,9 +180,9 @@ def forward {batch seq hidden_size num_heads num_kv_heads half : Nat}
     (is_causal : Bool := true)
     : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Project to Q, K, V
-  let q := Tensor.linear3d x attn.q_proj  -- [batch, seq, num_heads * head_dim]
-  let k := Tensor.linear3d x attn.k_proj  -- [batch, seq, num_kv_heads * head_dim]
-  let v := Tensor.linear3d x attn.v_proj  -- [batch, seq, num_kv_heads * head_dim]
+  let q := project x attn.q_proj attn.q_bias  -- [batch, seq, num_heads * head_dim]
+  let k := project x attn.k_proj attn.k_bias  -- [batch, seq, num_kv_heads * head_dim]
+  let v := project x attn.v_proj attn.v_bias  -- [batch, seq, num_kv_heads * head_dim]
 
   -- Reshape to [batch, seq, num_heads, head_dim]
   let q := q.reshape #[batch, seq, num_heads, 2 * half]
@@ -217,9 +230,9 @@ def forwardStep {batch hidden_size num_heads num_kv_heads half cap len : Nat}
     (hlen : len < cap)
     : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × KVCache (device := device) batch num_kv_heads (2 * half) cap (len + 1) dtype :=
   -- Project current token to Q/K/V.
-  let q0 := Tensor.linear3d x attn.q_proj
-  let k0 := Tensor.linear3d x attn.k_proj
-  let v0 := Tensor.linear3d x attn.v_proj
+  let q0 := project x attn.q_proj attn.q_bias
+  let k0 := project x attn.k_proj attn.k_bias
+  let v0 := project x attn.v_proj attn.v_bias
 
   let q := q0.reshape #[batch, 1, num_heads, 2 * half]
   let k := k0.reshape #[batch, 1, num_kv_heads, 2 * half]
@@ -280,9 +293,9 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads half : Nat}
     (is_causal : Bool := true)
     : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Project to Q, K, V
-  let q := Tensor.linear3d x attn.q_proj  -- [batch, seq, num_heads * head_dim]
-  let k := Tensor.linear3d x attn.k_proj  -- [batch, seq, num_kv_heads * head_dim]
-  let v := Tensor.linear3d x attn.v_proj  -- [batch, seq, num_kv_heads * head_dim]
+  let q := project x attn.q_proj attn.q_bias  -- [batch, seq, num_heads * head_dim]
+  let k := project x attn.k_proj attn.k_bias  -- [batch, seq, num_kv_heads * head_dim]
+  let v := project x attn.v_proj attn.v_bias  -- [batch, seq, num_kv_heads * head_dim]
 
   -- Reshape to [batch, seq, num_heads, head_dim]
   let q := q.reshape #[batch, seq, num_heads, 2 * half]

@@ -46,6 +46,11 @@ private def loadLinearWeight (src : Source) (baseName : String) (outDim inDim : 
     return dequantizeFP8 w s hBlocks
   | none => return w.toFloat32
 
+private def loadBias (src : Source) (baseName : String) (dim : Nat)
+    (device : Device := .CPU) : IO (Tensor { device := device, shape := #[dim], dtype := .Float32 }) := do
+  let ⟨_, b⟩ ← src.load (← src.resolve (nameCandidates s!"{baseName}.bias")) #[dim] device
+  pure (reqGradFalse b.toFloat32)
+
 private def loadAttention (src : Source) (layerIdx : Nat)
     (hidden_size num_heads num_kv_heads head_dim : Nat)
     (device : Device := .CPU) : IO (qwen.QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
@@ -56,6 +61,9 @@ private def loadAttention (src : Source) (layerIdx : Nat)
   let oProj ← loadLinearWeight (device := device) src s!"{p}.o_proj" hidden_size (num_heads * head_dim)
   let qNorm ← (src.find? (nameCandidates s!"{p}.q_norm.weight")).mapM (src.load · #[head_dim] device)
   let kNorm ← (src.find? (nameCandidates s!"{p}.k_norm.weight")).mapM (src.load · #[head_dim] device)
+  let qBias ← loadBias (device := device) src s!"{p}.q_proj" (num_heads * head_dim)
+  let kBias ← loadBias (device := device) src s!"{p}.k_proj" (num_kv_heads * head_dim)
+  let vBias ← loadBias (device := device) src s!"{p}.v_proj" (num_kv_heads * head_dim)
   pure {
     q_proj := reqGradFalse qProj
     k_proj := reqGradFalse kProj
@@ -63,6 +71,9 @@ private def loadAttention (src : Source) (layerIdx : Nat)
     o_proj := reqGradFalse oProj
     q_norm := qNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
     k_norm := kNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
+    q_bias := some qBias
+    k_bias := some kBias
+    v_bias := some vBias
   }
 
 private def loadMLP (src : Source) (layerIdx : Nat)

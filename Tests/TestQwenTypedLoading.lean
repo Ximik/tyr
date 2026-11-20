@@ -26,7 +26,9 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 omni tied : Bool) : IO
     ("model.layers.0.mlp.up_proj.weight", #[16, 8]),
     ("model.layers.0.mlp.down_proj.weight", #[8, 16]),
     ("model.norm.weight", #[8])
-  ] ++ (if omni then #[] else #[("model.layers.0.self_attn.q_norm.weight", #[4]),
+  ] ++ (if omni then #[("model.layers.0.self_attn.q_proj.bias", #[8]),
+      ("model.layers.0.self_attn.k_proj.bias", #[4]), ("model.layers.0.self_attn.v_proj.bias", #[4])]
+    else #[("model.layers.0.self_attn.q_norm.weight", #[4]),
       ("model.layers.0.self_attn.k_norm.weight", #[4])])
     ++ (if tied then #[] else #[("lm_head.weight", #[8, 8])])
   let mut fields : List (String × Json) := []
