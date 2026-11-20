@@ -31,10 +31,11 @@ env.load()
 import modal  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-LAUNCHER = "parity/modal/run_modal.py"
+# Read only here, never in the image, so they may differ from the commit.
+LOCAL_ONLY = ("parity/modal/run_modal.py", "parity/modal/requirements.txt")
 BASE_IMAGE = "nvidia/cuda:13.0.2-devel-ubuntu24.04"
 CHECKOUT = "/opt/tyr"
-PYTHON = "/opt/ref-venv/bin/python"
+ENVS = "/opt/parity-envs"
 WEIGHTS = "/weights"
 OUT = "/out"
 TIMEOUT = 6 * 3600
@@ -56,9 +57,9 @@ def https_url(url: str) -> str:
 def checked_commit() -> tuple[str, str]:
     """HEAD and an https URL of a remote with a branch containing it; exits if
     the tree has other changes or no remote branch contains HEAD."""
-    dirty = [line[3:] for line in git("status", "--porcelain").splitlines() if line[3:] != LAUNCHER]
+    dirty = [line[3:] for line in git("status", "--porcelain").splitlines() if line[3:] not in LOCAL_ONLY]
     if dirty:
-        sys.exit("the working tree has changes besides " + LAUNCHER + ":\n  " + "\n  ".join(dirty))
+        sys.exit("the working tree has changes besides " + " and ".join(LOCAL_ONLY) + ":\n  " + "\n  ".join(dirty))
     sha = git("rev-parse", "HEAD").strip()
     branches = [line.strip().split(" -> ")[0] for line in git("branch", "-r", "--contains", sha).splitlines()]
     if not branches:
@@ -127,7 +128,7 @@ def main() -> int:
 
     with modal.enable_output():
         selection = f" --tests {args.tests}" if args.tests else ""
-        fetch = start("weights", f"{PYTHON} parity/run.py --weights-only --weights {WEIGHTS}{selection}", [WEIGHTS],
+        fetch = start("weights", f"python3 parity/run.py --envs {ENVS} --weights-only --weights {WEIGHTS}{selection}", [WEIGHTS],
                         volumes={WEIGHTS: weights}, secrets=hf_secret,
                         cpu=4.0, **common)
         if finish(fetch) != 0:
@@ -136,7 +137,7 @@ def main() -> int:
 
         volumes = {WEIGHTS: weights.read_only(), OUT: out}
         runs = {
-            device: start(device, f"{PYTHON} parity/run.py --device {kind} --weights {WEIGHTS} --out {OUT}{selection}",
+            device: start(device, f"python3 parity/run.py --envs {ENVS} --device {kind} --weights {WEIGHTS} --out {OUT}{selection}",
                           [OUT], volumes=volumes, **resources, **common)
             for device, kind, resources in (
                 ("cpu", "cpu", {"cpu": 16.0, "memory": 65536}),
