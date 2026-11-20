@@ -1891,6 +1891,54 @@ private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : Nat}
     inputIds
     (Nat.le_refl _)
 
+private partial def forcedLoopCached {batch maxLen steps : Nat}
+    (cfg : Config)
+    (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
+    (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHalfHeadDim cfg], dtype := .Float32 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    (fed : Nat)
+    {curSeq : Nat}
+    (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen curSeq)
+    (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype })
+    (acc : Array (Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype }))
+    (hfit : curSeq + steps ≤ maxLen + fed)
+    : IO (Array (Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype })) := do
+  let acc := acc.push (lastLogits.reshape #[batch, 1, cfg.vocab_size])
+  if h : fed + 1 < steps then
+    let tok : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.slice forced 1 fed 1
+    let (logits, cache') ← decodeStep cfg m tok cache (by omega) slidingCosAll slidingSinAll fullCosAll fullSinAll
+    forcedLoopCached cfg m slidingCosAll slidingSinAll fullCosAll fullSinAll forced (fed + 1) cache' logits acc (by omega)
+  else
+    pure acc
+
+/-- Logits after `inputIds` and after each token of `forced` but the last, the
+prompt prefilled in one pass and the tokens fed one at a time through the cache.
+Position `i` of the result scores the choice of `forced[:, i]`. -/
+def forcedLogits {batch seq steps : Nat}
+    (cfg : Config)
+    (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    : IO (Tensor { device := device, shape := #[batch, steps, cfg.vocab_size], dtype := dtype }) := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
+    throw <| IO.userError "forcedLogits requires non-empty prompt sequence"
+  if steps == 0 then
+    throw <| IO.userError "forcedLogits requires at least one forced token"
+  let maxLen := seq + steps
+  let (slidingCosAll, slidingSinAll, fullCosAll, fullSinAll) :=
+    precomputeDecodeRotary (maxLen := maxLen) cfg inputIds.device
+  let cache := Gemma4Model.initCache cfg m.model maxLen inputIds.device (h := by omega)
+  let (logits, cache') ←
+    prefillCaches (maxLen := maxLen) cfg m inputIds cache (by omega) hSeq
+      slidingCosAll slidingSinAll fullCosAll fullSinAll
+  let steps' ← forcedLoopCached cfg m slidingCosAll slidingSinAll fullCosAll fullSinAll forced 0 cache' logits #[] (by omega)
+  IO.ofExcept <| Tensor.catMany? (steps'.map Tensor.packShape) 1 #[batch, steps, cfg.vocab_size]
+
 def generate {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)

@@ -65,9 +65,11 @@ private def tryLoadParameter (src : Source) (name : String) (s : Shape) : IO (Op
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
     SomeDTypeTensor shape device := ⟨tensor.1, tensor.2.detach⟩
 
-private def requireDType {shape : Shape} (dtype : DType)
+/-- Admit a stored weight at the model dtype: equality only unless `cast`,
+which converts it once here. -/
+private def admitDType {shape : Shape} (cast : Bool) (dtype : DType)
     (tensor : SomeDTypeTensor shape device) : IO (Tensor ⟨shape, dtype, device⟩) :=
-  IO.ofExcept (tensor.atDType? dtype)
+  if cast then pure (tensor.2.castDType dtype) else IO.ofExcept (tensor.atDType? dtype)
 
 private def pad1dTo {srcDim dstDim : Nat} {dt : DType}
     (x : Tensor ⟨#[srcDim], dt, device⟩) : IO (Tensor ⟨#[dstDim], dt, device⟩) := do
@@ -131,7 +133,7 @@ private def layerAttentionDim (cfg : Config) (layerType : LayerType) : Nat :=
 private def layerKVProjDim (cfg : Config) (layerType : LayerType) : Nat :=
   layerNumKVHeads cfg layerType * layerHeadDim cfg layerType
 
-private def loadAttention (src : Source) (cfg : Config) (layerIdx : Nat)
+private def loadAttention (src : Source) (cfg : Config) (layerIdx : Nat) (cast : Bool)
     : IO (Gemma4Attention (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}.self_attn"
   let layerType := Config.layerTypeAt cfg layerIdx
@@ -173,15 +175,15 @@ private def loadAttention (src : Source) (cfg : Config) (layerIdx : Nat)
   let kNorm ← loadRMSNorm src s!"{p}.k_norm" headDim (Config.maxHeadDim cfg) cfg.rms_norm_eps
 
   pure {
-    q_proj := reqGradFalse (← requireDType dtype qProj)
-    k_proj := reqGradFalse (← requireDType dtype kProj)
-    v_proj := reqGradFalse (← requireDType dtype vProj)
-    o_proj := reqGradFalse (← requireDType dtype oProj)
+    q_proj := reqGradFalse (← admitDType cast dtype qProj)
+    k_proj := reqGradFalse (← admitDType cast dtype kProj)
+    v_proj := reqGradFalse (← admitDType cast dtype vProj)
+    o_proj := reqGradFalse (← admitDType cast dtype oProj)
     q_norm := qNorm
     k_norm := kNorm
   }
 
-private def loadDenseMLP (src : Source) (cfg : Config) (layerIdx : Nat)
+private def loadDenseMLP (src : Source) (cfg : Config) (layerIdx : Nat) (cast : Bool)
     : IO (Gemma4MLP (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}.mlp"
   let inter := Config.layerIntermediateSize cfg layerIdx
@@ -205,24 +207,24 @@ private def loadDenseMLP (src : Source) (cfg : Config) (layerIdx : Nat)
       cfg.hidden_size inter
       cfg.hidden_size targetInter
   pure {
-    gate_proj := reqGradFalse (← requireDType dtype gate)
-    up_proj := reqGradFalse (← requireDType dtype up)
-    down_proj := reqGradFalse (← requireDType dtype down)
+    gate_proj := reqGradFalse (← admitDType cast dtype gate)
+    up_proj := reqGradFalse (← admitDType cast dtype up)
+    down_proj := reqGradFalse (← admitDType cast dtype down)
   }
 
-private def loadPerLayerInputBlock (src : Source) (cfg : Config) (layerIdx : Nat)
+private def loadPerLayerInputBlock (src : Source) (cfg : Config) (layerIdx : Nat) (cast : Bool)
     : IO (Gemma4PerLayerInputBlock (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let gate ← loadParameter src s!"{p}.per_layer_input_gate" #[cfg.hidden_size_per_layer_input, cfg.hidden_size]
   let proj ← loadParameter src s!"{p}.per_layer_projection" #[cfg.hidden_size, cfg.hidden_size_per_layer_input]
   let norm ← loadRMSNorm src s!"{p}.post_per_layer_input_norm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
   pure {
-    per_layer_input_gate := reqGradFalse (← requireDType dtype gate)
-    per_layer_projection := reqGradFalse (← requireDType dtype proj)
+    per_layer_input_gate := reqGradFalse (← admitDType cast dtype gate)
+    per_layer_projection := reqGradFalse (← admitDType cast dtype proj)
     post_per_layer_input_norm := norm
   }
 
-private def loadMoeBranch (src : Source) (cfg : Config) (layerIdx : Nat)
+private def loadMoeBranch (src : Source) (cfg : Config) (layerIdx : Nat) (cast : Bool)
     : IO (Gemma4MoeBranch (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let routerProj ← loadParameter src s!"{p}.router.proj" #[cfg.num_experts, cfg.hidden_size]
@@ -248,32 +250,32 @@ private def loadMoeBranch (src : Source) (cfg : Config) (layerIdx : Nat)
       per_expert_scale := reqGradFalse perExpertScale.2.toFloat32
     }
     experts := {
-      gate_up_proj := reqGradFalse (← requireDType dtype gateUp)
-      down_proj := reqGradFalse (← requireDType dtype down)
+      gate_up_proj := reqGradFalse (← admitDType cast dtype gateUp)
+      down_proj := reqGradFalse (← admitDType cast dtype down)
     }
     post_feedforward_layernorm_1 := post1
     post_feedforward_layernorm_2 := post2
     pre_feedforward_layernorm_2 := pre2
   }
 
-private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
+private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat) (cast : Bool)
     : IO (Gemma4Layer (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let layerType := Config.layerTypeAt cfg layerIdx
-  let selfAttn ← loadAttention src cfg layerIdx
-  let mlp ← loadDenseMLP src cfg layerIdx
+  let selfAttn ← loadAttention src cfg layerIdx cast
+  let mlp ← loadDenseMLP src cfg layerIdx cast
   let inputNorm ← loadRMSNorm src s!"{p}.input_layernorm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
   let postAttnNorm ← loadRMSNorm src s!"{p}.post_attention_layernorm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
   let preFfnNorm ← loadRMSNorm src s!"{p}.pre_feedforward_layernorm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
   let postFfnNorm ← loadRMSNorm src s!"{p}.post_feedforward_layernorm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
   let perLayerInput ←
     if Config.hasPerLayerInput cfg then
-      some <$> loadPerLayerInputBlock src cfg layerIdx
+      some <$> loadPerLayerInputBlock src cfg layerIdx cast
     else
       pure none
   let moe ←
     if Config.isMoE cfg then
-      some <$> loadMoeBranch src cfg layerIdx
+      some <$> loadMoeBranch src cfg layerIdx cast
     else
       pure none
   let layerScalar ← loadParameter src s!"{p}.layer_scalar" #[1]
@@ -288,14 +290,17 @@ private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
     post_feedforward_layernorm := postFfnNorm
     per_layer_input := perLayerInput
     moe := moe
-    layer_scalar := reqGradFalse (← requireDType dtype layerScalar)
+    layer_scalar := reqGradFalse (← admitDType cast dtype layerScalar)
   }
 
 namespace Gemma4ForCausalLM
 
-/-- Load Gemma 4 model from a SafeTensors file or a directory of shards. -/
+/-- Load Gemma 4 model from a SafeTensors file or a directory of shards. The
+model dtype is `dtype?`, every weight of that dtype cast to it once here, or
+else the stored dtype of the embeddings, which every such weight must have. -/
 def load (path : String) (cfg : Config := Config.gemma4_E4B)
     (log : Handlers := {}) (device : Device := .CPU)
+    (dtype? : Option RealFloatingDType := none)
     : IO (Σ dtype : RealFloatingDType, Gemma4ForCausalLM (device := device) cfg dtype.val) := do
   log.onInfo s!"Loading Gemma4ForCausalLM (device := device) from {path}..."
   let src ← Source.open path
@@ -305,7 +310,8 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
       src
       "model.language_model.embed_tokens"
       #[cfg.vocab_size, cfg.hidden_size]
-  let dtype := embedTokens.1
+  let cast := dtype?.isSome
+  let dtype := dtype?.map (·.val) |>.getD embedTokens.1
   let floating ← IO.ofExcept dtype.realFloating?
   let _ := floating.down
 
@@ -340,7 +346,7 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
 
   let indices : Vector cfg.num_hidden_layers Nat := ⟨Array.range cfg.num_hidden_layers, Array.size_range⟩
   let layers ← indices.mapM fun i => do
-    let layer ← loadLayer src cfg i
+    let layer ← loadLayer src cfg i cast
     if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then
       log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers}"
     pure layer
@@ -348,9 +354,9 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
   let norm ← loadRMSNorm src "model.language_model.norm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
 
   let model : Gemma4Model (dtype := dtype) (device := device) cfg := {
-    embed_tokens := reqGradFalse (← requireDType dtype embedTokens)
-    embed_tokens_per_layer := (← embedTokensPerLayer.mapM fun value => do pure (reqGradFalse (← requireDType dtype value)))
-    per_layer_model_projection := (← perLayerModelProjection.mapM fun value => do pure (reqGradFalse (← requireDType dtype value)))
+    embed_tokens := reqGradFalse (← admitDType cast dtype embedTokens)
+    embed_tokens_per_layer := (← embedTokensPerLayer.mapM fun value => do pure (reqGradFalse (← admitDType cast dtype value)))
+    per_layer_model_projection := (← perLayerModelProjection.mapM fun value => do pure (reqGradFalse (← admitDType cast dtype value)))
     per_layer_projection_norm := perLayerProjectionNorm
     layers := layers
     norm := norm
@@ -359,7 +365,7 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
   let lmHeadOpt ← tryLoadParameter src "lm_head" #[cfg.vocab_size, cfg.hidden_size]
   let lmHead ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse (← requireDType dtype w))
+    | some w => pure (reqGradFalse (← admitDType cast dtype w))
     | none =>
       if cfg.tie_word_embeddings then
         pure (reqGradFalse model.embed_tokens)
