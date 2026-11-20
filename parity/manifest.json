@@ -88,6 +88,21 @@
         "preprocessor_config.json": "9b5cd03a36fbb8a627c64d98a5b5b126ead95a77720723944487311f0110b666",
         "model.safetensors": "d4dd5542fd6a1d35639e21384238f3bfe6c557c849d392b5905d33ee29e71db5"
       }
+    },
+    "laguna-xs-2.1-nvfp4": {
+      "repo": "poolside/Laguna-XS-2.1-NVFP4",
+      "revision": "d32afde8b09af1539b49ff96ff5551c674485f8e",
+      "files": {
+        "config.json": "8bba8588c6197aa04be89a405a0af640e1914c6323934f7e0860f7cedc528f4e",
+        "configuration_laguna.py": "403780a055babd84007313d07c994006b900d91a5bb6d0dfeea352d18b7ec0ea",
+        "modeling_laguna.py": "b1279340f2f45952738269ce801c8ef841540eba4e04e9df966a23ad5f188650",
+        "model.safetensors.index.json": "1b210b9cd9301ce87579afa9a5e58edfed659ef68f439c952f600f509de8e8c2",
+        "model-00001-of-00005.safetensors": "5c57958ad46c9a012f08234e9587b8e7b25f4f72805228c91415455eb5900d66",
+        "model-00002-of-00005.safetensors": "a5cdc16384bb24a59e342322148120705c78a5cca623e71375dd0e9a3b23e736",
+        "model-00003-of-00005.safetensors": "7685bcfd4cd890e3504e10dfe7fda635c509f6d729b5245ba4b31a0dabd59575",
+        "model-00004-of-00005.safetensors": "05c31a155e4b1c383397d2703b839f96dcf254609542d3560095d5adb1b29585",
+        "model-00005-of-00005.safetensors": "b9944765b6d8f21de94545e95f451d359ca1f7d54015159971d948172e787bd2"
+      }
     }
   },
   "code": {}
