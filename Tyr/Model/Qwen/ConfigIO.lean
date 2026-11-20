@@ -15,8 +15,9 @@ namespace QwenConfig
 /-- Parse the text decoder from a `config.json` node. Behavior the shared layer
 hard-codes (SiLU MLP, no attention bias, no sliding window, plain RoPE) is
 required of the file; `allowMRope` additionally admits multimodal RoPE (type
-`mrope`, or any type with an `mrope_section`), which equals plain RoPE for
-text-only positions. A missing `head_dim` is
+`mrope`, or type `default` with an `mrope_section`), which equals plain RoPE
+when a token's three position components are equal, as they are for text and
+audio. A missing `head_dim` is
 `hidden_size / num_attention_heads` when `deriveHeadDim`, else `d.head_dim`. -/
 def parseJson (j : Json) (d : QwenConfig) (allowMRope : Bool := false) (deriveHeadDim : Bool := true) :
     Except String QwenConfig := do
@@ -27,7 +28,8 @@ def parseJson (j : Json) (d : QwenConfig) (allowMRope : Bool := false) (deriveHe
   | none | some .null => pure ()
   | some scaling =>
     let kind : Option String ← firstFieldD? scaling ["type", "rope_type"] none
-    let mrope := kind == some "mrope" || (← member? scaling "mrope_section").isSome
+    let mrope := kind == some "mrope" ||
+      (kind == some "default" && (← member? scaling "mrope_section").isSome)
     unless allowMRope && mrope do
       throw s!"unsupported 'rope_scaling' = {scaling.compress}; this model implements plain RoPE"
   let hidden ← fieldD? j "hidden_size" d.hidden_size
