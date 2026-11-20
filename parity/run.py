@@ -76,7 +76,8 @@ def detect_devices() -> list[str]:
 def fetch_weights(tests: dict, root: Path) -> dict[str, str]:
     """Errors by weights key; an empty map means every test's weights are in place."""
     errors = {}
-    for key in sorted({m.TEST.weights for m in tests.values()}):
+    keys = {m.TEST.weights_for(stage) for m in tests.values() for stage in STAGES}
+    for key in sorted(keys):
         try:
             weight_files.fetch(key, root)
         except Exception as error:
@@ -99,7 +100,8 @@ def build_probes(tests: dict) -> tuple[dict[str, str], str]:
 
 
 def run_case(module, case: str, device: str, dtype: str, weights: Path, case_dir: Path) -> dict:
-    """The case's result; `seconds` holds each stage's wall time, also on ERROR."""
+    """The case's result; `seconds` holds each stage's wall time, also on ERROR.
+    `weights` is the directory holding every manifest key."""
     seconds: dict[str, float] = {}
     try:
         return run_stages(module, case, device, dtype, weights, case_dir, seconds) | {"seconds": seconds}
@@ -114,7 +116,8 @@ def run_stages(module, case: str, device: str, dtype: str, weights: Path, case_d
         with open(case_dir / f"{stage}.log", "w") as log:
             code = subprocess.run(
                 [sys.executable, __file__, "--stage", stage, "--test", module.TEST.name, "--case", case,
-                 "--device", device, "--dtype", dtype, "--weights", str(weights), "--out", str(case_dir / stage)],
+                 "--device", device, "--dtype", dtype, "--weights", str(weights / module.TEST.weights_for(stage)),
+                 "--out", str(case_dir / stage)],
                 stdout=log, stderr=subprocess.STDOUT,
             ).returncode
         seconds[stage] = round(time.monotonic() - start, 1)
@@ -144,7 +147,7 @@ def run_device(tests: dict, device: str, failures: dict[str, str], build_log: st
             if failure:
                 result = {"verdict": "ERROR", "error": failure}
             else:
-                result = run_case(module, case, device, dtype, weights_root / module.TEST.weights, case_dir)
+                result = run_case(module, case, device, dtype, weights_root, case_dir)
             (case_dir / "result.json").write_text(json.dumps(result, indent=2))
             verdicts[name][case] = result["verdict"]
             timing = " ".join(f"{k} {v}s" for k, v in result.get("seconds", {}).items())
@@ -198,7 +201,8 @@ def main() -> int:
     build_errors, build_log = build_probes(tests)
     failures = {}
     for name, module in tests.items():
-        failure = weight_errors.get(module.TEST.weights) or build_errors.get(module.TEST.probe)
+        failure = next((weight_errors[k] for s in STAGES if (k := module.TEST.weights_for(s)) in weight_errors),
+                       None) or build_errors.get(module.TEST.probe)
         if failure:
             failures[name] = failure
 
