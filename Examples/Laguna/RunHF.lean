@@ -96,7 +96,7 @@ private def runBench
     (inputIds : Tensor { shape := #[b, seq], dtype := .Int64, device := device })
     (promptLen : Nat)
     (maxNewTokens : Nat)
-    (eos : Array UInt64)
+    (eos : Array tokenizer.TokenId)
     : IO Unit := do
   let firstMsRef ← IO.mkRef 0
   let tokenCount ← IO.mkRef 0
