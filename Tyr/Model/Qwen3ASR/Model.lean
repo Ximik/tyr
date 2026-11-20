@@ -382,30 +382,25 @@ private def buildInputsEmbeds {batch seq frames : Nat}
     let placeholderMask := getPlaceholderMask cfg inputIds
     pure (Tensor.maskedScatter inputsEmbeds0 placeholderMask source.2)
 
-/-- Port of reference `get_rope_index` calculation from attention masks. -/
-def getRopeIndex {batch seq : Nat}
+/-- The per-row RoPE deltas of the reference `get_rope_index`, from attention masks. -/
+def ropeDeltas {batch seq : Nat}
     (_m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (attentionMask : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    : IO (Tensor { device := device, shape := #[3, batch, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, 1], dtype := .Int64 }) := do
+    : IO (Tensor { device := device, shape := #[batch, 1], dtype := .Int64 }) := do
   let flat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 attentionMask) #[batch * seq]
   let vals ← Tensor.toUInt64Array flat
 
-  let mut posVals : Array Int64 := Array.mkEmpty (3 * batch * seq)
   let mut deltaVals : Array Int64 := Array.mkEmpty batch
 
   for b in [:batch] do
-    let mut row : Array Nat := Array.mkEmpty seq
     let mut running : Nat := 0
     let mut maxPos : Nat := 1
     let mut validCount : Nat := 0
 
     for t in [:seq] do
       let v := vals.getD (b * seq + t) 0
-      if v == 0 then
-        row := row.push 1
-      else
+      if v != 0 then
         let p := running
-        row := row.push p
         running := running + 1
         validCount := validCount + 1
         if p > maxPos then
@@ -414,13 +409,7 @@ def getRopeIndex {batch seq : Nat}
     let delta := (maxPos + 1) - validCount
     deltaVals := deltaVals.push (Int64.ofNat delta)
 
-    for _ in [:3] do
-      for p in row do
-        posVals := posVals.push (Int64.ofNat p)
-
-  let positionIds : Tensor { device := device, shape := #[3, batch, seq], dtype := .Int64 } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? posVals #[3, batch, seq])).to device
-  let ropeDeltas : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? deltaVals #[batch, 1])).to device
-  pure (positionIds, ropeDeltas)
+  pure ((← IO.ofExcept (Tensor.fromInt64ArrayAs? deltaVals #[batch, 1])).to device)
 
 abbrev LayerKVCache (cfg : ThinkerConfig) (batch cap len : Nat) (dtype : DType := .Float32) :=
   qwen.QwenAttention.KVCache (device := device) batch cfg.textConfig.numKeyValueHeads cfg.textConfig.headDim cap len dtype
@@ -691,7 +680,7 @@ def forwardWithAux {batch seq frames : Nat}
     match attentionMask with
     | none => pure none
     | some mask =>
-      let (_positionIds, ropeRaw) ← m.getRopeIndex mask
+      let ropeRaw ← m.ropeDeltas mask
       let rawVals : Array Nat :=
         (← Tensor.toUInt64Array (Tensor.reshape (Tensor.toInt64 ropeRaw) #[batch])).map (·.toNat)
       let validCounts ← maskRowCounts mask
