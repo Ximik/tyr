@@ -48,6 +48,23 @@ private def mfaInChannels (cfg : SpeakerEncoderConfig) : Nat := c1 cfg + c2 cfg 
 private def samePadding (kernelSize dilation : Nat) : Nat :=
   (dilation * (kernelSize - 1)) / 2
 
+/-- Index read for padded position `i` (relative to the first frame) under
+reflect padding; a pad longer than `frames - 1` keeps reflecting. -/
+private def reflectFrame (frames : Nat) (i : Int) : Nat :=
+  if frames ≤ 1 then 0 else
+    let period := 2 * (frames - 1)
+    let r := (i % (period : Int)).toNat
+    if r < frames then r else period - r
+
+/-- `F.pad(x, (pad, pad), mode="reflect")` along the frame axis. -/
+private def reflectPadFrames {batch channels frames : Nat}
+    (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device }) (pad : Nat) :
+    Tensor { shape := #[batch, channels, frames + 2 * pad], dtype := dtype.val, device := device } :=
+  let column (i : Int) := Tensor.packShape (Tensor.slice! x 2 (reflectFrame frames i) 1)
+  let left := (Array.range pad).map fun j => column (((pad - j : Nat) : Int))
+  let right := (Array.range pad).map fun j => column ((frames + j : Nat) : Int)
+  Tensor.catMany! (left.push (Tensor.packShape x) ++ right) 2 #[batch, channels, frames + 2 * pad]
+
 private def addBias3d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
@@ -78,10 +95,11 @@ def forward {batch frames inChannels outChannels kernelSize dilation : Nat}
     unfold samePadding
     rw [hm]
     omega
-  have hlen : (frames + 2 * samePadding kernelSize dilation - (dilation * (kernelSize - 1) + 1)) / 1 + 1 = frames := by
+  have hlen : (frames + 2 * samePadding kernelSize dilation + 2 * 0 - (dilation * (kernelSize - 1) + 1)) / 1 + 1
+      = frames := by
     omega
   let y : Tensor { shape := #[batch, outChannels, frames], dtype := dtype.val, device := device } :=
-    Tensor.reshape (Tensor.conv1d x m.weight 1 (samePadding kernelSize dilation) dilation
+    Tensor.reshape (Tensor.conv1d (reflectPadFrames x (samePadding kernelSize dilation)) m.weight 1 0 dilation
         ⟨by decide, hSame.2.1, hSame.1, by omega⟩)
       #[batch, outChannels, frames] (by rw [hlen])
   Tensor.relu (addBias3d y m.bias)
