@@ -372,6 +372,10 @@ lean_exe ParityLaguna where
   root := `Examples.Parity.Laguna
   supportInterpreter := true
 
+lean_exe ParityQwen3ASR where
+  root := `Examples.Parity.Qwen3ASR
+  supportInterpreter := true
+
 /-- Focused native acceptance path while model tensor migration is in progress. -/
 lean_exe test_typed_models where
   root := `Tests.RunTypedModels
