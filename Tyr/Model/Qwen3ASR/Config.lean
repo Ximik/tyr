@@ -95,6 +95,8 @@ structure TextConfig where
   halfHeadDim : Nat := 64
   rmsNormEps : Float := 1e-6
   ropeTheta : Float := 5000000.0
+  /-- The output head is the token embedding matrix; a stored `lm_head` is not read. -/
+  tieWordEmbeddings : Bool := false
   /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
   headsValid : 0 < numAttentionHeads ∧ 0 < numKeyValueHeads ∧ numKeyValueHeads ∣ numAttentionHeads := by decide
   /-- Heads are nonempty; checked when the config is built. -/

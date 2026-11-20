@@ -50,10 +50,10 @@ private def parseAudioConfig (j : Json) (d : AudioEncoderConfig := {}) : Except 
   }
 
 /-- Text decoder through the shared Qwen parser, which checks the same facts and
-rejects behavior the decoder hard-codes; the decoder always loads `lm_head`. -/
+rejects behavior the decoder hard-codes. -/
 private def parseTextConfig (j : Json) (d : TextConfig := {}) : Except String TextConfig := do
-  ConfigJson.requireEq j "tie_word_embeddings" false
-  let q ← qwen.QwenConfig.parseJson j d.toQwenConfig (deriveHeadDim := false)
+  let tie ← fieldD? j "tie_word_embeddings" d.tieWordEmbeddings
+  let q ← qwen.QwenConfig.parseJson j d.toQwenConfig (allowMRope := true) (deriveHeadDim := false)
   pure {
     vocabSize := q.vocab_size
     hiddenSize := q.hidden_size
@@ -64,6 +64,7 @@ private def parseTextConfig (j : Json) (d : TextConfig := {}) : Except String Te
     halfHeadDim := q.half_head_dim
     rmsNormEps := q.rms_norm_eps
     ropeTheta := q.rope_theta
+    tieWordEmbeddings := tie
     headsValid := q.headsValid
     halfHeadDimPos := q.halfHeadDimPos
     vocabPos := q.vocabPos
