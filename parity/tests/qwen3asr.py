@@ -66,7 +66,7 @@ def reference(case, weights, device, dtype, out):
     (out / "result.json").write_text(json.dumps(
         {"tokens": torch.stack(tokens, 1).tolist(), "prompt": prompt[0].tolist()}))
     save_file({
-        "mel": inputs["input_features"].float().contiguous(),
+        "mel": inputs["input_features"][..., :int(inputs["input_features_mask"].sum())].float().contiguous(),
         "encoder": encoder.float().reshape(-1, encoder.shape[-1]).cpu().contiguous(),
         "logits": torch.stack(logits, 1).cpu().contiguous(),
         "margin": torch.stack(margins, 1).cpu().contiguous(),
