@@ -4,9 +4,9 @@
 
 Runs itself in the venv `<envs>/orchestrator` from `requirements.txt`. Each
 test names an environment, `envs/<name>.txt`; its stages run in the venv
-`<envs>/<name>`. Venvs are created on first use and reinstalled when their lock
-changes. `HF_TOKEN`, for gated repositories, is read from the environment or the
-repository's `.env`. Steps:
+`<envs>/<name>`, on the Python `lib/venv.py` names. Venvs are created on first
+use and reinstalled when their lock changes. `HF_TOKEN`, for gated
+repositories, is read from the environment or the repository's `.env`. Steps:
 1. the venvs of the selected tests;
 2. their weights, downloaded and checked (`lib/weights.py`);
 3. `lake build` of their probes, with the checkout's Lake configuration;

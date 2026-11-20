@@ -101,7 +101,8 @@ python parity/run.py --tests qwen3 --device cpu
 It creates its venvs under `output/parity/envs` on first use: one for itself
 (`parity/requirements.txt`) and one per environment the selected tests name
 (`parity/envs/<name>.txt`; a reference whose pins conflict with the others
-gets its own). It then downloads and checks the weights listed in
+gets its own), the latter on Python 3.12, which uv fetches into that directory
+if the system has none. It then downloads and checks the weights listed in
 `parity/manifest.json` (into `output/parity/weights`), builds the probes with
 the current Lake configuration, and runs the tests.
 
