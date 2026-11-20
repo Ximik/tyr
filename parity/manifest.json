@@ -124,6 +124,27 @@
         "tokenizer.json": "fe1fad59be22a41ee293363fcf95fdedbc7c93f3b49270b1d2e18bd1399a7a05",
         "model.safetensors": "d3f212dd20abecd315d830bc54ae3865e56ebfc3276484e57b771288ba27fd35"
       }
+    },
+    "qwen3-forcedaligner-0.6b": {
+      "repo": "Qwen/Qwen3-ForcedAligner-0.6B",
+      "revision": "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+      "files": {
+        "config.json": "d616c65d46c4b90bdc651b0a0963ea932732241140f337f9bb6b0335a9c8ef09",
+        "preprocessor_config.json": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+        "model.safetensors": "47831d0e82f96b20e9034dba01a075ee06436654719f6a68289e49f1b65ce0e7"
+      }
+    },
+    "qwen3-forcedaligner-0.6b-hf": {
+      "repo": "Qwen/Qwen3-ForcedAligner-0.6B-hf",
+      "revision": "c07281df297b9905d24a508279258cccf987a064",
+      "files": {
+        "config.json": "82ac390b36a8f80c5a0c4e202367debd149e5d8c30abe4cf5eed439101b1c5ce",
+        "processor_config.json": "bc0b230081b44e629dd5b9045b78495615c1831b4b9f4cffe97bd37e82a6156a",
+        "tokenizer_config.json": "945e980986de2ca7768f3326bfdbb4fbea3406f972b8ae0be233089f2b253c11",
+        "chat_template.jinja": "59b5ae119bda7c00089bba5f49af775791ea67c7aeb7d2b828cddda9463121bf",
+        "tokenizer.json": "cadfb9cbd9ff8f4e309075ec6a71b063295ff796afb4b5dbc0fd2873fbb301f2",
+        "model.safetensors": "00568245ceca5af1991d28562a75fe1ddc9bfeb041c27fda66947ea05c47fb86"
+      }
     }
   },
   "code": {}
