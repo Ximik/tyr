@@ -945,6 +945,46 @@ private def generateCore {batch seq : Nat}
   decodeLoopCached cfg m tables strategy eosTokenIds finished0 maxNewTokens
     cache logits onStep 0 inputIds (Nat.le_refl _)
 
+private partial def forcedLoopSession {batch maxLen steps : Nat}
+    (cfg : Config)
+    (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
+    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    (fed : Nat)
+    {pos : Nat}
+    (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen pos)
+    (lastLogits : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] })
+    (acc : Array (Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.vocab_size] }))
+    (hfit : pos + steps ≤ maxLen + fed)
+    : IO (Array (Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.vocab_size] })) := do
+  let acc := acc.push (lastLogits.reshape #[batch, 1, cfg.vocab_size])
+  if h : fed + 1 < steps then
+    let tok : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.slice forced 1 fed 1
+    let (logits, session') ← decodeSession cfg m tables (m.embedTokens tok) session (by omega)
+    forcedLoopSession cfg m tables forced (fed + 1) session' logits acc (by omega)
+  else
+    pure acc
+
+/-- Logits after `inputIds` and after each token of `forced` but the last, the
+prompt prefilled in one pass and the tokens fed one at a time through the cache
+session. Position `i` of the result scores the choice of `forced[:, i]`. -/
+def forcedLogits {batch seq steps : Nat}
+    (cfg : Config)
+    (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, steps, cfg.vocab_size] }) := do
+  let m := TensorStruct.detach m
+  if seq == 0 || steps == 0 then
+    throw <| IO.userError "forcedLogits requires a non-empty prompt and at least one forced token"
+  let inputsEmbeds := m.embedTokens inputIds
+  let maxLen := seq + steps
+  let tables ← precomputeRotaryTables cfg maxLen inputsEmbeds.device
+  let session ← LagunaModel.initCacheSession cfg m.model maxLen inputsEmbeds.device
+  let (logits, session) ← prefillSession cfg m tables inputsEmbeds session
+  let steps' ← forcedLoopSession cfg m tables forced 0 session logits #[] (by omega)
+  IO.ofExcept <| Tensor.catMany? (steps'.map Tensor.packShape) 1 #[batch, steps, cfg.vocab_size]
+
 /-- Greedy/sampled generation from token ids. Terminates when every row is
     finished (`eosTokenIds`, default `cfg.eos_token_ids`) or the
     `maxNewTokens` budget is spent. -/
