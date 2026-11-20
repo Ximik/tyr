@@ -65,6 +65,7 @@ private def parseTextConfig (j : Json) (d : TextConfig := {}) : Except String Te
     rmsNormEps := q.rms_norm_eps
     ropeTheta := q.rope_theta
     tieWordEmbeddings := tie
+    mrope := q.mrope
     headsValid := q.headsValid
     halfHeadDimPos := q.halfHeadDimPos
     vocabPos := q.vocabPos
