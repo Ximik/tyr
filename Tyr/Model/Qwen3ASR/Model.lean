@@ -257,7 +257,7 @@ def encodeAudioVarLen {batch frames : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
     (featureLens : Array Nat)
-    : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames, cfg.audioConfig.outputDim] } :=
+    : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.featExtractOutputLength frames, cfg.audioConfig.outputDim] } :=
   m.audioTower.forwardVarLenInference inputFeatures featureLens
 
 /-- Audio features with explicit training/evaluation attention-dropout effects. -/
@@ -276,7 +276,7 @@ def encodeAudioVarLenIO {batch frames : Nat}
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
     (featureLens : Array Nat)
     (training : Bool)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames, cfg.audioConfig.outputDim] }) :=
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.featExtractOutputLength frames, cfg.audioConfig.outputDim] }) :=
   m.audioTower.forwardVarLenIO inputFeatures featureLens training
 
 private def featureLengthsFromFeatureMask (cfg : ThinkerConfig) {batch featureSeq : Nat}
@@ -307,13 +307,6 @@ private def audioValidMaskFromFeatureMask (cfg : ThinkerConfig) {batch featureSe
   let valid2dBool : Tensor { device := device, shape := #[batch, audioSeq], dtype := .Bool } := Tensor.eqScalar valid2d 1
   pure <| Tensor.broadcastTo (Tensor.reshape valid2dBool #[batch, audioSeq, 1]) #[batch, audioSeq, cfg.textConfig.hiddenSize]
 
-private def audioAttentionMaskFromFeatureMask (cfg : ThinkerConfig) {batch featureSeq audioSeq : Nat}
-    (featureAttentionMask : Tensor { device := device, shape := #[batch, featureSeq], dtype := .Int64 })
-    : IO (Tensor { device := device, shape := #[batch, audioSeq], dtype := .Int64 }) := do
-  let featureLens ← featureLengthsFromFeatureMask cfg featureAttentionMask
-  let audioLens := AudioEncoderConfig.featExtractOutputLengths featureLens
-  pure (buildLengthMask audioLens)
-
 private def buildInputsEmbeds {batch seq frames : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -325,28 +318,25 @@ private def buildInputsEmbeds {batch seq frames : Nat}
   match inputFeatures with
   | none => pure inputsEmbeds0
   | some feats =>
-    let audioSeq := AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames
     let placeholderMask2d := getPlaceholderMask2d cfg inputIds
     let placeholderLensTensor : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.sumDim (Tensor.toInt64 placeholderMask2d) 1 false).reshape #[batch]
     let placeholderLens := (← Tensor.toUInt64Array placeholderLensTensor).map (·.toNat)
-    let (audioLensOpt, _audioAttnMask, audioFeaturesRaw) ←
+    let (expectedAudioLens, source) ←
       match featureAttentionMask with
       | some fm =>
         let featureLens ← featureLengthsFromFeatureMask cfg fm
-        let audioLens := AudioEncoderConfig.featExtractOutputLengths featureLens
-        let m2d ← audioAttentionMaskFromFeatureMask cfg (audioSeq := audioSeq) fm
-        let raw ← encodeAudioVarLenIO m feats featureLens training
-        pure (some audioLens, some m2d, raw)
+        let audioFeatures := projectAudio m (← encodeAudioVarLenIO m feats featureLens training)
+        let validMask ← audioValidMaskFromFeatureMask cfg (audioSeq := AudioEncoderConfig.featExtractOutputLength frames) fm
+        pure (AudioEncoderConfig.featExtractOutputLengths featureLens,
+          Tensor.maskedSelect audioFeatures (validMask.to audioFeatures.device))
       | none =>
+        let audioSeq := AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames
         let ⟨hf⟩ ← if h : 0 < frames then pure (PLift.up h) else
           throw (IO.userError "Qwen3-ASR audio encoding needs at least one feature frame")
-        let raw ← encodeAudioIO m feats hf training none
-        pure (none, none, raw)
+        let audioFeatures := projectAudio m (← encodeAudioIO m feats hf training none)
+        pure (Array.replicate batch audioSeq,
+          ⟨batch * audioSeq * cfg.textConfig.hiddenSize, Tensor.reshape audioFeatures #[batch * audioSeq * cfg.textConfig.hiddenSize]⟩)
 
-    let expectedAudioLens :=
-      match audioLensOpt with
-      | some xs => xs.map (fun l => if l <= audioSeq then l else audioSeq)
-      | none => Array.replicate batch audioSeq
     let expectedRows := batch
     if expectedAudioLens.size != expectedRows then
       throw <| IO.userError
@@ -369,16 +359,6 @@ private def buildInputsEmbeds {batch seq frames : Nat}
         throw <| IO.userError
           s!"audio placeholder mismatch at batch {i}: expected {expected}, got {got} (too many placeholders)"
 
-    let audioFeatures := projectAudio m audioFeaturesRaw
-    let source ←
-      match featureAttentionMask with
-      | some fm =>
-        let validMask ← audioValidMaskFromFeatureMask cfg (audioSeq := audioSeq) fm
-        let validMask :=
-          validMask.to audioFeatures.device
-        pure (Tensor.maskedSelect audioFeatures validMask)
-      | none =>
-        pure ⟨batch * audioSeq * cfg.textConfig.hiddenSize, Tensor.reshape audioFeatures #[batch * audioSeq * cfg.textConfig.hiddenSize]⟩
     let placeholderMask := getPlaceholderMask cfg inputIds
     pure (Tensor.maskedScatter inputsEmbeds0 placeholderMask source.2)
 

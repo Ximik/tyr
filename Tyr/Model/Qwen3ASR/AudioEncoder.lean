@@ -434,8 +434,8 @@ private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Na
     (m : AudioEncoder (device := device) (dtype := dtype) cfg)
     (sample : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, frames] })
     (featureLen : Nat)
-    : M (Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) := do
-  let outSeq := AudioEncoderConfig.framesAfterConv3 cfg frames
+    : M (Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength frames, cfg.outputDim] }) := do
+  let outSeq := AudioEncoderConfig.featExtractOutputLength frames
   let featureLen := if featureLen <= frames then featureLen else frames
   if featureLen == 0 then
     return Tensor.castLike sample ((Tensor.zeros #[1, outSeq, cfg.outputDim] false sample.device))
@@ -509,9 +509,9 @@ private def forwardVarLenWith {M : Type → Type} [Monad M] {batch frames : Nat}
     (m : AudioEncoder (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.numMelBins, frames] })
     (featureLens : Array Nat)
-    : M (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) := do
+    : M (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.featExtractOutputLength frames, cfg.outputDim] }) := do
   let inputFeatures := alignFeatures m inputFeatures
-  let outSeq := AudioEncoderConfig.framesAfterConv3 cfg frames
+  let outSeq := AudioEncoderConfig.featExtractOutputLength frames
   if batch == 0 then
     return Tensor.castLike inputFeatures ((Tensor.zeros #[batch, outSeq, cfg.outputDim] false inputFeatures.device))
   let mut rows : Array (Sigma (fun shape => Tensor { dtype := dtype, device := device, shape := shape })) := #[]
@@ -523,12 +523,14 @@ private def forwardVarLenWith {M : Type → Type} [Monad M] {batch frames : Nat}
     rows := rows.push (Tensor.packShape row)
   return Tensor.catMany! rows 0 #[batch, outSeq, cfg.outputDim]
 
-/-- Deterministic chunk-local inference, re-padded to the fixed output width. -/
+/-- Deterministic chunk-local inference. Each row holds its windowed output
+(`featExtractOutputLength` of its feature length) followed by zeros up to the
+windowed output of the full width. -/
 def forwardVarLenInference {batch frames : Nat}
     (m : AudioEncoder (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.numMelBins, frames] })
     (featureLens : Array Nat)
-    : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+    : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.featExtractOutputLength frames, cfg.outputDim] } :=
   Id.run <| forwardVarLenWith (M := Id)
     (fun layer x mask => pure (layer.forwardInference x mask)) m inputFeatures featureLens
 
@@ -538,7 +540,7 @@ def forwardVarLenIO {batch frames : Nat}
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.numMelBins, frames] })
     (featureLens : Array Nat)
     (training : Bool)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) :=
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.featExtractOutputLength frames, cfg.outputDim] }) :=
   forwardVarLenWith (fun layer x mask => layer.forwardIO x training mask) m inputFeatures featureLens
 
 /-- Compatibility alias for deterministic chunk-local inference. -/
@@ -546,7 +548,7 @@ def forwardVarLen {batch frames : Nat}
     (m : AudioEncoder (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.numMelBins, frames] })
     (featureLens : Array Nat)
-    : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+    : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.featExtractOutputLength frames, cfg.outputDim] } :=
   m.forwardVarLenInference inputFeatures featureLens
 
 private def forwardWith {M : Type → Type} [Monad M] {batch frames : Nat}
