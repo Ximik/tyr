@@ -14,6 +14,9 @@ output/
 tmp/
 output.ppm
 
+# Local secrets (HF_TOKEN, MODAL_TOKEN_ID, MODAL_TOKEN_SECRET)
+.env
+
 # Python
 .mypy_cache/
 .venv*/

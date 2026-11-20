@@ -346,6 +346,12 @@ lean_exe Gemma4RunHF where
   root := `Examples.Gemma4.RunHF
   supportInterpreter := true
 
+/-! Parity probes run by `parity/run.py`: `Parity<Name>` is `Examples/Parity/<Name>.lean`. -/
+
+lean_exe ParityQwen3 where
+  root := `Examples.Parity.Qwen3
+  supportInterpreter := true
+
 /-- Focused native acceptance path while model tensor migration is in progress. -/
 lean_exe test_typed_models where
   root := `Tests.RunTypedModels

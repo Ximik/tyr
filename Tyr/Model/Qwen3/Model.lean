@@ -310,6 +310,50 @@ def generateGreedy {batch seq : Nat}
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 logits0 hSeq (Nat.le_add_right _ _)
   greedyLoopCached m cosAll sinAll eosTokenIds eosVector maxNewTokens cachesPrefill lastLogits none inputIds (Nat.le_refl _)
 
+private partial def forcedLoopCached {batch maxLen steps : Nat}
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    (fed : Nat)
+    {curSeq : Nat}
+    (caches : Array (LayerKVCache (device := device) cfg batch maxLen curSeq))
+    (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 })
+    (acc : Array (Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 }))
+    (hfit : curSeq + steps ≤ maxLen + fed)
+    : IO (Array (Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 })) := do
+  let acc := acc.push (lastLogits.reshape #[batch, 1, cfg.vocab_size])
+  if h : fed + 1 < steps then
+    let tok : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.slice forced 1 fed 1
+    let (logits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll (m.embedTokens tok) caches (by omega)
+    forcedLoopCached m cosAll sinAll forced (fed + 1) caches' logits acc (by omega)
+  else
+    pure acc
+
+/-- Logits after `inputIds` and after each token of `forced` but the last, the
+tokens fed one at a time through static per-layer KV caches. Position `i` of the
+result scores the choice of `forced[:, i]`. -/
+def forcedLogits {batch seq steps : Nat}
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    : IO (Tensor { device := device, shape := #[batch, steps, cfg.vocab_size], dtype := .Float32 }) := do
+  let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
+    throw <| IO.userError "forcedLogits requires non-empty prompt sequence"
+  if steps == 0 then
+    throw <| IO.userError "forcedLogits requires at least one forced token"
+  let inputsEmbeds := m.embedTokens inputIds
+  let cacheDevice := inputsEmbeds.device
+  let cacheMaxLen : Nat := seq + steps
+  let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
+  let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := by omega)
+  let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.slice inputsEmbeds 1 0 1
+  let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 caches0 (by omega)
+  let (lastLogits, cachesPrefill) ←
+    prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 logits0 hSeq (by omega)
+  let steps' ← forcedLoopCached m cosAll sinAll forced 0 cachesPrefill lastLogits #[] (by omega)
+  IO.ofExcept <| Tensor.catMany? (steps'.map Tensor.packShape) 1 #[batch, steps, cfg.vocab_size]
+
 /-- Reference greedy generation by full re-forward on each decode step. -/
 def generateGreedyUncached {batch seq : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)

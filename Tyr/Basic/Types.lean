@@ -211,6 +211,15 @@ inductive DeviceKind where
 | MPS
 deriving Repr, Inhabited, BEq, DecidableEq
 
+/-- Parse the PyTorch device spellings `cpu`, `mps`, `cuda` (ordinal 0) and
+`cuda:<ordinal>`. -/
+def DeviceKind.ofString? : String → Option DeviceKind
+  | "cpu" => some .CPU
+  | "mps" => some .MPS
+  | "cuda" => some (.CUDA 0)
+  | raw =>
+    if raw.startsWith "cuda:" then (raw.drop 5).toString.toNat?.map .CUDA else none
+
 namespace Device
 
 -- Availability is established at the runtime acquisition boundary. In
