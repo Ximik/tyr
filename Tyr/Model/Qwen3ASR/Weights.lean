@@ -210,8 +210,15 @@ private def loadThinkerSharded (modelDir : String) (cfg : ThinkerConfig)
   let audioProjectionBias :=
     (Tensor.zerosFor { shape := #[cfg.textConfig.hiddenSize], dtype := dtype, device })
 
-  let lmHead ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.lm_head.weight"
-    #[ThinkerConfig.lmHeadOutDim cfg, cfg.textConfig.hiddenSize]
+  let lmHead ←
+    if cfg.textConfig.tieWordEmbeddings then
+      if h : ThinkerConfig.lmHeadOutDim cfg = cfg.textConfig.vocabSize then
+        pure (h ▸ textModel.embed_tokens)
+      else
+        throw <| IO.userError "tie_word_embeddings needs an output head of vocab_size rows"
+    else
+      loadWeight (dtype := dtype) (device := device) modelDir "thinker.lm_head.weight"
+        #[ThinkerConfig.lmHeadOutDim cfg, cfg.textConfig.hiddenSize]
 
   pure {
     audioTower
