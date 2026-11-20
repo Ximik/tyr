@@ -360,6 +360,10 @@ lean_exe ParityQwen25Omni where
   root := `Examples.Parity.Qwen25Omni
   supportInterpreter := true
 
+lean_exe ParityGemma4 where
+  root := `Examples.Parity.Gemma4
+  supportInterpreter := true
+
 /-- Focused native acceptance path while model tensor migration is in progress. -/
 lean_exe test_typed_models where
   root := `Tests.RunTypedModels
