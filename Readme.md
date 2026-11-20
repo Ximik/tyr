@@ -93,15 +93,17 @@ Python implementation: the same input must give the same output. Each test
 writes its raw files to `output/parity/<sha>/{cpu,gpu}/`; the exit code is
 nonzero if any case is FAIL or ERROR.
 
-Locally, with a venv that has `parity/requirements.txt` installed (the
-reference implementations run in it):
+Locally:
 ```bash
 python parity/run.py                 # all tests; CPU, plus CUDA if built for and available
 python parity/run.py --tests qwen3 --device cpu
 ```
-It downloads and checks the weights listed in `parity/manifest.json`
-(into `output/parity/weights`), builds the probes with the current Lake
-configuration, and runs the tests.
+It creates its venvs under `output/parity/envs` on first use: one for itself
+(`parity/requirements.txt`) and one per environment the selected tests name
+(`parity/envs/<name>.txt`; a reference whose pins conflict with the others
+gets its own). It then downloads and checks the weights listed in
+`parity/manifest.json` (into `output/parity/weights`), builds the probes with
+the current Lake configuration, and runs the tests.
 
 On Modal, for the current commit, which must be on a remote branch and have
 a clean tree; CPU and H100 run in parallel:

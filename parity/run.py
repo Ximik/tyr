@@ -2,19 +2,23 @@
 
     python parity/run.py [--tests a,b] [--device cpu|cuda ...]
 
-Run with the Python that has `requirements.txt` installed: the references run
-in it. `HF_TOKEN`, for gated repositories, is read from the
-environment or the repository's `.env`. Steps:
-1. weights of the selected tests, downloaded and checked (`lib/weights.py`);
-2. `lake build` of their probes, with the checkout's Lake configuration;
-3. for each device: each case's reference, then tyr, each in its own process,
+Runs itself in the venv `<envs>/orchestrator` from `requirements.txt`. Each
+test names an environment, `envs/<name>.txt`; its stages run in the venv
+`<envs>/<name>`. Venvs are created on first use and reinstalled when their lock
+changes. `HF_TOKEN`, for gated repositories, is read from the environment or the
+repository's `.env`. Steps:
+1. the venvs of the selected tests;
+2. their weights, downloaded and checked (`lib/weights.py`);
+3. `lake build` of their probes, with the checkout's Lake configuration;
+4. for each device: each case's reference, then tyr, each in its own process,
    then the test's checks.
 Devices default to CPU, plus CUDA when the build is a CUDA build and CUDA is
 available. Results go to `<out>/<sha>/<cpu|gpu>/` (`-dirty` after the sha if
 the tree has changes): `<test>/<case>/{reference,tyr}/`, their logs,
 `<test>/<case>/result.json` (with each stage's `seconds`), `build.log`,
 `run.json`. Exits 1 if any case is
-FAIL or ERROR. `--weights-only` and `--build-only` stop after steps 1 and 2.
+FAIL or ERROR. `--envs-only`, `--weights-only` and `--build-only` do only steps
+1, 2 and 3.
 
 A test module in `tests/` defines `TEST` (`lib.test.Test`), `CHECKS` (callables
 `(case_dir, device) -> {"verdict", ...}`) and
@@ -23,7 +27,6 @@ arguments; `tyr` may read the reference output in `out.parent / "reference"`."""
 
 import argparse
 import importlib
-import importlib.metadata
 import json
 import shutil
 import subprocess
@@ -34,7 +37,22 @@ from pathlib import Path
 
 PARITY = Path(__file__).resolve().parent
 REPO = PARITY.parent
+ENVS = PARITY / "envs"
+DEFAULT_VENVS = REPO / "output" / "parity" / "envs"
 sys.path.insert(0, str(PARITY))
+
+from lib import venv  # noqa: E402
+
+
+def venvs_root(argv: list[str]) -> Path:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--envs", type=Path, default=DEFAULT_VENVS)
+    return parser.parse_known_args(argv)[0].envs
+
+
+# Stage processes already run in their test's venv.
+if "--stage" not in sys.argv[1:]:
+    venv.ensure(venvs_root(sys.argv[1:]) / "orchestrator", PARITY / "requirements.txt")
 
 from lib import env  # noqa: E402
 from lib import weights as weight_files  # noqa: E402
@@ -65,12 +83,23 @@ def git(*args: str) -> str:
 def detect_devices() -> list[str]:
     devices = ["cpu"]
     cuda_build = (REPO / "external" / "wheels" / "torch" / "lib" / "libtorch_cuda.so").exists()
-    # A child process, so this one holds no CUDA context while the stages run.
-    available = subprocess.run([sys.executable, "-c", "import torch; print(torch.cuda.is_available())"],
-                               capture_output=True, text=True).stdout.strip() == "True"
-    if cuda_build and available:
+    gpu = shutil.which("nvidia-smi") is not None and subprocess.run(
+        ["nvidia-smi", "-L"], capture_output=True, text=True).stdout.startswith("GPU")
+    if cuda_build and gpu:
         devices.append("cuda")
     return devices
+
+
+def prepare_envs(tests: dict, root: Path) -> tuple[dict[str, Path], dict[str, str]]:
+    """The Python of each environment the tests name, and errors by environment."""
+    pythons, errors = {}, {}
+    for name in sorted({m.TEST.env for m in tests.values()}):
+        try:
+            pythons[name] = venv.prepare(root / name, ENVS / f"{name}.txt")
+        except Exception as error:
+            errors[name] = f"environment {name}: {error}"
+            print(errors[name], file=sys.stderr, flush=True)
+    return pythons, errors
 
 
 def fetch_weights(tests: dict, root: Path) -> dict[str, str]:
@@ -99,24 +128,25 @@ def build_probes(tests: dict) -> tuple[dict[str, str], str]:
     return errors, log
 
 
-def run_case(module, case: str, device: str, dtype: str, weights: Path, case_dir: Path) -> dict:
+def run_case(module, python: Path, case: str, device: str, dtype: str, weights: Path, case_dir: Path) -> dict:
     """The case's result; `seconds` holds each stage's wall time, also on ERROR.
-    `weights` is the directory holding every manifest key."""
+    `python` is the test's venv; `weights` the directory holding every manifest key."""
     seconds: dict[str, float] = {}
     try:
-        return run_stages(module, case, device, dtype, weights, case_dir, seconds) | {"seconds": seconds}
+        return run_stages(module, python, case, device, dtype, weights, case_dir, seconds) | {"seconds": seconds}
     except Exception:
         return {"verdict": "ERROR", "error": traceback.format_exc(), "seconds": seconds}
 
 
-def run_stages(module, case: str, device: str, dtype: str, weights: Path, case_dir: Path,
+def run_stages(module, python: Path, case: str, device: str, dtype: str, weights: Path, case_dir: Path,
                seconds: dict[str, float]) -> dict:
     for stage in STAGES:
+        key = module.TEST.weights_for(stage)
         start = time.monotonic()
         with open(case_dir / f"{stage}.log", "w") as log:
             code = subprocess.run(
-                [sys.executable, __file__, "--stage", stage, "--test", module.TEST.name, "--case", case,
-                 "--device", device, "--dtype", dtype, "--weights", str(weights / key) if (key := module.TEST.weights_for(stage)) else "",
+                [str(python), __file__, "--stage", stage, "--test", module.TEST.name, "--case", case,
+                 "--device", device, "--dtype", dtype, "--weights", str(weights / key) if key else "",
                  "--out", str(case_dir / stage)],
                 stdout=log, stderr=subprocess.STDOUT,
             ).returncode
@@ -129,7 +159,7 @@ def run_stages(module, case: str, device: str, dtype: str, weights: Path, case_d
     return {"verdict": worst(c["verdict"] for c in checks.values()), "checks": checks}
 
 
-def run_device(tests: dict, device: str, failures: dict[str, str], build_log: str,
+def run_device(tests: dict, pythons: dict[str, Path], device: str, failures: dict[str, str], build_log: str,
                weights_root: Path, out: Path, sha: str) -> bool:
     """Run every selected test on `device`; whether all cases passed or tied."""
     out.mkdir(parents=True)
@@ -147,7 +177,7 @@ def run_device(tests: dict, device: str, failures: dict[str, str], build_log: st
             if failure:
                 result = {"verdict": "ERROR", "error": failure}
             else:
-                result = run_case(module, case, device, dtype, weights_root, case_dir)
+                result = run_case(module, pythons[module.TEST.env], case, device, dtype, weights_root, case_dir)
             (case_dir / "result.json").write_text(json.dumps(result, indent=2))
             verdicts[name][case] = result["verdict"]
             timing = " ".join(f"{k} {v}s" for k, v in result.get("seconds", {}).items())
@@ -156,7 +186,8 @@ def run_device(tests: dict, device: str, failures: dict[str, str], build_log: st
     run = {
         "sha": sha,
         "device": device,
-        "packages": {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()},
+        "envs": {name: (ENVS / f"{name}.txt").read_text().splitlines()
+                 for name in sorted({tests[t].TEST.env for t in verdicts})},
         "tests": verdicts,
     }
     (out / "run.json").write_text(json.dumps(run, indent=2, sort_keys=True))
@@ -170,6 +201,8 @@ def main() -> int:
                         help="repeatable; default: cpu, and cuda if built for and available")
     parser.add_argument("--weights", type=Path, default=REPO / "output" / "parity" / "weights")
     parser.add_argument("--out", type=Path, default=REPO / "output" / "parity")
+    parser.add_argument("--envs", type=Path, default=DEFAULT_VENVS, help="where the venvs live")
+    parser.add_argument("--envs-only", action="store_true")
     parser.add_argument("--weights-only", action="store_true")
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--stage", choices=STAGES, help=argparse.SUPPRESS)
@@ -195,14 +228,18 @@ def main() -> int:
         errors, log = build_probes(tests)
         print(log)
         return 1 if errors else 0
+    pythons, env_errors = prepare_envs(tests, args.envs)
+    if args.envs_only:
+        return 1 if env_errors else 0
     weight_errors = fetch_weights(tests, args.weights)
     if args.weights_only:
         return 1 if weight_errors else 0
     build_errors, build_log = build_probes(tests)
     failures = {}
     for name, module in tests.items():
-        failure = next((weight_errors[k] for s in STAGES if (k := module.TEST.weights_for(s)) in weight_errors),
-                       None) or build_errors.get(module.TEST.probe)
+        failure = env_errors.get(module.TEST.env) or next(
+            (weight_errors[k] for s in STAGES if (k := module.TEST.weights_for(s)) in weight_errors),
+            None) or build_errors.get(module.TEST.probe)
         if failure:
             failures[name] = failure
 
@@ -211,7 +248,7 @@ def main() -> int:
     for device in args.device or detect_devices():
         out = args.out / sha / ("cpu" if device == "cpu" else "gpu")
         shutil.rmtree(out, ignore_errors=True)
-        ok = run_device(tests, device, failures, build_log, args.weights, out, sha) and ok
+        ok = run_device(tests, pythons, device, failures, build_log, args.weights, out, sha) and ok
     return 0 if ok else 1
 
 
