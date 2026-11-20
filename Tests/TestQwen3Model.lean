@@ -57,7 +57,7 @@ def testQwen3GreedyCachedUncachedParity : IO Unit := do
 def testQwen3ConfigLoad : IO Unit := do
   let path := "/tmp/qwen3_config_test.json"
   let json :=
-    "{\"vocab_size\":128,\"hidden_size\":48,\"intermediate_size\":96," ++
+    "{\"model_type\":\"qwen3\",\"vocab_size\":128,\"hidden_size\":48,\"intermediate_size\":96," ++
     "\"num_hidden_layers\":3,\"num_attention_heads\":6,\"num_key_value_heads\":2," ++
     "\"rope_theta\":500000.0,\"max_position_embeddings\":4096}"
   IO.FS.writeFile path json
@@ -71,7 +71,7 @@ def testQwen3ConfigLoad : IO Unit := do
 def testQwen3ConfigLoadRejectsInvalidInvariants : IO Unit := do
   let path := "/tmp/qwen3_config_invalid_test.json"
   let json :=
-    "{\"vocab_size\":128,\"hidden_size\":49,\"intermediate_size\":96," ++
+    "{\"model_type\":\"qwen3\",\"vocab_size\":128,\"hidden_size\":49,\"intermediate_size\":96," ++
     "\"num_hidden_layers\":3,\"num_attention_heads\":6,\"num_key_value_heads\":2}"
   IO.FS.writeFile path json
   let threw ←
