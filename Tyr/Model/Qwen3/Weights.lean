@@ -26,7 +26,7 @@ def load (path : String) (cfg : Config := Config.qwen3_4B)
     (device : Device := .CPU) : IO (Qwen3ForCausalLM (device := device) cfg) := do
   log.onInfo s!"Loading Qwen3ForCausalLM from {path}..."
   let src ← Source.open path
-  let model ← qwen.loadQwen3Model (device := device) src cfg false log
+  let model ← qwen.loadQwen3Model (device := device) src cfg true log
 
   let lmHeadOpt ← src.load? "lm_head.weight" #[cfg.vocab_size, cfg.hidden_size] device
   let (lmHead, tieWordEmbeddings) ←

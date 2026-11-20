@@ -37,8 +37,8 @@ private def loadLinearWeight (src : Source) (name : String) (outDim inDim : Nat)
     pure (dequantizeFP8 w.2 s.2 hBlocks)
   | none => pure w.2.toFloat32
 
-/-- Load a single attention layer.
-    Optionally loads Q/K norms if present (for Flux Klein text encoder). -/
+/-- Load a single attention layer. With `loadQKNorms`, the per-head Q/K norm
+    weights are required. -/
 def loadAttention (src : Source) (layerIdx : Nat)
     (hidden_size num_heads num_kv_heads head_dim : Nat)
     (loadQKNorms : Bool := false)
@@ -50,14 +50,13 @@ def loadAttention (src : Source) (layerIdx : Nat)
   let v_proj ← loadLinearWeight (device := device) src s!"{layerPrefix}.v_proj" (num_kv_heads * head_dim) hidden_size
   let o_proj ← loadLinearWeight (device := device) src s!"{layerPrefix}.o_proj" hidden_size (num_heads * head_dim)
 
-  -- Optionally load Q/K norms (Flux Klein text encoder has these)
   let q_norm ← if loadQKNorms then
-    src.load? s!"{layerPrefix}.q_norm.weight" #[head_dim] device
+    some <$> src.load s!"{layerPrefix}.q_norm.weight" #[head_dim] device
   else
     pure none
 
   let k_norm ← if loadQKNorms then
-    src.load? s!"{layerPrefix}.k_norm.weight" #[head_dim] device
+    some <$> src.load s!"{layerPrefix}.k_norm.weight" #[head_dim] device
   else
     pure none
 
