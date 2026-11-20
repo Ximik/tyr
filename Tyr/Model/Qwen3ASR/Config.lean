@@ -97,6 +97,8 @@ structure TextConfig where
   ropeTheta : Float := 5000000.0
   /-- The output head is the token embedding matrix; a stored `lm_head` is not read. -/
   tieWordEmbeddings : Bool := false
+  /-- Declared multimodal RoPE layout; see `qwen.QwenConfig.mrope`. -/
+  mrope : Option qwen.MRopeLayout := none
   /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
   headsValid : 0 < numAttentionHeads ∧ 0 < numKeyValueHeads ∧ numKeyValueHeads ∣ numAttentionHeads := by decide
   /-- Heads are nonempty; checked when the config is built. -/
@@ -123,6 +125,7 @@ def toQwenConfig (cfg : TextConfig) : qwen.QwenConfig := {
   half_head_dim := cfg.halfHeadDim
   rope_theta := cfg.ropeTheta
   rms_norm_eps := cfg.rmsNormEps
+  mrope := cfg.mrope
   headsValid := cfg.headsValid
   halfHeadDimPos := cfg.halfHeadDimPos
   vocabPos := cfg.vocabPos

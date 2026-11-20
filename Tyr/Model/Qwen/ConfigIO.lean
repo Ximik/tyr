@@ -15,23 +15,32 @@ namespace QwenConfig
 /-- Parse the text decoder from a `config.json` node. Behavior the shared layer
 hard-codes (SiLU MLP, no attention bias, no sliding window, plain RoPE) is
 required of the file; `allowMRope` additionally admits multimodal RoPE (type
-`mrope`, or type `default` with an `mrope_section`), which equals plain RoPE
-when a token's three position components are equal, as they are for text and
-audio. A missing `head_dim` is
+`mrope`, or type `default` with an `mrope_section`), recorded as `mrope`: its
+sections must cover the rotary frequency pairs, and `rope_scaling` may hold no
+other key. Only a decoder whose tokens all have equal positions on the three
+axes (text and audio, no image grid) may set `allowMRope`: there every layout
+equals the plain RoPE the decoder computes. A missing `head_dim` is
 `hidden_size / num_attention_heads` when `deriveHeadDim`, else `d.head_dim`. -/
 def parseJson (j : Json) (d : QwenConfig) (allowMRope : Bool := false) (deriveHeadDim : Bool := true) :
     Except String QwenConfig := do
   requireOneOf j "hidden_act" ["silu"]
   requireEq j "attention_bias" false
   requireEq j "use_sliding_window" false
-  match ← member? j "rope_scaling" with
-  | none | some .null => pure ()
+  let mrope : Option MRopeLayout ← match ← member? j "rope_scaling" with
+  | none | some .null => pure none
   | some scaling =>
+    let unsupported := s!"unsupported 'rope_scaling' = {scaling.compress}; this model implements plain RoPE"
     let kind : Option String ← firstFieldD? scaling ["type", "rope_type"] none
-    let mrope := kind == some "mrope" ||
-      (kind == some "default" && (← member? scaling "mrope_section").isSome)
-    unless allowMRope && mrope do
-      throw s!"unsupported 'rope_scaling' = {scaling.compress}; this model implements plain RoPE"
+    let sections : Option (Array Nat) ← field? scaling "mrope_section"
+    let some sections := sections | throw unsupported
+    unless allowMRope && (kind == some "mrope" || kind == some "default") do throw unsupported
+    let known := ["type", "rope_type", "mrope_section", "interleaved", "mrope_interleaved"]
+    let .obj fields := scaling | throw unsupported
+    if fields.toArray.any (fun (key, _) => !known.contains key) then throw unsupported
+    let interleaved : Bool ← fieldD? scaling "mrope_interleaved" false
+    let alsoInterleaved : Bool ← fieldD? scaling "interleaved" interleaved
+    unless alsoInterleaved == interleaved do throw unsupported
+    pure (some ({ sections, interleaved } : MRopeLayout))
   let hidden ← fieldD? j "hidden_size" d.hidden_size
   let heads ← fieldD? j "num_attention_heads" d.num_attention_heads
   let kvHeads ← fieldD? j "num_key_value_heads" d.num_key_value_heads
@@ -45,6 +54,9 @@ def parseJson (j : Json) (d : QwenConfig) (allowMRope : Bool := false) (deriveHe
       else throw s!"Invalid Qwen config: without head_dim, num_attention_heads={heads} must divide hidden_size={hidden}"
   let ⟨hHeadDim⟩ ← if h : 0 < headDim ∧ 2 ∣ headDim then pure (PLift.up h) else
     throw s!"Invalid Qwen config: head_dim={headDim} must be positive and even"
+  if let some layout := mrope then
+    unless layout.sections.foldl (· + ·) 0 == headDim / 2 do
+      throw s!"Invalid Qwen config: mrope_section {layout.sections} must sum to head_dim / 2 = {headDim / 2}"
   let vocab ← fieldD? j "vocab_size" d.vocab_size
   let ⟨hVocab⟩ ← if h : 0 < vocab then pure (PLift.up h) else
     throw "Invalid Qwen config: vocab_size must be positive"
@@ -64,6 +76,7 @@ def parseJson (j : Json) (d : QwenConfig) (allowMRope : Bool := false) (deriveHe
     half_head_dim := headDim / 2
     rope_theta := theta
     rms_norm_eps := eps
+    mrope := mrope
     headsValid := hHeads
     halfHeadDimPos := by omega
     vocabPos := hVocab

@@ -192,3 +192,36 @@ def testQwen3BatchedEosIsRowAware : IO Unit := do
       let tok := rowToken cachedVals seqCached 0 t
       LeanTest.assertEqual tok eosTok
         "once finished, a row should stay on EOS for subsequent decode steps"
+
+private def mropeConfig (ropeScaling : String) : Lean.Json :=
+  match Lean.Json.parse ("{\"vocab_size\":8,\"hidden_size\":8,\"num_attention_heads\":2," ++
+      "\"num_key_value_heads\":1,\"head_dim\":4,\"rope_scaling\":" ++ ropeScaling ++ "}") with
+  | .ok j => j
+  | .error e => panic! e
+
+@[test]
+def testQwenConfigRecordsTheMRopeLayout : IO Unit := do
+  let omni ← IO.ofExcept <| qwen.QwenConfig.parseJson
+    (mropeConfig "{\"type\":\"default\",\"mrope_section\":[1,1,0]}") {} (allowMRope := true)
+  LeanTest.assertTrue (omni.mrope == some { sections := #[1, 1, 0], interleaved := false })
+    "type default with mrope_section is recorded"
+  let asr ← IO.ofExcept <| qwen.QwenConfig.parseJson
+    (mropeConfig "{\"rope_type\":\"default\",\"mrope_section\":[1,0,1],\"interleaved\":true,\"mrope_interleaved\":true}")
+    {} (allowMRope := true)
+  LeanTest.assertTrue (asr.mrope == some { sections := #[1, 0, 1], interleaved := true })
+    "the interleaved layout is recorded"
+  let plain ← IO.ofExcept <| qwen.QwenConfig.parseJson (mropeConfig "null") {}
+  LeanTest.assertTrue plain.mrope.isNone "no rope_scaling records no layout"
+
+@[test]
+def testQwenConfigRejectsRopeScalingItDoesNotImplement : IO Unit := do
+  let rejected (ropeScaling : String) (allowMRope : Bool := true) : Bool :=
+    (qwen.QwenConfig.parseJson (mropeConfig ropeScaling) {} (allowMRope := allowMRope)).toOption.isNone
+  LeanTest.assertTrue (rejected "{\"type\":\"default\",\"mrope_section\":[1,1,0]}" (allowMRope := false))
+    "multimodal RoPE needs allowMRope"
+  LeanTest.assertTrue (rejected "{\"type\":\"yarn\",\"mrope_section\":[1,1,0]}") "another type with mrope_section"
+  LeanTest.assertTrue (rejected "{\"type\":\"default\",\"mrope_section\":[1,1,0],\"factor\":2.0}") "an unread key"
+  LeanTest.assertTrue (rejected "{\"type\":\"default\",\"mrope_section\":[1,1,1]}") "sections not summing to head_dim / 2"
+  LeanTest.assertTrue (rejected "{\"type\":\"mrope\"}") "mrope without sections"
+  LeanTest.assertTrue (rejected "{\"type\":\"default\",\"mrope_section\":[1,1,0],\"interleaved\":true,\"mrope_interleaved\":false}")
+    "contradicting interleave flags"
