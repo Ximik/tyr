@@ -71,6 +71,8 @@ def build_image(sha: str, url: str) -> modal.Image:
     toolchain = (REPO / "lean-toolchain").read_text().strip()
     return (
         modal.Image.from_registry(BASE_IMAGE, add_python="3.12")
+        # The base image's entrypoint prints a banner and a missing-driver warning on CPU machines.
+        .entrypoint([])
         .apt_install("ca-certificates", "git", "curl", "unzip", "make", "g++")
         .run_commands("curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh"
                       " | sh -s -- -y --default-toolchain none")

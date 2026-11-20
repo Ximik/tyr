@@ -12,7 +12,8 @@ environment or the repository's `.env`. Steps:
 Devices default to CPU, plus CUDA when the build is a CUDA build and CUDA is
 available. Results go to `<out>/<sha>/<cpu|gpu>/` (`-dirty` after the sha if
 the tree has changes): `<test>/<case>/{reference,tyr}/`, their logs,
-`<test>/<case>/result.json`, `build.log`, `run.json`. Exits 1 if any case is
+`<test>/<case>/result.json` (with each stage's `seconds`), `build.log`,
+`run.json`. Exits 1 if any case is
 FAIL or ERROR. `--weights-only` and `--build-only` stop after steps 1 and 2.
 
 A test module in `tests/` defines `TEST` (`lib.test.Test`), `CHECKS` (callables
@@ -27,6 +28,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -97,16 +99,30 @@ def build_probes(tests: dict) -> tuple[dict[str, str], str]:
 
 
 def run_case(module, case: str, device: str, dtype: str, weights: Path, case_dir: Path) -> dict:
+    """The case's result; `seconds` holds each stage's wall time, also on ERROR."""
+    seconds: dict[str, float] = {}
+    try:
+        return run_stages(module, case, device, dtype, weights, case_dir, seconds) | {"seconds": seconds}
+    except Exception:
+        return {"verdict": "ERROR", "error": traceback.format_exc(), "seconds": seconds}
+
+
+def run_stages(module, case: str, device: str, dtype: str, weights: Path, case_dir: Path,
+               seconds: dict[str, float]) -> dict:
     for stage in STAGES:
+        start = time.monotonic()
         with open(case_dir / f"{stage}.log", "w") as log:
             code = subprocess.run(
                 [sys.executable, __file__, "--stage", stage, "--test", module.TEST.name, "--case", case,
                  "--device", device, "--dtype", dtype, "--weights", str(weights), "--out", str(case_dir / stage)],
                 stdout=log, stderr=subprocess.STDOUT,
             ).returncode
+        seconds[stage] = round(time.monotonic() - start, 1)
         if code != 0:
             raise RuntimeError(f"{stage} exited with {code}; see {stage}.log")
+    start = time.monotonic()
     checks = {check.name: check(case_dir, device) for check in module.CHECKS}
+    seconds["checks"] = round(time.monotonic() - start, 1)
     return {"verdict": worst(c["verdict"] for c in checks.values()), "checks": checks}
 
 
@@ -128,13 +144,11 @@ def run_device(tests: dict, device: str, failures: dict[str, str], build_log: st
             if failure:
                 result = {"verdict": "ERROR", "error": failure}
             else:
-                try:
-                    result = run_case(module, case, device, dtype, weights_root / module.TEST.weights, case_dir)
-                except Exception:
-                    result = {"verdict": "ERROR", "error": traceback.format_exc()}
+                result = run_case(module, case, device, dtype, weights_root / module.TEST.weights, case_dir)
             (case_dir / "result.json").write_text(json.dumps(result, indent=2))
             verdicts[name][case] = result["verdict"]
-            print(f"{device} {name} {case}: {result['verdict']}", flush=True)
+            timing = " ".join(f"{k} {v}s" for k, v in result.get("seconds", {}).items())
+            print(f"{device} {name} {case}: {result['verdict']} ({timing})", flush=True)
 
     run = {
         "sha": sha,
