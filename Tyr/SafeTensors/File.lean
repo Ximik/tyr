@@ -209,16 +209,32 @@ namespace torch.RawTensor
 
 open Lean torch.safetensors
 
+/-- Write `tensors` to a new SafeTensors file at `path`, data in array order.
+Names must be nonempty and distinct. The header is padded with spaces to a
+multiple of 8 bytes. -/
+def saveSafeTensors (path : String) (tensors : Array (String × RawTensor)) : IO Unit := do
+  let mut entries : List (String × Json) := []
+  let mut lengths : Array UInt64 := #[]
+  let mut offset := 0
+  for (name, input) in tensors do
+    if name.isEmpty then
+      throw <| IO.userError "SafeTensors save error: tensor name cannot be empty."
+    if entries.any (·.1 == name) then
+      throw <| IO.userError s!"SafeTensors save error: tensor name '{name}' appears twice."
+    let some (tag, width) := input.dtype.safeTensorFormat?
+      | throw <| IO.userError s!"SafeTensors save error: unsupported dtype for tensor '{name}'."
+    let shape := input.runtimeShape
+    let length := shape.foldl (· * ·) 1 * width
+    entries := (name, Json.mkObj [("dtype", Json.str tag), ("shape", toJson shape),
+      ("data_offsets", toJson #[offset, offset + length])]) :: entries
+    lengths := lengths.push length.toUInt64
+    offset := offset + length
+  let header := (Json.mkObj entries).compress
+  let header := header.pushn ' ' ((8 - header.utf8ByteSize % 8) % 8)
+  safeTensorsWrite path header (tensors.map (·.2)) lengths
+
 /-- Write `input` as the only tensor of a new SafeTensors file at `path`. -/
-def saveSafeTensor (path name : String) (input : RawTensor) : IO Unit := do
-  if name.isEmpty then
-    throw <| IO.userError "SafeTensors save error: tensor name cannot be empty."
-  let some (tag, width) := input.dtype.safeTensorFormat?
-    | throw <| IO.userError s!"SafeTensors save error: unsupported dtype for tensor '{name}'."
-  let shape := input.runtimeShape
-  let length := shape.foldl (· * ·) 1 * width
-  let entry := Json.mkObj [("dtype", Json.str tag), ("shape", toJson shape),
-    ("data_offsets", toJson #[0, length])]
-  safeTensorsWrite path (Json.mkObj [(name, entry)]).compress #[input] #[length.toUInt64]
+def saveSafeTensor (path name : String) (input : RawTensor) : IO Unit :=
+  saveSafeTensors path #[(name, input)]
 
 end torch.RawTensor

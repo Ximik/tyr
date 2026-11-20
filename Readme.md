@@ -86,6 +86,32 @@ lake test                            # builds and runs test_runner
 lake exe test_runner --filter GPT    # with arguments
 ```
 
+### Parity Tests
+
+`parity/` checks each model on its published weights against the original
+Python implementation: the same input must give the same output. Each test
+writes its raw files to `output/parity/<sha>/{cpu,gpu}/`; the exit code is
+nonzero if any case is FAIL or ERROR.
+
+Locally, with a venv that has `parity/requirements.txt` installed (the
+reference implementations run in it):
+```bash
+python parity/run.py                 # all tests; CPU, plus CUDA if built for and available
+python parity/run.py --tests qwen3 --device cpu
+```
+It downloads and checks the weights listed in `parity/manifest.json`
+(into `output/parity/weights`), builds the probes with the current Lake
+configuration, and runs the tests.
+
+On Modal, for the current commit, which must be on a remote branch and have
+a clean tree; CPU and H100 run in parallel:
+```bash
+python parity/modal/run_modal.py [--tests qwen3]
+```
+On first run it creates `parity/modal/.venv` with the pinned `modal` package
+(`parity/modal/requirements.txt`) and runs itself there. It needs only the
+tokens in `.env` (see below), not the Modal CLI.
+
 ## Environment Variables
 
 All optional.
@@ -119,6 +145,14 @@ See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler ov
 | `TYR_DEVICE` | `cpu`, `cuda`, `mps` or `auto`; device used by the examples and model loaders |
 | `TYR_VERBOSE_ERRORS=1` | print the full libtorch report when a libtorch error crashes the program |
 | `TYR_DEBUG_MPS=1` | print MPS (Apple GPU) availability diagnostics |
+
+**Parity tests**, read from the environment or from `.env` at the repository
+root (gitignored; `KEY=VALUE` lines):
+
+| Variable | Effect |
+|---|---|
+| `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | Modal API token (modal.com → Settings → API Tokens), for `parity/modal/run_modal.py` |
+| `HF_TOKEN` | Hugging Face read token, for gated repositories such as Gemma |
 
 ## Documentation
 
