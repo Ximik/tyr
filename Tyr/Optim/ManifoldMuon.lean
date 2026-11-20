@@ -240,10 +240,10 @@ def solveDirection {m n : Nat}
     matching Muon's usual tall/wide handling. -/
 def retractStiefel {m n : Nat} (W : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m, n], d, dev⟩ :=
   if h : n ≤ m then
-    (Tyr.AD.Stiefel.project m n W h).matrix
+    (Tyr.Manifolds.Stiefel.project m n W h).matrix
   else
     let h' : m ≤ n := Nat.le_of_lt (Nat.lt_of_not_le h)
-    Tensor.transpose2d (Tyr.AD.Stiefel.project n m (Tensor.transpose2d W) h').matrix
+    Tensor.transpose2d (Tyr.Manifolds.Stiefel.project n m (Tensor.transpose2d W) h').matrix
 
 /-- Single update step with inner-solver diagnostics. -/
 def stepSingleWithDiagnostics {m n : Nat}

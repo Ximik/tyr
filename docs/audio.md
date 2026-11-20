@@ -49,18 +49,8 @@ loops. Each layer owns preallocated K and V buffers of shape
 `[batch, numKvHeads, maxSeqLen, headDim]`; a decode step writes the new token's
 K/V at position `cache.currentLen` (in place, via
 `torch.data.sliceScatterInplace`), slices the
-layer to the valid prefix, and runs attention through `nn.tyrFlashAttn4d`
-(`Tyr/Torch.lean:1198`).
-
-The C++ `tyr::flash_attn` operator behind that call routes to the
-ThunderKittens H100 decode kernel (`tkMhaH100DecodeFwd`) when the step is
-decode-eligible, and to PyTorch SDPA otherwise. Eligibility is decided in
-`select_route` (`cc/src/tyr_ops.cpp:314`): CUDA on a Hopper-class device, BF16,
-`qSeq = 1`, `headDim ∈ {64, 128, 256}`, GQA-valid head counts, no attention
-mask, `dropout = 0`, non-causal, default scale. The kernel iterates
-`ceil(kvSeq/64)` blocks and tail-masks the last one, so cache views are never
-padded to a block multiple. See [GPU kernels](gpu/kernels.md) for the kernel
-catalog.
+layer to the valid prefix, and runs attention through
+`Tensor.attentionGQAQKV` (libtorch scaled-dot-product attention).
 
 One namespace quirk: the module is named `Tyr.Inference.KVCache` but declares
 `namespace torch.Generator.KVCache` (`Tyr/Inference/KVCache.lean:24`), a
@@ -269,8 +259,6 @@ and stale slice bounds when wiring a cache into a new model.
   the device model used by the cache.
 - [TensorStruct](core/tensorstruct.md) — the generic traversal class behind the
   cache instances.
-- [GPU kernels](gpu/kernels.md) — the ThunderKittens decode kernel and the
-  dispatch layer behind `nn.tyrFlashAttn4d`.
 - [Getting started](getting-started.md) — building and running the examples
   referenced above.
 

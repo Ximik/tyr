@@ -235,18 +235,18 @@ lake exe Gemma4RunHF --source google/gemma-4-E4B \
 
 # Single-image captioning
 lake exe Gemma4RunHF --source google/gemma-4-E2B-it \
-  --image external/git/ThunderKittens/assets/kittens.png \
+  --image path/to/image.png \
   --prompt "Describe this image."
 
 # Multiple images with explicit placeholders
 lake exe Gemma4RunHF --source google/gemma-4-E2B-it \
-  --image external/git/ThunderKittens/assets/kittens.png \
-  --image external/git/ThunderKittens/assets/attn.png \
+  --image path/to/image.png \
+  --image path/to/second.png \
   --prompt "Image A: <|image|> Image B: <|image|> Compare them briefly."
 
 # Larger multimodal checkpoint
 lake exe Gemma4RunHF --source google/gemma-4-26B-A4B-it \
-  --image external/git/ThunderKittens/assets/kittens.png \
+  --image path/to/image.png \
   --prompt "Describe this image."
 ```
 
@@ -263,31 +263,6 @@ Useful flags:
 - Use literal `<|image|>` markers in the prompt to place images explicitly; if omitted, images are prefixed in input order
 - `--enable-thinking` use the Gemma 4 thinking-enabled chat template
 - `--debug-ids` print generated token ids alongside decoded text
-
-## BranchingFlows
-
-Combinatorial branching flow sampler -- a port of branching flow networks to Lean. Includes continuous, discrete, and mixed training demos. No external data needed.
-
-```bash
-lake exe BranchingFlowsContinuousTrain
-lake exe BranchingFlowsMoleculeTrain
-lake exe BranchingFlowsMoleculeTransformerTrain
-lake exe BranchingFlowsMoleculeTrainGenerate
-```
-
-Demo files:
-- `BranchingFlowsDemo.lean` -- Minimal deterministic demo
-- `ContinuousTrainDemo.lean` -- Continuous state training with an overfit loss-decrease check
-- `DiscreteTrainDemo.lean` -- Discrete state training
-- `MixedTrainDemo.lean` -- Mixed continuous/discrete training
-- `MoleculeTrainDemo.lean` -- QM9-shaped coordinate/label training with an overfit loss-decrease check
-- `MoleculeTransformerTrainDemo.lean` -- QM9-shaped transformer training with coordinate, label, split, and deletion loss checks
-- `MoleculeGenerationDemo.lean` -- Oracle molecule bridge/generation example with XYZ export
-- `MoleculeTrainGenerate.lean` -- Dataset-backed molecule transformer training, evaluation, and learned XYZ generation
-
-Torch-backed training demos should run through Lake executables or compiled
-targets so Tyr's native Torch bridge is linked. The training executables print
-initial/final losses and fail if the tiny model does not improve.
 
 ## NanoProof
 

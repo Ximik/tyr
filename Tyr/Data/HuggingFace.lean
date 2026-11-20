@@ -7,14 +7,14 @@
   avoiding the need for Python dependencies.
 -/
 import Tyr.Data.Download
-import Tyr.Data.Pretraining
+import Tyr.RawTensor.Parquet
 import Tyr.Log
 import Lean.Data.Json
 
 namespace torch.Data.HuggingFace
 
 open torch.Data.Download
-open torch.Data.Pretraining (readParquetAsJson readRowGroupAsJson getParquetMetadata)
+open torch.Data.Parquet (readParquetAsJson readRowGroupAsJson getParquetMetadata)
 open torch.Log
 
 /-- HuggingFace dataset configuration -/

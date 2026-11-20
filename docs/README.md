@@ -21,19 +21,15 @@ Two kinds of documentation exist:
 - **Loading pretrained models:** [Serialization](serialization.md) →
   [LLMs](models/llms.md) / [Audio & speech models](models/audio-speech.md) /
   [Generative models](models/generative.md).
-- **Writing GPU kernels:** [GPU DSL & codegen](gpu/dsl-codegen.md) →
-  [GPU kernels & ops](gpu/kernels.md) → [FFI & build system](ffi-and-build.md).
 - **Training at scale:** [Data pipeline](data.md) → [Autodiff](autodiff.md) →
   [Distributed & orchestration](distributed.md).
-- **Scientific computing:** [DiffEq](diffeq.md) →
-  [Event-skeleton simulation](event-skeleton.md) → [MCTS](mctx.md).
 
 ## Contents
 
 ### Foundations
 
 - [Getting started](getting-started.md) — dependencies, build, environment,
-  tests, running examples and GPU parity suites.
+  tests, and running examples.
 - [Tensors and the torch FFI](core/tensors.md) — `Shape`, the shape-indexed
   tensor type `Tensor σ`, pure specification arithmetic, and checked native
   adapter boundaries.
@@ -42,8 +38,8 @@ Two kinds of documentation exist:
   `deriving` handlers.
 - [Typed facade](core/typed.md) — `Tensor (σ : StaticSpec)`: phantom-typed
   tensors tracking shape, dtype, and concrete device.
-- [Utilities](core/utilities.md) — deterministic `PRNGKey` splitting, the
-  `Log.Handlers` pattern, and the `#tensor` / `#module` infoview widgets.
+- [Utilities](core/utilities.md) — the `Log.Handlers` pattern and the
+  `#tensor` / `#module` infoview widgets.
 
 ### Training stack
 
@@ -51,8 +47,7 @@ Two kinds of documentation exist:
   HuggingFace Hub resolution, and training checkpoints.
 - [Data pipeline](data.md) — tokenizers, batch iterators (fixed-dim vs
   shape-erased), parquet/shard loading, task mixtures, streaming text.
-- [Autodiff](autodiff.md) — the three AD layers: `torch.autograd` FFI,
-  IR-level JVP/VJP in `Tyr/AutoGrad.lean`, and the `Tyr/AD` elimination stack.
+- [Autodiff](autodiff.md) — the `torch.autograd` FFI path.
 - [Modules](modules.md) — neural network layers, `deriving Model`, and the
   `Tyr/Modular` normed-module / LR-budget machinery.
 - [Optimization](optimization.md) — Optax-style `GradientTransformation`s,
@@ -64,30 +59,10 @@ Two kinds of documentation exist:
 ### Models
 
 - [LLMs](models/llms.md) — shared generation infrastructure (sampling, KV
-  caches) and the Qwen lineage, Gemma4, and FLM.
-- [Generative models](models/generative.md) — BranchingFlows, Flowfusion,
-  Flux image generation, and the VAE.
+  caches), the Qwen lineage and Gemma4.
+- [Generative models](models/generative.md) — Flux image generation and the VAE.
 - [Audio & speech models](models/audio-speech.md) — KittenTTS, Qwen3-TTS,
   Qwen3-ASR, Silero VAD, and Whisper.
-
-### GPU
-
-- [GPU DSL & codegen](gpu/dsl-codegen.md) — tile types, the `KernelM` monad,
-  the `@[gpu_kernel]` attribute, CUDA emission, and TileIR.
-- [GPU kernels & ops](gpu/kernels.md) — the ThunderKittens-style kernel
-  catalog (MHA H100, decode, flash attention, norms), the high-level ops
-  bridge, and the parity-validation story.
-- [ThunderKittens porting status](gpu/thunderkittens-porting-status.md) —
-  pre-existing status note on the TK port.
-
-### Scientific computing
-
-- [DiffEq](diffeq.md) — ODE/SDE solvers, adjoints, Brownian paths,
-  interpolation, root finding, events.
-- [Event-skeleton simulation](event-skeleton.md) — hybrid event-driven
-  dynamics: saltation, marks, branching, contact physics, manipulators, URDF.
-- [MCTS](mctx.md) — Monte Carlo tree search (`Tyr/Mctx`) and the DAG variant
-  (`Tyr/MctxDag`), including the AlphaGrad bridge.
 
 ### Infrastructure
 
@@ -97,12 +72,6 @@ Two kinds of documentation exist:
   counting conventions, the `lakefile.lean` build machinery, and scripts.
 - [Examples and testing](examples-and-testing.md) — tour of `Examples/`,
   test organization, LeanTest, and coverage gaps.
-
-### Meta
-
-- [Improvement suggestions](IMPROVEMENTS.md) — consolidated, verified
-  findings (bug risks, stale docs, missing tests, cleanups) collected while
-  writing these guides.
 
 ## Conventions in these guides
 

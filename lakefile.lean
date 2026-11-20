@@ -12,13 +12,9 @@ def nonEmptyTrimmed? (s : String) : Option String :=
     next `lake -R`. The `libtyr` target checks it against the fetched wheels. -/
 def cudaHome? : Option String := get_config? cuda
 
-/-- GPU to build CUDA kernels for, with `-Kcuda`: `-Kgpu=H100` (or `A100`,
+/-- GPU to compile CUDA sources for, with `-Kcuda`: `-Kgpu=H100` (or `A100`,
     `B200`, `B300`, `GB10`). cc/Makefile maps it to the architecture flags. -/
 def gpu? : Option String := get_config? gpu
-
-/-- Kernel modules to generate CUDA for, space-separated:
-    `-Kkernels="Tyr.GPU.Kernels.MhaH100 Tyr.GPU.Kernels.MhaH100Decode"`. -/
-def gpuKernels : String := (get_config? kernels).getD "Tyr.GPU.Kernels.MhaH100"
 
 /-- Runtime search path for `cc/build/libTyrC`, relative to the loading binary
     so the checkout can move. Binaries sit two to four levels below the repo
@@ -55,11 +51,6 @@ package tyr where
   moreLinkArgs := packageLinkArgs
 
 require LeanTest from git "https://github.com/cpehle/lean_test.git" @ "b42cd3d78716e5a2de5b640ac82d7fe3f05f2a4c"
-require LeanBenchmark from git "https://github.com/cpehle/lean-benchmark.git" @
-  "9ab68a2e976aef3791b5b5630be8f5f1e8f79fe9"
-require LeanUrdfTypeProvider from git
-  "https://github.com/ranvier-labs/lean-urdf-typeprovider.git" @
-  "5712c1fcdf4462d1e7a216f12159651381410149"
 
 /-! ## C++ Library Build -/
 
@@ -87,53 +78,12 @@ target libtyr pkg : Dynlib := do
 
   let tyrCLib := pkg.dir / "cc" / "build" / nameToSharedLib "TyrC"
   let sysroot ← getLeanSysroot
-  let kernelModules := (gpuKernels.splitOn " ").toArray.filterMap nonEmptyTrimmed?
-
-  -- The kernel code generator. It imports kernel modules, so it runs with
-  -- Lean's module path, and its inputs are the generator itself plus the
-  -- modules' compiled `.olean` files.
-  let some generator ← findLeanExe? `GenerateGpuKernels
-    | error "lakefile.lean: no GenerateGpuKernels executable"
   let generatorEnv ← getAugmentedEnv
   let generatedDir := pkg.dir / "cc" / "src" / "generated"
-  let generatorInputs (modules : Array Module) : FetchM (Job Unit) := do
-    let mut inputs := (← generator.exe.fetch).map fun _ => ()
-    for mod in modules do
-      inputs := inputs.mix (← mod.olean.fetch)
-    return inputs
-  -- Runs a generator when its inputs' trace changes. Unlike `buildFileAfterDep`,
-  -- this does not delete `output` first: generators leave unchanged files
-  -- untouched, so Make recompiles only what actually changed.
-  let generate (name : String) (inputs : Job Unit) (output : FilePath)
-      (cmd : FilePath) (args : Array String) (extraTrace := BuildTrace.nil) :
-      SpawnM (Job Unit) :=
-    inputs.mapM fun _ => do
-      addTrace extraTrace
-      buildUnlessUpToDate output (← getTrace) (pkg.buildDir / "codegen" / s!"{name}.trace") do
-        proc { cmd := cmd.toString, args, env := generatorEnv }
 
-  -- 1. Placeholder launchers for every kernel in `TyrKernels` (all builds):
-  --    kernels whose CUDA is not compiled still link.
-  let some kernelLib ← findLeanLib? `TyrKernels
-    | error "lakefile.lean: no TyrKernels library"
-  let allKernels ← kernelLib.getModuleArray
-  let stubsFile := generatedDir / "tyr_gpu_kernel_stubs.cpp"
-  let stubsJob ← generate "gpu-stubs" (← generatorInputs allKernels) stubsFile generator.file
-    (#["--stubs", stubsFile.toString] ++ allKernels.map (·.name.toString))
-
-  -- 2. CUDA for the `-Kkernels` modules (CUDA builds only). Lake reruns it when
-  --    the generator, one of those modules or `-Kkernels` changes.
-  let cudaJob ← if cudaHome?.isNone then pure (Job.pure ()) else do
-    let mut modules := #[]
-    for name in kernelModules do
-      let some mod ← findModule? name.toName
-        | error s!"-Kkernels: unknown module {name}"
-      modules := modules.push mod
-    generate "gpu-cuda" (← generatorInputs modules) generatedDir generator.file
-      (kernelModules ++ #["--out-dir", generatedDir.toString])
-      (extraTrace := BuildTrace.ofHash (Hash.ofString gpuKernels) "-Kkernels")
-
-  -- 3. C prototypes of every `TyrFFI` extern, which `libTyrC`'s sources include.
+  -- 1. C prototypes of every `TyrFFI` extern, which `libTyrC`'s sources include.
+  --    The generator leaves an unchanged header untouched, so Make recompiles
+  --    only when the prototypes change.
   let some ffiGenerator ← findLeanExe? `GenerateFfiHeader
     | error "lakefile.lean: no GenerateFfiHeader executable"
   let some ffiLib ← findLeanLib? `TyrFFI
@@ -143,13 +93,17 @@ target libtyr pkg : Dynlib := do
   let mut ffiInputs := (← ffiGenerator.exe.fetch).map fun _ => ()
   for mod in ffiModules do
     ffiInputs := ffiInputs.mix (← mod.olean.fetch)
-  let ffiJob ← generate "ffi-header" ffiInputs ffiHeader ffiGenerator.file
-    (#[ffiHeader.toString] ++ ffiModules.map (·.name.toString))
-  let codegenJob := stubsJob.mix cudaJob |>.mix ffiJob
+  let ffiJob ← ffiInputs.mapM fun _ => do
+    buildUnlessUpToDate ffiHeader (← getTrace) (pkg.buildDir / "codegen" / "ffi-header.trace") do
+      proc {
+        cmd := ffiGenerator.file.toString
+        args := #[ffiHeader.toString] ++ ffiModules.map (·.name.toString)
+        env := generatorEnv
+      }
 
-  -- 4. make, on every build: Make decides what to recompile. The library's
+  -- 2. make, on every build: Make decides what to recompile. The library's
   --    content is its trace, so an unchanged library rebuilds nothing else.
-  let libJob ← codegenJob.mapM fun _ => do
+  let libJob ← ffiJob.mapM fun _ => do
     let jobs ← match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
       | some jobs => pure jobs
       | none => captureProc { cmd := "getconf", args := #["_NPROCESSORS_ONLN"] }
@@ -160,23 +114,21 @@ target libtyr pkg : Dynlib := do
         ("LEAN_HOME", some sysroot.toString),
         -- Unset for a CPU build, so a `CUDA_HOME` in the caller's shell is ignored.
         ("CUDA_HOME", cudaHome?),
-        ("GPU", gpu?),
-        ("TYR_GPU_CODEGEN_MODULE", some gpuKernels)
+        ("GPU", gpu?)
       ]
     }
     let libTrace ← computeTrace tyrCLib
     setTrace libTrace
     return libTrace
 
-  -- 5. Every `lean_*` symbol the library exports must be a Lean extern (a
-  --    `TyrFFI` declaration or a kernel launcher); the generated header only
-  --    checks definitions Lean declares. The library keeps its own trace.
-  let checkModules := ffiModules ++ allKernels
-  let checkJob ← (libJob.mix ffiInputs |>.mix (← generatorInputs allKernels)).mapM fun _ => do
+  -- 3. Every `lean_*` symbol the library exports must be a `TyrFFI` extern;
+  --    the generated header only checks definitions Lean declares. The
+  --    library keeps its own trace.
+  let checkJob ← (libJob.mix ffiInputs).mapM fun _ => do
     buildUnlessUpToDate tyrCLib (← getTrace) (pkg.buildDir / "codegen" / "ffi-exports.trace") do
       proc {
         cmd := ffiGenerator.file.toString
-        args := #["--check-exports", tyrCLib.toString] ++ checkModules.map (·.name.toString)
+        args := #["--check-exports", tyrCLib.toString] ++ ffiModules.map (·.name.toString)
         env := generatorEnv
       }
   let doneJob ← (libJob.zipWith (fun libTrace _ => libTrace) checkJob).mapM fun libTrace => do
@@ -186,69 +138,32 @@ target libtyr pkg : Dynlib := do
 
 /-! ## Lean Library -/
 
-/-- Main Lean library: every `Tyr.*` module not claimed by `TyrCodegen`. -/
+/-- Main Lean library: every `Tyr.*` module not claimed by `TyrFFI`. -/
 @[default_target]
 lean_lib Tyr where
   roots := #[`Tyr]
   precompileModules := true
   -- Linked into every executable that imports a Tyr module and into the
-  -- precompiled module libraries; not into the codegen executables.
+  -- precompiled module libraries.
   moreLinkLibs := #[`@/libtyr]
 
-/-- Every `@[extern]` declaration of `Tyr`. Declared after `Tyr` and before
-    `TyrCodegen`, so `TyrCodegen` keeps `Tyr.Basic.Types`. Not precompiled, so
+/-- Every `@[extern]` declaration of `Tyr`, with the types they use. Declared
+    after `Tyr`: Lake gives a module to the last declared library whose roots
+    match it, and `Tyr` matches every `Tyr.*`. Not precompiled, so
     its `.olean` files build without `libTyrC`: the `libtyr` target generates
     `libTyrC`'s FFI header from them. The declared functions are in `libTyrC`,
     so linking needs it. -/
 lean_lib TyrFFI where
   roots := #[`Tyr.Basic, `Tyr.ConstantSupport, `Tyr.RawTensor, `Tyr.Audio.AppleInput,
     `Tyr.Audio.AppleOutput]
-  globs := #[.one `Tyr.Basic, .andSubmodules `Tyr.ConstantSupport, .andSubmodules `Tyr.RawTensor,
+  globs := #[.one `Tyr.Basic, .one `Tyr.Basic.Types, .andSubmodules `Tyr.ConstantSupport, .andSubmodules `Tyr.RawTensor,
     .one `Tyr.Audio.FloatBuffer, .one `Tyr.Audio.AppleInput, .one `Tyr.Audio.AppleOutput]
-  precompileModules := false
-  moreLinkLibs := #[`@/libtyr]
-
-/-- Codegen-only sub-library. Declared after `Tyr`: Lake gives a module to the
-    last declared library whose roots match it, and `Tyr` matches every `Tyr.*`.
-
-    Owns `Tyr.GPU.Codegen.*` plus the small set of modules they depend on
-    (`Tyr.GPU.Types`, `Capabilities`, `Tile`, `Tyr.Basic.Types`). These are
-    pure Lean with no native functions, so unlike `Tyr` the library does not
-    link `libTyrC`, and neither do the codegen executables. Their `main`
-    modules (`Tyr.GPU.GenerateGpuKernels`, `Tyr.GPU.GenerateTileIRKernels`)
-    stay outside this library: precompiled `Tyr` modules load it as one
-    shared library, which must not contain `main`s. -/
-lean_lib TyrCodegen where
-  roots := #[
-    `Tyr.GPU.Codegen,
-    `Tyr.GPU.Types,
-    `Tyr.GPU.Capabilities,
-    `Tyr.GPU.Tile,
-    `Tyr.Basic.Types
-  ]
-  -- `Tyr.GPU.Codegen` has no file of its own, only submodules.
-  globs := #[.submodules `Tyr.GPU.Codegen, .one `Tyr.GPU.Types,
-    .one `Tyr.GPU.Capabilities, .one `Tyr.GPU.Tile, .one `Tyr.Basic.Types]
-  precompileModules := false
-
-/-- The GPU kernels written in Lean (`Tyr.GPU.Kernels.*`). Declared after `Tyr`
-    (see `TyrCodegen`). Not precompiled, so their `.olean` files build without
-    `libTyrC`: the `libtyr` target needs them to generate the kernels' CUDA. The
-    kernels' launch functions are in `libTyrC`, so linking needs it. -/
-lean_lib TyrKernels where
-  roots := #[`Tyr.GPU.Kernels]
-  globs := #[.andSubmodules `Tyr.GPU.Kernels]
   precompileModules := false
   moreLinkLibs := #[`@/libtyr]
 
 /-- Test library containing all tests -/
 lean_lib Tests where
   roots := #[`Tests]
-  precompileModules := false
-
-/-- Experimental tests that track in-progress modules. -/
-lean_lib TestsExperimental where
-  roots := #[`TestsExperimental]
   precompileModules := false
 
 /-- Examples library -/
@@ -269,69 +184,10 @@ lean_exe RunDistributedValues where
   root := `Tests.RunDistributedValues
   supportInterpreter := true
 
-/-- Native tensor-free MCTS search and allocation microbenchmarks. -/
-lean_exe mctx_bench where
-  root := `benchmarks.Mctx
-
-/-- Dopri5 per-step cost on a tensor state versus a `Float` state. -/
-lean_exe diffeq_glue_bench where
-  root := `benchmarks.DiffEqGlue
-
-/-- Generate CUDA translation units from registered @[gpu_kernel] declarations.
-    Imports only `TyrCodegen`, so it does not link `libTyrC`. -/
-lean_exe GenerateGpuKernels where
-  root := `Tyr.GPU.GenerateGpuKernels
-  supportInterpreter := true
-
 /-- Write the C prototypes of `TyrFFI`'s extern declarations. Imports only
     `Lean`, so it does not link `libTyrC`. -/
 lean_exe GenerateFfiHeader where
   root := `Tyr.GenerateFfiHeader
-
-/-- Compile registered @[tileir_kernel] declarations through NVIDIA TileIR tooling. -/
-lean_exe GenerateTileIRKernels where
-  root := `Tyr.GPU.GenerateTileIRKernels
-  supportInterpreter := true
-
-/-- Experimental test runner for unstable/in-progress modules. -/
-lean_exe test_runner_experimental where
-  root := `Tests.RunTestsExperimental
-  supportInterpreter := true
-
-/-- BranchingFlows discrete-token training demonstration. -/
-lean_exe BranchingFlowsDiscreteTrain where
-  root := `Examples.BranchingFlows.DiscreteTrainDemo
-  supportInterpreter := true
-
-/-- BranchingFlows mixed continuous/token training demonstration. -/
-lean_exe BranchingFlowsMixedTrain where
-  root := `Examples.BranchingFlows.MixedTrainDemo
-  supportInterpreter := true
-
-/-- BranchingFlows continuous overfit training check. -/
-lean_exe BranchingFlowsContinuousTrain where
-  root := `Examples.BranchingFlows.ContinuousTrainDemo
-  supportInterpreter := true
-
-/-- BranchingFlows molecule overfit training check. -/
-lean_exe BranchingFlowsMoleculeTrain where
-  root := `Examples.BranchingFlows.MoleculeTrainDemo
-  supportInterpreter := true
-
-/-- Molecule-shaped oracle generation with branch-event trajectory export. -/
-lean_exe BranchingFlowsMoleculeGenerate where
-  root := `Examples.BranchingFlows.MoleculeGenerationDemo
-  supportInterpreter := true
-
-/-- BranchingFlows molecule transformer overfit training check. -/
-lean_exe BranchingFlowsMoleculeTransformerTrain where
-  root := `Examples.BranchingFlows.MoleculeTransformerTrainDemo
-  supportInterpreter := true
-
-/-- Dataset-backed BranchingFlows molecule transformer training and generation. -/
-lean_exe BranchingFlowsMoleculeTrainGenerate where
-  root := `Examples.BranchingFlows.MoleculeTrainGenerate
-  supportInterpreter := true
 
 /-- Manual FFI failure-mode probe (intentionally crashes; not in the suite).
     Run it to check that an uncaught libtorch exception terminates with an
@@ -358,31 +214,6 @@ lean_exe RunRiemannianNanoGPT where
 /-- Diffusion training executable -/
 lean_exe TrainDiffusion where
   root := `Examples.TrainDiffusion
-  supportInterpreter := true
-
-/-- URDF-backed hybrid contact event-skeleton simulation demo. -/
-lean_exe RunUrdfContactExample where
-  root := `Examples.EventSkeleton.RunUrdfContactExample
-  supportInterpreter := true
-
-/-- AlphaGrad-style RoeFlux_1d elimination planning port demo. -/
-lean_exe AlphaGradRoeFlux1dA0 where
-  root := `Examples.AlphaGradPort.RoeFlux1dA0
-  supportInterpreter := true
-
-/-- AlphaGrad port task sweep runner (targets tasks one-by-one). -/
-lean_exe AlphaGradPortSweep where
-  root := `Examples.AlphaGradPort.TaskSweep
-  supportInterpreter := true
-
-/-- AlphaGrad policy-training runner with real parameter updates. -/
-lean_exe AlphaGradPolicyTrain where
-  root := `Examples.AlphaGradPort.PolicyTrainMain
-  supportInterpreter := true
-
-/-- AlphaGrad policy-training sweep runner across tasks and training modes. -/
-lean_exe AlphaGradPolicySweep where
-  root := `Examples.AlphaGradPort.PolicySweepMain
   supportInterpreter := true
 
 /-- NanoChat training executable (modded GPT + distributed) -/
@@ -418,41 +249,6 @@ lean_exe TestDiffusion where
 /-- DataLoader test executable -/
 lean_exe TestDataLoader where
   root := `Tests.RunTestDataLoader
-  supportInterpreter := true
-
-/-- Differential equation baseline test executable. -/
-lean_exe TestDiffEq where
-  root := `Tests.RunTestDiffEq
-  supportInterpreter := true
-
-/-- Adjoint differential equation test executable. -/
-lean_exe TestDiffEqAdjoint where
-  root := `Tests.RunTestDiffEqAdjoint
-  supportInterpreter := true
-
-/-- Core adjoint differential equation test executable. -/
-lean_exe TestDiffEqAdjointCore where
-  root := `Tests.RunTestDiffEqAdjointCore
-  supportInterpreter := true
-
-/-- GPU DSL regression test executable. -/
-lean_exe TestGPUDSL where
-  root := `Tests.RunTestGPUDSL
-  supportInterpreter := true
-
-/-- GPU kernel fixture test executable. -/
-lean_exe TestGPUKernels where
-  root := `Tests.RunTestGPUKernels
-  supportInterpreter := true
-
-/-- End-to-end GPU parity tests (Tyr vs PyTorch, with optional vendored references). -/
-lean_exe TestGPUE2E where
-  root := `Tests.RunGPUE2E
-  supportInterpreter := true
-
-/-- GB10/Blackwell-specific end-to-end GPU parity tests. -/
-lean_exe TestGPUGB10E2E where
-  root := `Tests.RunGPUGB10E2E
   supportInterpreter := true
 
 /-- Laguna config.json parsing tests. -/
@@ -500,16 +296,6 @@ lean_exe LagunaRunHF where
   root := `Examples.Laguna.RunHF
   supportInterpreter := true
 
-/-- NVIDIA TileIR rendering and toolchain driver tests. -/
-lean_exe TestGPUTileIR where
-  root := `Tests.RunTestGPUTileIR
-  supportInterpreter := true
-
-/-- TileIR export driver regression tests. -/
-lean_exe TestTileIRGenerateMain where
-  root := `Tests.RunTestTileIRGenerateMain
-  supportInterpreter := true
-
 /-- Flux image generation demo -/
 lean_exe FluxDemo where
   root := `Examples.Flux.FluxDemo
@@ -523,18 +309,6 @@ lean_exe Qwen3TTSEndToEnd where
 /-- Offline KittenTTS / Kokoro synthesis demo using converted safetensors checkpoints. -/
 lean_exe KittenTTSPretrained where
   root := `Examples.KittenTTSPretrained
-  supportInterpreter := true
-
-lean_exe KittenTTSDurations where
-  root := `Examples.KittenTTSDurations
-  supportInterpreter := true
-
-lean_exe KittenTTSDebug where
-  root := `Examples.KittenTTSDebug
-  supportInterpreter := true
-
-lean_exe KittenTTSCompare where
-  root := `Examples.KittenTTSCompare
   supportInterpreter := true
 
 /-- Offline Qwen3-ASR transcription demo (fully Lean pipeline). -/
@@ -570,111 +344,6 @@ lean_exe Qwen25OmniRunHF where
 /-- Gemma 4 text loader/generation demo with HF repo-id resolution. -/
 lean_exe Gemma4RunHF where
   root := `Examples.Gemma4.RunHF
-  supportInterpreter := true
-
-/-- Flux debug harness (saves intermediate tensors) -/
-lean_exe FluxDebug where
-  root := `Examples.Flux.FluxDebug
-  supportInterpreter := true
-
-/-- End-to-end demo for a minimal ThunderKittens-style copy kernel. -/
-lean_exe RunCopy where
-  root := `Examples.GPU.RunCopyExe
-  supportInterpreter := true
-
-/-- End-to-end rotary fixture validation using a ThunderKittens-style kernel. -/
-lean_exe RunRotary where
-  root := `Examples.GPU.RunRotaryExe
-  supportInterpreter := true
-
-/-- End-to-end ThunderKittens layernorm fixture validation. -/
-lean_exe RunLayerNorm where
-  root := `Examples.GPU.RunLayerNormExe
-  supportInterpreter := true
-
-/-- End-to-end fused residual + RMSNorm fixture validation. -/
-lean_exe RunRMSNorm where
-  root := `Examples.GPU.RunRMSNormExe
-  supportInterpreter := true
-
-/-- Fused BF16 cross-entropy training benchmark. -/
-lean_exe RunLoss where
-  root := `Examples.GPU.RunLoss
-  supportInterpreter := true
-
-/-- Fused mixed-precision AdamW training benchmark. -/
-lean_exe RunOptimizer where
-  root := `Examples.GPU.RunOptimizer
-  supportInterpreter := true
-
-/-- End-to-end ThunderKittens flash attention fixture validation. -/
-lean_exe RunFlashAttn where
-  root := `Examples.GPU.RunFlashAttnExe
-  supportInterpreter := true
-
-/-- End-to-end FlashAttention3 validation. -/
-lean_exe RunFlashAttn3 where
-  root := `Examples.GPU.RunFlashAttn3
-  supportInterpreter := true
-
-/-- Runtime validation for the high-level `tyr::flash_attn` bridge. -/
-lean_exe RunFlashAttnOp where
-  root := `Examples.GPU.RunFlashAttnOp
-  supportInterpreter := true
-
-/-- One-H100 benchmark scaffold for the `tyr::flash_attn` bring-up. -/
-lean_exe RunFlashAttnBench where
-  root := `Examples.GPU.RunFlashAttnBench
-  supportInterpreter := true
-
-/-- Numerical correctness harness for the TK-style decode kernel.
-
-    Generates random Q/K/V plus a torch SDPA reference for several decode
-    shapes (Llama-3 head_dim=128, Qwen3-4B head_dim=64, tail-mask case,
-    single-block case, batch>1) and asserts kernel parity within BF16
-    tolerance. Also runs a cache-vs-no-cache parity test against
-    `Cache.attendLayer`.
-
-    Usage: `lake exe RunMhaH100Decode [--regen|--gen-only]`. -/
-lean_exe RunMhaH100Decode where
-  root := `Examples.GPU.RunMhaH100Decode
-  supportInterpreter := true
-
-/-- Decode-specific perf benchmark: timed forward over the same shape
-    matrix as `RunMhaH100Decode`, reporting p50 latency vs PyTorch SDPA
-    plus a couple of long-context (kv_seq=8k) rows. Forward-only
-    (decode is inference, no backward).
-
-    Usage: `lake exe RunDecodeBench [--case all|<id>] [--backend all|tyr|sdpa]
-                                    [--warmup N] [--iters N] [--repeats N]
-                                    [--jsonl-out path]`. -/
-lean_exe RunDecodeBench where
-  root := `Examples.GPU.RunDecodeBench
-  supportInterpreter := true
-
-/-- End-to-end ThunderKittens `mha_h100` forward/backward fixture validation. -/
-lean_exe RunMhaH100 where
-  root := `Examples.GPU.RunMhaH100Exe
-  supportInterpreter := true
-
-/-- End-to-end `mha_h100` training/benchmark demo (kernel + optional torch baseline). -/
-lean_exe RunMhaH100Train where
-  root := `Examples.GPU.RunMhaH100Train
-  supportInterpreter := true
-
-/-- End-to-end GB10 MHA validation and synchronized benchmark. -/
-lean_exe RunMhaGB10 where
-  root := `Examples.GPU.RunMhaGB10Exe
-  supportInterpreter := true
-
-/-- End-to-end multi-block `mha_h100` validation (`seq=768`, `d=64`). -/
-lean_exe RunMhaH100Seq768 where
-  root := `Examples.GPU.RunMhaH100Seq768
-  supportInterpreter := true
-
-/-- End-to-end Blackwell/B200 BF16 GEMM validation. -/
-lean_exe RunB200Bf16Gemm where
-  root := `Examples.GPU.RunB200Bf16Gemm
   supportInterpreter := true
 
 /-- Focused native acceptance path while model tensor migration is in progress. -/

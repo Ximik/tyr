@@ -9,7 +9,7 @@ namespace Tyr.Modular
 open torch
 
 variable {device : Device}
-open Tyr.AD
+open Tyr.Manifolds
 
 /-- Local linearization data for one module at one forward point. -/
 structure LocalLinearization (inDim paramDim outDim : Nat) where

@@ -6,8 +6,8 @@ Tyr is a dependently-typed deep learning framework for Lean 4 that tracks tensor
 shapes in the type system and executes through a C++ FFI layer (`cc/`) on top of
 libtorch. This guide covers the path from a fresh checkout to a working build:
 installing native dependencies, compiling with Lake, setting runtime library
-paths, and running the test suites, examples, GPU parity scripts, and
-distributed NanoChat training. Read this before any of the component guides.
+paths, and running the test suites, examples, and distributed NanoChat
+training. Read this before any of the component guides.
 
 ## Architecture & main abstractions
 
@@ -15,11 +15,10 @@ Everything is driven by `lakefile.lean` (Lake DSL). The pieces that matter on
 day one:
 
 - **Lean libraries** — `Tyr` (`@[default_target]`, precompiled; everything under
-  `Tyr.*`), `TyrCodegen` (the GPU code generator; does not link `libTyrC`), `Tests`,
-  `TestsExperimental`, and `Examples`.
+  `Tyr.*`), `Tests`, and `Examples`.
 - **C++ bridge** — `target libtyr` in `lakefile.lean` wraps the Makefile
-  build: it runs the GPU kernel codegen executable and then
-  `make -C cc dylib`, producing the shared library `cc/build/libTyrC.so`
+  build: it generates the FFI header `cc/src/generated/tyr_ffi.h` and then
+  runs `make -C cc dylib`, producing the shared library `cc/build/libTyrC.so`
   (`.dylib` on macOS), which carries libtorch, OpenMP, Arrow/Parquet and soxr
   as its own dependencies. The package's `moreLinkLibs` links it into every
   executable and precompiled module library.
@@ -70,16 +69,15 @@ next `lake -R`. The CPU/CUDA choice must match the fetched wheels, and the
 build stops with the command to run if it does not.
 
 `deps/fetch.sh` runs two fetchers. `deps/fetch_git.sh` checks out the git
-repos pinned by commit in `deps/git.lock` (soxr, ThunderKittens), fetching only
+repos pinned by commit in `deps/git.lock` (soxr, gloo), fetching only
 that commit. `deps/fetch_wheels.sh` unpacks the wheels pinned with sha256 in
 `deps/wheels.lock` (torch 2.10.0, pyarrow 25.0.1) into `external/wheels`; it
 fetches the variant named on the command line; `cuda` adds
 `external/wheels/nvidia`. `deps/lock_wheels.py`
 regenerates the wheel lock after a version bump.
 
-Lake-level requirements are declared in `lakefile.lean`: `LeanTest`,
-`LeanBenchmark`, and `LeanUrdfTypeProvider`, all pinned git revisions that Lake
-fetches automatically.
+The Lake-level requirement is declared in `lakefile.lean`: `LeanTest`, a
+pinned git revision that Lake fetches automatically.
 
 ## Building
 
@@ -91,13 +89,12 @@ lake build TrainGPT TrainDiffusion TrainNanoChat FluxDemo
 
 Build configuration is a set of Lake options, given together on `lake -R`. Lake
 keeps them until the next `lake -R`, which replaces all of them, e.g.
-`lake -R -Kcuda=/usr/local/cuda -Kgpu=GB10 -Kkernels="Tyr.GPU.Kernels.MhaGB10" build`:
+`lake -R -Kcuda=/usr/local/cuda -Kgpu=GB10 build`:
 
 | Option | Effect |
 |---|---|
 | `-Kcuda=<toolkit>` | CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
 | `-Kgpu=<name>` | with `-Kcuda`, required: GPU to build kernels for, `H100`, `A100`, `B200`, `B300` or `GB10` |
-| `-Kkernels="<module> ..."` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
 
 `TYR_MAKE_JOBS` sets the parallel jobs for `make -C cc dylib` (default: CPU
 count).
@@ -121,7 +118,6 @@ Runtime variables a user actually sets:
 |---|---|---|
 | `TYR_DEVICE` | `Examples/TrainGPT.lean:92`, NanoChat scripts | `auto` / `cpu` / `cuda` / `mps` device selection (default CPU in TrainGPT, `cuda` in the torchrun scripts) |
 | `RANK` / `LOCAL_RANK` / `WORLD_SIZE` / `MASTER_ADDR` / `MASTER_PORT` | distributed trainers | set by `torchrun`; see `scripts/nanochat/ENV_INVENTORY.md` |
-| `TYR_LEAN_BIN` | `scripts/gpu/*.sh` | path to the `lean` binary when elan is not on `PATH` |
 
 ## Running tests
 
@@ -136,19 +132,10 @@ lake exe test_runner --ignored              # include tests marked ignored
 lake exe test_runner --fail-fast            # stop at first failure
 ```
 
-The experimental suite tracks in-progress modules and is expected to be less
-stable:
-
-```bash
-lake build test_runner_experimental
-.lake/build/bin/test_runner_experimental
-```
-
 Focused suites exist as separate executables:
-`TestDataLoader`, `TestDiffusion`, `TestDiffEq`, `TestDiffEqAdjoint`,
-`TestGPUDSL`, `TestGPUKernels`, `TestGPUE2E`, `TestGPUGB10E2E`,
-`TestGPUTileIR`, plus `RunRiemannianNanoGPTTests`. Build and run them the same
-way (`lake exe <name>`).
+`TestDataLoader`, `TestDiffusion`, plus
+`RunRiemannianNanoGPTTests`. Build and run them the same way
+(`lake exe <name>`).
 
 ## Running examples
 
@@ -162,38 +149,6 @@ Per-example details live in `Examples/README.md`; the common pattern is
 | `TrainNanoChat` | modded-nanogpt distributed training | flags `--data`, `--val`, `--checkpoint-dir`, `--resume`, `--debug` |
 | `NanoChatPipeline` / `NanoChatChat` | multi-stage pipeline / checkpoint chat | configured via env, see `scripts/nanochat/ENV_INVENTORY.md` |
 | `FluxDemo` | Flux Klein 4B image generation | needs weights under `weights/`; writes `output.ppm` |
-| `BranchingFlowsMoleculeTrainGenerate` | dataset-backed molecule training + generation | |
-
-## GPU parity scripts
-
-`scripts/gpu/` validates the ThunderKittens-style kernels against PyTorch. The
-entry point builds three end-to-end checks (`scripts/gpu/test_parity_suite.sh`):
-
-```bash
-./scripts/gpu/test_parity_suite.sh          # LeanTest GPU E2E + B200 BF16 GEMM + mha_h100 seq=768
-RANDOMIZED_MHA_TRIALS=10 ./scripts/gpu/test_parity_suite.sh   # add N randomized MHA trials
-```
-
-Per-kernel scripts (`test_copy_e2e.sh`, `test_rotary_e2e.sh`,
-`test_layernorm_e2e.sh`, `test_flashattn_e2e.sh`, `test_mha_h100_e2e.sh`,
-`test_mha_h100_768_e2e.sh`, `test_b200_bf16_gemm_e2e.sh`, ...) all delegate to
-`scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which
-configures Lake (`-Kcuda=$CUDA_HOME -Kgpu -Kkernels=<KernelModule>`) and builds
-`libtyr` (generating the kernel's CUDA), builds the runner, regenerates
-fixtures, and runs the parity check. Useful knobs:
-
-- `CUDA_HOME` — the CUDA toolkit (required).
-- `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` — override the `nvidia-smi`-based
-  detection (`H100`/`GB10`/`B200`/`B300`/`A100`; `HOPPER`/`BLACKWELL`/`AMPERE`);
-  the tests also read them at run time.
-- `E2E_TRIALS` — repeat the fixture-regenerate + check loop N times.
-- `TYR_GPU_VENDORED_REF_RUNNER` — optional vendored ThunderKittens reference
-  runner, invoked as `runner <suite-name> <fixture-dir>` after each suite;
-  defaults to `scripts/gpu/run_vendored_reference.sh` when executable.
-
-These scripts need a CUDA build (`deps/fetch.sh cuda` and
-`lake -R -Kcuda=<toolkit>`). On a plain macOS or CPU-only Linux checkout, skip
-this section.
 
 ## Distributed NanoChat scripts
 
@@ -288,7 +243,6 @@ framework.
 - [Data loading](data.md) — batch iterators and file formats beyond raw `.bin`
 - [FFI and build internals](ffi-and-build.md) — `cc/` reference counting and link layout
 - [Examples and testing](examples-and-testing.md) — full example catalog and test conventions
-- [GPU kernels](gpu/kernels.md) and [GPU DSL codegen](gpu/dsl-codegen.md) — the kernel side of the parity scripts
 - [Distributed training](distributed.md) — the collectives behind `TrainNanoChat`
 - [LLM models](models/llms.md) — GPT/NanoChat model definitions
 

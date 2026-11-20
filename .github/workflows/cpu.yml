@@ -103,8 +103,7 @@ jobs:
 
       - name: Build examples and FFI probe
         run: |
-          lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate mctx_bench ffi_crash_probe
-          lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
+          lake build --wfail Examples ffi_crash_probe
 
       - name: Check FFI crash reporting
         run: .github/scripts/check_ffi_crash_probe.sh
@@ -133,8 +132,6 @@ jobs:
       - name: Run required CPU test suites
         run: |
           lake env python3 scripts/test_inventory.py --run --report output/ci/suites.json
-          lake env python3 scripts/test_branching_checkpoint_resume.py
-          lake env ./.lake/build/bin/mctx_bench
 
       - name: Test two-rank Gloo collective values
         run: lake env python3 scripts/test_distributed_values.py --log-dir output/ci/distributed
@@ -177,5 +174,4 @@ jobs:
           python3 scripts/test_qwen3tts_asr_wrapper.py
           "$RUNNER_TEMP/qualification-tests/bin/python" scripts/test_qwen3tts_parity_wrapper.py
           python3 .github/scripts/test_native_build.py
-          python3 scripts/test_branching_checkpoint_snapshot.py
           bash scripts/nanochat/test_checkpoint_paths.sh

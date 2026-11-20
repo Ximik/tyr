@@ -198,22 +198,6 @@ int main() {
       ++skipped;
       std::puts("SKIP event handle calls: native CUDA runtime is present; no fake handles tested");
     }
-    bool graphStub = false;
-    test("unavailable CUDA graph begin", [&] {
-      Object graph(lean_torch_cuda_graph_capture_begin(), lean_dec);
-      require(lean_io_result_is_error(graph.get()), "CUDA graph began while CUDA unavailable");
-      graphStub = userErrorContains(graph.get(), "CUDA graphs not available in this libtorch build");
-    });
-    if (graphStub) {
-      test("CPU CUDA-graph stubs return correct carriers", [] {
-        expectError(lean_torch_cuda_graph_capture_end());
-        expectError(lean_torch_cuda_graph_replay());
-        expectSuccess(lean_torch_cuda_graph_reset());
-      });
-    } else {
-      ++skipped;
-      std::puts("SKIP CUDA graph lifecycle: CUDA-enabled graph state repair is a separate task");
-    }
   } else {
     ++skipped;
     std::puts("SKIP CPU-only CUDA/event/graph cases: CUDA available or availability check failed");

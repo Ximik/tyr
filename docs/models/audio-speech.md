@@ -317,7 +317,7 @@ Loading:
 Running:
 
 - KittenTTS: `Model.synthesizeIds m inputIds refStyle speed`, `Model.predictDurations`;
-  bundle-level `synthesizePhonemes`, `synthesizePhonemesToFile`, `predictPhonemeDurations`
+  bundle-level `synthesizePhonemes`, `synthesizePhonemesToFile`
   — returning `KittenTTSOutput` / `KittenTTSDurationPrediction`.
 - Qwen3TTS: `generateFrame`, `generateCodes`, `generateCodesWithLengths`,
   `generateFromText`, `generateFromInstructText` on `Qwen3TTSForConditionalGeneration`;

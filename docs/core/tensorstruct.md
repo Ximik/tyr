@@ -48,7 +48,7 @@ example : TensorStruct.count initialized = 2 := rfl
 
 The handler delegates each field to its own instance. Each field must therefore
 have a suitable traversal instance. `deriving Model` additionally derives
-`ToTensorStructSchema` and `TensorStructFlatten` for schema-aware AD use.
+`ToTensorStructSchema` and `TensorStructFlatten`.
 Generated schemas retain tensor metadata and distinguish parameter participation.
 
 ## Containers and traversal policies
@@ -129,10 +129,8 @@ values require a manual cast instance.
 loads exact stored shapes. Stored tensor-count, dtype, and shape mismatches are
 errors. The caller can choose whether loaded tensors become trainable parameters.
 
-Schema and flattening support lives in `Tyr.AD.TensorStructSchema`. The AD
-frontend recognizes indexed `Tensor` and `Frozen` parameters and checks declared
-dtype metadata against the generated boundaries. See [autodiff](../autodiff.md)
-and [serialization](../serialization.md).
+Schema and flattening support lives in `Tyr.TensorStruct.Schema`. See
+[serialization](../serialization.md).
 
 ## Related guides
 

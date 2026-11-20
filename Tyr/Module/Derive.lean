@@ -8,7 +8,7 @@ import Lean
 import Tyr.Torch
 import Tyr.TensorStruct
 import Tyr.TensorStruct.DeriveCast
-import Tyr.AD.TensorStructSchema
+import Tyr.TensorStruct.Schema
 
 open Lean Elab Command Term Meta
 

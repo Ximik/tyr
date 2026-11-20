@@ -1,6 +1,5 @@
 import LeanTest
 import Tyr.Typed.Neural
-import Tyr.Model.BranchingFlows.TypedOps
 
 namespace Tests.OperationContracts
 
@@ -39,9 +38,6 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (y : Tensor ⟨#[2], .Float32, .CP
     (condition : Tensor ⟨#[2], .Bool, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   Tensor.whereSelect condition x y
 
-example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32, .CPU⟩) :
-    Tensor ⟨#[2], .Float32, .CPU⟩ := branching.mulTensorScalar x scalar
-
 @[test] def testWherePromotesOperands : IO Unit := do
   let x := (Tensor.fromInt64Array #[1, 2])
   let y := (Tensor.fromFloatArray #[9.5, 8.5])
@@ -49,13 +45,6 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
   let result : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.whereSelect condition x y
   LeanTest.assertEqual result.raw.dtype .Float32
   LeanTest.assertEqual (← result.toFloatArray) #[9.5, 8.5]
-
-@[test] def testTensorScalarPromotesValues : IO Unit := do
-  let x := Tensor.fromInt64Array #[2, 4]
-  let scalar := (Tensor.fromFloatArray #[0.5]).reshape #[]
-  let result := branching.mulTensorScalar x scalar
-  LeanTest.assertEqual result.raw.dtype .Float32
-  LeanTest.assertEqual (← result.toFloatArray) #[1, 2]
 
 example (_empty : Tensor ⟨#[0], .Float32, .CPU⟩) (_complex : Tensor ⟨#[2], .Complex64, .CPU⟩)
     (_values : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by

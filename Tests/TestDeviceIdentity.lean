@@ -32,7 +32,7 @@ example {device : Device} (model : Linear 2 3 .Float32 device)
     Tensor ⟨#[1, 3], .Float32, device⟩ := model.forward2d input
 
 example (device : Device) :
-    Tyr.Modular.MatrixManifoldCarrier (fun m n => Tyr.AD.Stiefel m n .Float32 device) device :=
+    Tyr.Modular.MatrixManifoldCarrier (fun m n => Tyr.Manifolds.Stiefel m n .Float32 device) device :=
   inferInstance
 
 example (device : Device) :

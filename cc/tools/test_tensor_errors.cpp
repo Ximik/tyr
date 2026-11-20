@@ -30,16 +30,6 @@ void values(lean_object* tensor, size_t count, double expected) {
   for (size_t i = 0; i < count; ++i)
     require(lean_unbox_float(lean_array_get_core(array, i)) == expected, "Unexpected output value");
 }
-Object flash(lean_object* q, lean_object* k, lean_object* v,
-             lean_object* mask = lean_box(0), lean_object* scale = lean_box(0)) {
-  return Object(lean_torch_tyr_flash_attn_4d(
-    q, k, v, mask, 0, scale, 0), lean_dec);
-}
-Object flashIO(lean_object* q, lean_object* k, lean_object* v, double dropout,
-               lean_object* mask = lean_box(0), lean_object* scale = lean_box(0)) {
-  return Object(lean_torch_tyr_flash_attn_4d_io(
-    q, k, v, mask, dropout, 0, scale, 0), lean_dec);
-}
 void crossEntropy(bool unreduced) {
   Object logits(lean_torch_full(shape({2, 2}), 0, 0, lean_box(1)), lean_dec);
   Object labels(lean_torch_full_int(shape({2}), 0), lean_dec);
@@ -75,38 +65,6 @@ void tryIndexSelectError(uint64_t id) {
           "Index selection changed borrowed references");
 }
 
-void flashSuccess() {
-  auto q = full({1, 1, 2, 2}), v = full({1, 1, 2, 2}, 7);
-  auto result = flash(q.get(), q.get(), v.get());
-  values(result.get(), 4, 7);
-  require(q->m_rc == 1 && v->m_rc == 1, "FlashAttention changed borrowed references");
-}
-void flashDropout() {
-  auto q = full({1, 1, 2, 2});
-  for (double dropout : {-0.5, 1.5, std::numeric_limits<double>::quiet_NaN()}) {
-    auto result = flashIO(q.get(), q.get(), q.get(), dropout);
-    require(lean_io_result_is_error(result.get()), "Invalid FlashAttention dropout did not return IO.error");
-  }
-  require(q->m_rc == 1, "FlashAttention IO changed borrowed references");
-  auto success = flashIO(q.get(), q.get(), q.get(), 1.0);
-  require(lean_io_result_is_ok(success.get()), "Valid dropout p=1 failed after errors");
-  values(lean_io_result_get_value(success.get()), 4, 0);
-}
-void flashOptionCleanup(bool invalidCarrier, bool effectful = false) {
-  auto q = full({1, 1, 2, 2}), maskTensor = full({1, 3});
-  Object invalid(lean_mk_string("not a tensor"), lean_dec);
-  Object mask(some(retain(maskTensor.get())), lean_dec), scale(some(lean_box_float(0.5)), lean_dec);
-  auto* carrier = invalidCarrier ? invalid.get() : q.get();
-  if (effectful) {
-    auto result = flashIO(carrier, q.get(), q.get(), 0, retain(mask.get()), retain(scale.get()));
-    require(lean_io_result_is_error(result.get()), "Expected IO.error for invalid FlashAttention inputs");
-  } else {
-    expectThrow([&] { return lean_torch_tyr_flash_attn_4d(
-      carrier, q.get(), q.get(), retain(mask.get()), 0, retain(scale.get()), 0); });
-  }
-  require(mask->m_rc == 1 && scale->m_rc == 1, "FlashAttention leaked owned options on failure");
-  require(q->m_rc == 1 && maskTensor->m_rc == 2, "FlashAttention changed borrowed tensor ownership");
-}
 void randintError(bool invalidDevice) {
   Object dims(shape({4}), lean_dec);
   auto* cuda = lean_alloc_ctor(0, 1, 0);
@@ -412,16 +370,10 @@ int main() {
       std::cout << "FAIL " << label << ": " << error.what() << '\n';
     }
   };
-  run("flash/success-carrier", flashSuccess);
   run("indexSelect/success", [] { indexSelect(false); });
   run("indexSelect/empty", [] { indexSelect(true); });
   run("try/indexSelect-negative-error", [] { tryIndexSelectError(UINT64_MAX); });
   run("try/indexSelect-bounds-error", [] { tryIndexSelectError(2); });
-  run("flash/dropout-error", flashDropout);
-  run("flash/options-early-error", [] { flashOptionCleanup(true); });
-  run("flash/options-dispatch-error", [] { flashOptionCleanup(false); });
-  run("flash/io-options-early-error", [] { flashOptionCleanup(true, true); });
-  run("flash/io-options-dispatch-error", [] { flashOptionCleanup(false, true); });
   run("randint/bounds-error", [] { randintError(false); });
   run("randint/device-error", [] { randintError(true); });
   run("randint/signed-success", randintSigned);
@@ -457,7 +409,6 @@ int main() {
   run("sub-success", [] { binary(lean_torch_tensor_sub, 4); });
   run("mul-success", [] { binary(lean_torch_tensor_mul, 12); });
   run("div-success", [] { binary(lean_torch_div, 3); });
-  run("mulTensorScalar-success", [] { binary(lean_torch_mul_tensor_scalar, 12); });
   run("addScalar-success", [] { scalar(lean_torch_add_scalar, 8); });
   run("subScalar-success", [] { scalar(lean_torch_sub_scalar, 4); });
   run("mulScalar-success", [] { scalar(lean_torch_mul_scalar, 12); });

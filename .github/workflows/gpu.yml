@@ -1,13 +1,12 @@
 name: GPU
 
-# Builds the CUDA kernels and runs GPU qualification on the self-hosted runner.
+# Builds with CUDA and runs GPU qualification on the self-hosted runner.
 # See docs/ci-and-qualification.md.
 
 on:
   push:
     branches: [main]
     paths:
-      - 'Tyr/GPU/**'
       - 'Tyr/Torch.lean'
       - 'Tyr/Basic.lean'
       - 'Tyr/Basic/**'
@@ -15,8 +14,6 @@ on:
       - 'Tyr/Typed/**'
       - 'Tyr/RawTensor.lean'
       - 'Tyr/RawTensor/**'
-      - 'Tests/*GPU*.lean'
-      - 'Examples/GPU/**'
       - 'Examples/NanoChat/Generator/KVCache.lean'
       - 'Tyr/Inference/**'
       - 'Tyr/Model/Laguna/**'
@@ -25,11 +22,9 @@ on:
       - '.github/scripts/readiness.py'
       - 'deps/**'
       - 'scripts/test_native_attention.sh'
-      - 'scripts/gpu/**'
       - 'cc/include/**'
       - 'cc/tools/**'
       - 'cc/src/tyr*'
-      - 'cc/src/tk_*'
       - 'cc/src/generated/**'
       - 'cc/Makefile'
       - 'lakefile.lean'

@@ -8,7 +8,7 @@ wheels (`deps/fetch_wheels.sh`) and the pinned Lean toolchain can be cached
 in either mode.
 
 Pull requests restore compatible `.lake/packages`, `.lake/build`, `cc/build`
-and generated CUDA sources. `.github/scripts/cache_key.py` separates caches by OS,
+and `cc/src/generated`. `.github/scripts/cache_key.py` separates caches by OS,
 architecture, runner image, workspace path, compiler/SDK, Lean version,
 dependency manifests (including `deps/git.lock` and `deps/wheels.lock`),
 LibTorch configuration, and explicit native/GPU build flags. The exact build
@@ -100,21 +100,11 @@ minutes for unrelated processes to finish and recording the wait separately
 from execution time. It never interrupts such workloads. Other CUDA services
 still need the shared lock to guarantee exclusion throughout a test command.
 
-The GPU phase runs the strict family-specific LeanTest suite, regenerated decode
-and cache parity, the standalone native attention value/gradient tests on CUDA,
+The GPU phase runs the standalone native attention value/gradient tests on CUDA
 and Laguna model/cache checks with `TYR_LAGUNA_CACHE_BENCH=1`. CUDA benchmark
 markers are required; CPU-only success cannot qualify Laguna. Timing output
 compares cache capacities 128 and 8192 without imposing a hardware-independent
 speed threshold.
-
-`gpu-plan.json` and the GPU report record the architecture-specific codegen
-inputs and production decode route. `RunMhaH100Decode` runs on every configured
-GPU through the production dispatcher: H100 uses its custom decode kernel for
-eligible shapes; GB10, B200 and B300 currently exercise the SDPA fallback.
-The Blackwell plans do not compile the unused Hopper decode module. In
-particular, GB10 cannot compile its WGMMA/tcgen05 instructions. A successful
-Blackwell decode gate therefore establishes fallback/cache parity, not custom
-Hopper-kernel qualification.
 
 The real-model phase uses immutable inputs from
 `scripts/qualification/fixtures.json`:
@@ -160,6 +150,6 @@ flock --timeout 3600 "$TYR_QUALIFICATION_ROOT/gpu.lock" bash scripts/qualificati
 `output/qualification/` contains the source commit, runtime/package identity,
 fixture manifest hash, individual logs and executed/skipped/failed counts. The
 summary fails for missing reports, runtime-only preflights, zero executed tests,
-skips or failures. GPU counts are actual LeanTest cases; other entries count
-completed qualification gates, not individual tensors or model tokens. A fixture
+skips or failures. Counts are completed qualification gates, not individual
+tensors or model tokens. A fixture
 download or successful build is never reported as model/GPU qualification.

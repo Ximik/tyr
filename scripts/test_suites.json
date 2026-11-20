@@ -1,7 +1,6 @@
 {
   "required": {
     "test_runner": ["--fail-fast"],
-    "test_runner_experimental": [],
     "LagunaConfigTest": [],
     "LagunaTokenizerTest": [],
     "LagunaNvFp4Test": [],
@@ -11,8 +10,6 @@
     "LagunaRopeTest": []
   },
   "optional": {
-    "TestGPUE2E": "CUDA parity; strict runs on Hopper in gpu.yml",
-    "TestGPUGB10E2E": "CUDA parity; strict runs on Blackwell in gpu.yml",
     "LagunaFusedTest": "Requires a CUDA GPU and compiled fused NVFP4 kernels",
     "ffi_crash_probe": "Intentional process crash; checked by a dedicated step in cpu.yml"
   }

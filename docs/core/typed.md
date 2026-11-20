@@ -362,9 +362,9 @@ checks arithmetic result dtypes separately from unavailable kernels.
 
 ## Attention and dropout
 
-Attention separates pure inference from stochastic execution. `Tensor.attention`,
-the GQA/masked/window variants, and `Tensor.flashAttention` accept no dropout
-probability and use zero dropout. They require a real floating dtype, and the
+Attention separates pure inference from stochastic execution. `Tensor.attention`
+and the GQA/masked/window variants accept no dropout probability and use zero
+dropout. They require a real floating dtype, and the
 grouped variants take an `AttentionHeads` proof: the query heads equal the K/V
 heads or, with GQA enabled, are a whole multiple of them. Literal head counts
 discharge it, and a divisibility fact gives it through `AttentionHeads.ofDvd`.

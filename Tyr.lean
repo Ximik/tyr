@@ -8,14 +8,7 @@ import Tyr.TensorStruct
 import Tyr.TensorStruct.Cast
 import Tyr.TensorStruct.DeriveCast
 import Tyr.TensorStruct.Indexed
-import Tyr.Mctx
-import Tyr.MctxDag
-
--- AutoGrad (JAX-style AD on IR)
-import Tyr.AD
-
--- Event-skeleton representation for hybrid/stochastic differentiation
-import Tyr.EventSkeleton
+import Tyr.TensorStruct.Schema
 
 -- Neural network modules
 import Tyr.Module
@@ -61,10 +54,6 @@ import Tyr.Train.RunLedger
 import Tyr.Train.ChatSFT
 import Tyr.RL.GRPO
 
--- GPU kernel abstraction
-import Tyr.GPU
-import Tyr.GPU.AD
-import Tyr.GPU.AutoGrad
 
 /-!
 # Tyr
@@ -86,10 +75,6 @@ This root module re-exports the core, general-purpose surface area:
   with per-leaf dtype/device specifications and no allocated destination template.
 - `Tyr.TensorStruct.Indexed`: `Select`, a value whose type is chosen by a `Bool` index, and
   `IndexedList`, a sequence whose element types depend on the position.
-- `Tyr.Mctx`: Monte Carlo tree search infrastructure.
-- `Tyr.MctxDag`: DAG-oriented counterpart to `Tyr.Mctx` with sharing semantics.
-- `Tyr.AutoGrad`: JAX-style automatic differentiation over Tyr IR.
-- `Tyr.EventSkeleton`: event-skeleton representation for hybrid/stochastic differentiation.
 - `Tyr.Module`: neural network module abstractions and layers.
 - `Tyr.Optim` (+ scheduler/dist variants): optimizers and learning-rate scheduling.
 - `Tyr.Distributed` and `Tyr.Sharding`: distributed training and partitioning utilities.
@@ -97,7 +82,6 @@ This root module re-exports the core, general-purpose surface area:
 - `Tyr.Text`: streaming text consensus and voice-activity (VAD) providers.
 - `Tyr.Checkpoint`: model/optimizer checkpoint save and restore.
 - `Tyr.Pipeline`: training/inference orchestration helpers.
-- `Tyr.GPU` (+ `Tyr.GPU.AD`, `Tyr.GPU.AutoGrad`): GPU kernel abstractions and AD support.
 
 ## Example
 

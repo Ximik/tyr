@@ -298,39 +298,6 @@ def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {de
     q.raw k.raw v.raw effective causal gqa
   pure (Tensor.ofRaw! raw)
 
-def flashAttention! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
-    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
-    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
-    (mask : Option (SomeDTypeTensor #[batch, kvSeq] dev) := none)
-    (causal : Bool := false) (scale : Option Float := none) :
-    Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  Tensor.ofRaw! (RawTensor.flashAttention!
-    q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) causal scale gqa)
-
-/-- Zero-dropout FlashAttention. -/
-def flashAttention {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
-    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
-    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
-    (mask : Option (SomeDTypeTensor #[batch, kvSeq] dev) := none)
-    (causal : Bool := false) (scale : Option Float := none)
-    (_heads : AttentionHeads heads kvHeads gqa := by attention_heads) :
-    Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  flashAttention! q k v gqa mask causal scale
-
-/-- FlashAttention with explicit training-mode dropout through native IO.
-Evaluation uses zero dropout, independently of the configured probability. -/
-def flashAttentionIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
-    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
-    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
-    (dropout : Float) (training : Bool) (gqa : Bool := false)
-    (mask : Option (SomeDTypeTensor #[batch, kvSeq] dev) := none)
-    (causal : Bool := false) (scale : Option Float := none) :
-    IO (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
-  let effective ← attentionCheckIO "flashAttentionIO" (attentionDropout? dropout training)
-  let raw ← RawTensor.flashAttentionIO
-    q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) effective causal scale gqa
-  pure (Tensor.ofRaw! raw)
-
 def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim start : Nat)
     (source : Tensor ⟨sourceShape, d, dev⟩)

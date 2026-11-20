@@ -1,7 +1,6 @@
 import LeanTest
 import Tyr.Module.Derive
 import Tyr.Optim
-import Tyr.DiffEq.Typed
 
 namespace Tests.TensorStructConstraints
 
@@ -37,7 +36,6 @@ example : Optim.GradientTransformation (Parameters .Float32 (device := .CPU)) Op
   Optim.sgd 0.1
 example : Optim.GradientTransformation (Parameters .Float64 (device := .CPU))
     (Optim.AdamWState (Parameters .Float64 (device := .CPU))) := Optim.adamw
-example : torch.DiffEq.DiffEqSpace (Parameters .Float32 (device := .CPU)) := inferInstance
 
 -- A structural traversal is insufficient to justify floating arithmetic.
 example : True := by
@@ -54,8 +52,6 @@ example : True := by
     have _ := Optim.sgd (α := Parameters .Int64 (device := .CPU)) 0.1
   fail_if_success
     have _ := Optim.adamw (α := Parameters .Int64 (device := .CPU))
-  fail_if_success
-    have _ : torch.DiffEq.DiffEqSpace (Parameters .Int64 (device := .CPU)) := inferInstance
   trivial
 
 example {dtype : DType} {device : Device} [DType.RealFloating dtype] :

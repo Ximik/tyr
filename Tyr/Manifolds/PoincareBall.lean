@@ -1,6 +1,6 @@
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -62,4 +62,4 @@ instance poincareBallManifold (n : Nat) : DifferentiableManifold (PoincareBall n
   exp x v := PoincareBall.project n (Tensor.add x.coords v.vec)
   retract x v := PoincareBall.project n (Tensor.add x.coords v.vec)
 
-end Tyr.AD
+end Tyr.Manifolds

@@ -366,17 +366,17 @@ private def stepOnManifoldFamily {m n : Nat} {d : DType} {dev : Device} [DType.R
   match family with
   | .stiefel =>
     if h : n ≤ m then
-      let x : Tyr.AD.Stiefel m n d dev := ⟨param, h⟩
-      let g := Tyr.AD.StiefelTangent.project x ambientGrad
-      pure (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix
+      let x : Tyr.Manifolds.Stiefel m n d dev := ⟨param, h⟩
+      let g := Tyr.Manifolds.StiefelTangent.project x ambientGrad
+      pure (Tyr.Manifolds.DualMapGeometry.dualMapStep x g lr).matrix
     else
       -- Wide matrices have no column-orthonormal frame; step the transposed
       -- (row-orthonormal) Stiefel representative instead, matching Muon's
       -- usual tall/wide handling.
       let h' : m ≤ n := Nat.le_of_lt (Nat.lt_of_not_le h)
-      let x : Tyr.AD.Stiefel n m d dev := ⟨Tensor.transpose2d param, h'⟩
-      let g := Tyr.AD.StiefelTangent.project x (Tensor.transpose2d ambientGrad)
-      pure (Tensor.transpose2d (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix)
+      let x : Tyr.Manifolds.Stiefel n m d dev := ⟨Tensor.transpose2d param, h'⟩
+      let g := Tyr.Manifolds.StiefelTangent.project x (Tensor.transpose2d ambientGrad)
+      pure (Tensor.transpose2d (Tyr.Manifolds.DualMapGeometry.dualMapStep x g lr).matrix)
   | .orthogonal =>
     let support ← d.acquireConstantSupport dev
     let _ := support.down
@@ -384,22 +384,22 @@ private def stepOnManifoldFamily {m n : Nat} {d : DType} {dev : Device} [DType.R
     if h : m = n then
       let pSquare : Tensor ⟨#[n, n], d, dev⟩ := by simpa [h] using param
       let gSquare : Tensor ⟨#[n, n], d, dev⟩ := by simpa [h] using ambientGrad
-      let x : Tyr.AD.Orthogonal n d dev := ⟨pSquare⟩
-      let tg := Tyr.AD.OrthogonalTangent.fromAmbient x gSquare
-      let x' := Tyr.AD.DualMapGeometry.dualMapStep x tg lr
+      let x : Tyr.Manifolds.Orthogonal n d dev := ⟨pSquare⟩
+      let tg := Tyr.Manifolds.OrthogonalTangent.fromAmbient x gSquare
+      let x' := Tyr.Manifolds.DualMapGeometry.dualMapStep x tg lr
       pure (by simpa [h] using x'.matrix : Tensor ⟨#[m, n], d, dev⟩)
     else
       throw <| IO.userError s!"MatrixManifoldFamily.orthogonal requires square matrices, got {m}x{n}"
   | .grassmann =>
     if h : n ≤ m then
-      let x : Tyr.AD.Grassmann m n d dev := ⟨param, h⟩
-      let g := Tyr.AD.GrassmannTangent.project x ambientGrad
-      pure (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix
+      let x : Tyr.Manifolds.Grassmann m n d dev := ⟨param, h⟩
+      let g := Tyr.Manifolds.GrassmannTangent.project x ambientGrad
+      pure (Tyr.Manifolds.DualMapGeometry.dualMapStep x g lr).matrix
     else
       let h' : m ≤ n := Nat.le_of_lt (Nat.lt_of_not_le h)
-      let x : Tyr.AD.Grassmann n m d dev := ⟨Tensor.transpose2d param, h'⟩
-      let g := Tyr.AD.GrassmannTangent.project x (Tensor.transpose2d ambientGrad)
-      pure (Tensor.transpose2d (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix)
+      let x : Tyr.Manifolds.Grassmann n m d dev := ⟨Tensor.transpose2d param, h'⟩
+      let g := Tyr.Manifolds.GrassmannTangent.project x (Tensor.transpose2d ambientGrad)
+      pure (Tensor.transpose2d (Tyr.Manifolds.DualMapGeometry.dualMapStep x g lr).matrix)
 
 /--
 Single matrix step for the generic manifold path using `DualMapGeometry`.

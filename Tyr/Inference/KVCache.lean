@@ -21,13 +21,6 @@
   preserves its values; callers thread the returned cache forward to observe
   new tokens. Native copy-on-write can reuse storage when no aliases remain.
 
-  The attention call goes through `Tensor.flashAttention`, which the C++
-  `tyr::flash_attn` operator dispatches to the native TK decode kernel
-  (`tkMhaH100DecodeFwd`) when shape-eligible (BF16, qSeq=1,
-  head_dim ∈ {64, 128, 256}, GQA-valid) and to PyTorch SDPA otherwise. The
-  kernel handles non-multiple-of-64 `kvSeq` via a runtime tail mask, so the
-  cache view never has to be padded.
-
   This module is the canonical home for the cache abstraction. NanoChat,
   Qwen, and any other generation-loop code should import from here. (The
   earlier copy at `Examples/NanoChat/Generator/KVCache.lean` is a thin
@@ -67,7 +60,7 @@ structure Cache (numLayers batch maxSeqLen numKvHeads headDim : Nat)
 /-- Initialize empty KV cache for given dimensions.
     `device` defaults to CPU; pass a device acquired with `Device.cuda n` so
     the cache buffers live on the same device as the Q/K/V tensors that will be
-    appended into them — `tyrFlashAttn4d` rejects cross-device inputs. -/
+    appended into them — attention rejects cross-device inputs. -/
 def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : Nat)
     (device : Device := Device.CPU)
     : IO (Cache numLayers batch maxSeqLen numKvHeads headDim .BFloat16 device) := do
@@ -208,13 +201,10 @@ def Cache.appendLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDi
     1. Write `newK`, `newV` (one token per batch row) into layer `layerIdx`'s
        cache at position `cache.currentLen`.
     2. Slice the layer's cache to the resulting valid length (`currentLen + 1`).
-    3. Call `tyrFlashAttn4d` on `(newQ, K_view, V_view)`.
+    3. Run attention on `(newQ, K_view, V_view)`.
 
     Returns the updated full cache and the attention output for the new query
-    token. Retained input caches remain unchanged. The C++ `tyr::flash_attn`
-    dispatcher routes to `tkMhaH100DecodeFwd` when the shape is
-    decode-eligible (head_dim ∈ {64, 128, 256}, qSeq==1, BF16, GQA-valid),
-    and falls back to PyTorch SDPA otherwise.
+    token. Retained input caches remain unchanged.
 
     Rejects zero head counts, layer indices, capacity and (at runtime, for
     dynamically-graded specs) query device/dtype mismatches before writing;
@@ -242,7 +232,7 @@ def Cache.attendLayer
   let some updatedLayer := cache'.layers[layerIdx]?
     | throw <| IO.userError "KV cache layer index out of range after append"
   let (kView, vView) ← updatedLayer.attentionView validLen
-  let output := Tensor.flashAttention (Tensor.detach newQ) kView vView enableGqa (_heads := _heads)
+  let output := Tensor.attentionGQAQKV (Tensor.detach newQ) kView vView false enableGqa (_heads := _heads)
   return (cache', output)
 
 /-- TensorStruct instance for LayerCache -/

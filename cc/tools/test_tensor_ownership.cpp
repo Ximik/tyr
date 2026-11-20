@@ -167,21 +167,6 @@ void testNativeFailureCleanup(lean_object* tensor) {
                                                 weight.transfer(), bias.transfer(), 1e-5); });
   weight.consumed("groupNorm early failure weight");
   bias.consumed("groupNorm early failure bias");
-
-  for (bool effectful : {false, true}) {
-    ObservedArg mask(some(retain(tensor))), scale(some(lean_box_float(0.5)));
-    if (effectful) {
-      auto* result = lean_torch_tyr_flash_attn_4d_io(
-        invalid.get(), tensor, tensor, mask.transfer(), 0, 0, scale.transfer(), 0);
-      require(lean_io_result_is_error(result), "Expected FlashAttention IO.error");
-      lean_dec(result);
-    } else {
-      expectThrow([&] { return lean_torch_tyr_flash_attn_4d(
-        invalid.get(), tensor, tensor, mask.transfer(), 0, scale.transfer(), 0); });
-    }
-    mask.consumed("flash attention early failure mask");
-    scale.consumed("flash attention early failure scale");
-  }
 }
 
 void testModelArguments(lean_object* tensor) {
@@ -196,11 +181,6 @@ void testModelArguments(lean_object* tensor) {
   ObservedArg size(shape({6, 6})), mode(lean_mk_string("nearest"));
   lean_dec(lean_torch_interpolate(input.get(), size.transfer(), mode.transfer(), 0));
   size.consumed("interpolate size"); mode.consumed("interpolate mode");
-
-  ObservedArg optionalWeight(some(retain(tensor))), reduction(lean_mk_string("mean"));
-  lean_dec(lean_torch_binary_cross_entropy(tensor, tensor,
-    optionalWeight.transfer(), reduction.transfer()));
-  optionalWeight.consumed("BCE optional weight"); reduction.consumed("BCE reduction");
 }
 } // namespace
 

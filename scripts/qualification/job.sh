@@ -34,24 +34,17 @@ fi
 export TYR_QUALIFICATION_PYTHON="$python_bin"
 export GPU=${GPU:-GB10}
 export TYR_GPU_TARGET="$GPU"
-python3 scripts/qualification/gpu_plan.py "$GPU" > output/qualification/gpu-plan.json
-TYR_GPU_FAMILY=$(python3 scripts/qualification/gpu_plan.py "$GPU" --field family)
-export TYR_GPU_FAMILY
-gpu_runner=$(python3 scripts/qualification/gpu_plan.py "$GPU" --field runner)
-mapfile -t modules < <(python3 scripts/qualification/gpu_plan.py "$GPU" --field modules)
 cuda_libraries=$(python3 scripts/qualification/cuda_runtime.py --libtorch external/wheels/torch --cuda-home "$CUDA_HOME" --previous="${LD_LIBRARY_PATH:-}")
 export LD_LIBRARY_PATH="$cuda_libraries"
 
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --check-runtime --report output/qualification/runtime.json
 # Configure Lake for this CUDA build (kept for later `lake` calls).
-lake -R -Kcuda="$CUDA_HOME" -Kgpu="$GPU" -Kkernels="${modules[*]}" \
-  build "${modules[@]}"
-targets=("$gpu_runner" RunMhaH100Decode LagunaModelTest)
+targets=(LagunaModelTest)
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then
   targets+=(Qwen3TTSEndToEnd Qwen3ASRTranscribe)
 fi
-lake build "${targets[@]}"
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$GPU" build "${targets[@]}"
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --report output/qualification/gpu.json
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then

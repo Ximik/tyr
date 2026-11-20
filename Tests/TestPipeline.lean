@@ -1,17 +1,14 @@
 /-
   Tests/TestPipeline.lean
 
-  Tests for Pipeline orchestration (Tyr/Pipeline.lean) and
-  Data/Pipeline scheduling (Tyr/Data/Pipeline.lean).
+  Tests for Pipeline orchestration (Tyr/Pipeline.lean).
 -/
 import Tyr.Pipeline
-import Tyr.Data.Pipeline
 import LeanTest
 
 namespace Tests.Pipeline
 
 open torch.Pipeline
-open torch.Data.Pipeline
 
 /-! ## Float Assertion Helpers -/
 
@@ -161,61 +158,5 @@ def testReportSectionMarkdown : IO Unit := do
 
   let metrics := ReportSection.metrics "loss" [("train", "0.5")]
   LeanTest.assertTrue (metrics.toMarkdown.containsSubstr "train: 0.5") "metrics format"
-
-/-! ## Data/Pipeline LR Scheduling Tests -/
-
-@[test]
-def testBatchSizeScale : IO Unit := do
-  -- Same batch size = scale of 1.0
-  assertFloatEq (batchSizeScale 524288 524288) 1.0 (msg := "same batch size")
-  -- Smaller batch = smaller scale; sqrt(0.5) ≈ 0.707
-  assertFloatEq (batchSizeScale 262144 524288) 0.7071 (epsilon := 0.01) "sqrt scaling"
-  -- Larger batch = larger scale; sqrt(2) ≈ 1.414
-  assertFloatEq (batchSizeScale 1048576 524288) 1.414 (epsilon := 0.01) "sqrt scaling"
-
-@[test]
-def testWeightDecayScale : IO Unit := do
-  -- Reference depth (12) should give scale of 1.0
-  assertFloatEq (weightDecayScale 12) 1.0 (msg := "reference depth")
-  -- Deeper model = smaller weight decay
-  assertFloatLt (weightDecayScale 24) (weightDecayScale 12) "deeper model smaller WD"
-
-@[test]
-def testStageLRMultiplierPlateau : IO Unit := do
-  -- In plateau phase (no warmup, before warmdown), multiplier should be 1.0
-  let cfg : StageLRConfig := {
-    warmupRatio := 0.0
-    warmdownRatio := 0.4
-    initLrFrac := 1.0
-    minLrFrac := 0.0
-  }
-  -- At step 100 of 1000 total (10%), in plateau phase
-  assertFloatEq (getStageLRMultiplier cfg 100 1000) 1.0 (msg := "plateau phase")
-
-@[test]
-def testStageLRMultiplierWarmdown : IO Unit := do
-  let cfg : StageLRConfig := {
-    warmupRatio := 0.0
-    warmdownRatio := 0.4
-    initLrFrac := 1.0
-    minLrFrac := 0.1
-  }
-  -- At step 900 of 1000 (90%), should be decreasing
-  let mult := getStageLRMultiplier cfg 900 1000
-  assertFloatLt mult 1.0 "warmdown decreasing"
-  -- At final step, should be near minLrFrac
-  assertFloatInRange (getStageLRMultiplier cfg 999 1000) 0.1 0.2 "near minLrFrac at end"
-
-@[test]
-def testPretrainingLRConfig : IO Unit := do
-  let cfg := pretrainingLRConfig
-  assertFloatEq cfg.embeddingLr 0.3 (msg := "embedding LR")
-  assertFloatEq cfg.matrixLr 0.02 (msg := "matrix LR")
-
-@[test]
-def testSFTLRConfig : IO Unit := do
-  let cfg := sftLRConfig
-  assertFloatEq cfg.initLrFrac 0.02 (msg := "start at 2%")
-  assertFloatEq cfg.warmdownRatio 1.0 (msg := "linear decay throughout")
 
 end Tests.Pipeline

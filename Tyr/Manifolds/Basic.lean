@@ -6,7 +6,7 @@
 -/
 import Tyr.TensorStruct
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch (Static TensorStruct)
 
@@ -142,4 +142,4 @@ end DifferentiableManifold
 -- Backward compatibility alias
 abbrev Differentiable := DifferentiableManifold
 
-end Tyr.AD
+end Tyr.Manifolds

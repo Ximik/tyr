@@ -4,7 +4,7 @@ import Tyr.Manifolds.Orthogonal
 import Tyr.Manifolds.Grassmann
 import Tyr.Manifolds.Hyperbolic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -56,4 +56,4 @@ instance hyperbolicEmbedded [DType.ConstantSupported d dev] (n : Nat) : Embedded
   toAmbient := fun x => x.coords
   projectAmbientTangent := fun {x} Z => HyperbolicTangent.project x Z
 
-end Tyr.AD
+end Tyr.Manifolds

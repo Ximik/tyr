@@ -6,7 +6,7 @@
 -/
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -147,4 +147,4 @@ instance orthogonalManifold [DType.ConstantSupported d dev] (n : Nat) : Differen
     let (Q', _R) := Tensor.qrComplete newQ
     ⟨Q'⟩
 
-end Tyr.AD
+end Tyr.Manifolds

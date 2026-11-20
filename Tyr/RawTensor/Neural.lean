@@ -32,12 +32,6 @@ namespace torch.RawTensor
     (q k v : @& RawTensor) (causal gqa : Bool) : RawTensor
 @[extern "lean_torch_sdpa_gqa_qkv_io"] opaque attentionGQAQKVIO
     (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
-@[extern "lean_torch_tyr_flash_attn_4d"] opaque flashAttention!
-    (q k v : @& RawTensor) (mask : Option RawTensor)
-    (causal : Bool) (scale : Option Float) (gqa : Bool) : RawTensor
-@[extern "lean_torch_tyr_flash_attn_4d_io"] opaque flashAttentionIO
-    (q k v : @& RawTensor) (mask : Option RawTensor) (dropout : Float)
-    (causal : Bool) (scale : Option Float) (gqa : Bool) : IO RawTensor
 @[extern "lean_torch_slice_scatter_along_dim"] opaque sliceScatter
     (input : RawTensor) (dim start : @& Nat) (source : @& RawTensor) : RawTensor
 @[extern "lean_torch_apply_rotary_emb"] opaque applyRotary

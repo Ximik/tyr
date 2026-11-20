@@ -9,7 +9,7 @@ namespace Tyr.Modular
 open torch
 
 variable {device : Device}
-open Tyr.AD
+open Tyr.Manifolds
 
 /-- Ambient matrix type for manifold carriers: Float32 weights with
     explicit placement, matching the carrier instances' manifold types. -/

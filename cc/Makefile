@@ -18,8 +18,6 @@ TORCHDIR=../external/wheels/torch
 TORCH_INC_FLAGS=-isystem $(TORCHDIR)/include -isystem $(TORCHDIR)/include/torch/csrc/api/include -isystem $(TORCHDIR)/include/TH -isystem $(TORCHDIR)/include/THC
 TORCH_LIBPATH=$(TORCHDIR)/lib
 TORCH_CUDA_VENDOR_LIBPATH=../external/wheels/nvidia/cu13/lib
-TKDIR=../external/git/ThunderKittens
-TK_INC_FLAGS=-I$(TKDIR)/include -I$(TKDIR)/prototype
 GLOO_DIR ?= ../external/git/gloo
 SOXR_DIR=../external/git/soxr
 SOXR_BUILD_DIR=build/soxr
@@ -67,7 +65,6 @@ endif
 CUDA_INC_FLAGS :=
 HAS_CUDA_TOOLKIT := 0
 CUDA_LIB_FLAGS :=
-CUDA_DRIVER_LINK_FLAGS :=
 ifeq ($(HAS_NVCC),1)
 ifneq ($(wildcard $(CUDA_HOME)/include/cuda_runtime.h),)
 CUDA_INC_FLAGS += -I$(CUDA_HOME)/include
@@ -89,12 +86,7 @@ endif
 ifeq ($(HAS_CUDA_TOOLKIT),1)
 CUDA_LIB_FLAGS += $(CUBLASLT_LINK_FLAG)
 endif
-# tk_vendor_mha_h100.cu calls the CUDA driver API (cuTensorMapEncodeTiled).
-ifneq ($(wildcard $(CUDA_HOME)/lib64/stubs/libcuda.so),)
-CUDA_DRIVER_LINK_FLAGS := -L$(CUDA_HOME)/lib64/stubs -lcuda
 endif
-endif
-CPP_CUDA_FLAGS := -DTYR_OPS_HAS_CUDA_TOOLKIT=$(HAS_CUDA_TOOLKIT)
 NCCL_ROOT ?= ../external/wheels/nvidia/nccl
 NCCL_INC_FLAGS :=
 ifneq ($(wildcard $(NCCL_ROOT)/include/nccl.h),)
@@ -112,43 +104,26 @@ NVCCFLAGS := -std=c++20 -O3 --use_fast_math --expt-extended-lambda --expt-relaxe
 NVCCFLAGS += -lineinfo -Xcompiler -fPIC
 NVCCFLAGS += -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__
 NVCCFLAGS += -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__
-# CUDA 12.1 headers do not expose cudaLaunchAttributePreferredClusterDimension.
-ifneq ($(strip $(CUDA_MAJOR_VERSION)),)
-ifeq ($(shell [ "$(CUDA_MAJOR_VERSION)" -lt 13 ] && echo 1 || echo 0),1)
-NVCCFLAGS += -DcudaLaunchAttributePreferredClusterDimension=cudaLaunchAttributeClusterDimension
-endif
-endif
 
-# Physical GPU target (controls generated SASS) and logical kernel family
-# (controls which ThunderKittens/Tyr arch guards are enabled) are split so
-# physical Blackwell-family targets are not instruction-compatible: GB10 uses
-# SM121 warp MMA, Hopper uses WGMMA, and B200/B300 use architecture-specific
-# tcgen05/TMEM instructions.
+# Physical GPU target (controls generated SASS).
 # Set by lakefile.lean from `-Kgpu`; H100 when building without CUDA.
 GPU ?= H100
 
 ifeq ($(GPU),H100)
-GPU_FAMILY := HOPPER
 GPU_ARCH := 90a
 else ifeq ($(GPU),A100)
-GPU_FAMILY := AMPERE
 GPU_ARCH := 80a
 else ifeq ($(GPU),B200)
-GPU_FAMILY := BLACKWELL
 GPU_ARCH := 100a
 else ifeq ($(GPU),B300)
-GPU_FAMILY := BLACKWELL
 GPU_ARCH := 103a
 else ifeq ($(GPU),GB10)
-GPU_FAMILY := BLACKWELL
 GPU_ARCH := 121
 else
 $(error Unsupported GPU: $(GPU). Use -Kgpu=H100, A100, B200, B300 or GB10)
 endif
 GPU_COMPUTE := compute_$(GPU_ARCH)
 GPU_CODE := sm_$(GPU_ARCH)
-
-NVCCFLAGS += -DKITTENS_$(GPU_FAMILY)
 
 NVCCFLAGS += -gencode arch=$(GPU_COMPUTE),code=$(GPU_CODE)
 
@@ -177,14 +152,11 @@ SRC_DIR := src
 HDR_DIR := include
 OUT_DIR := build
 TOOLS_DIR := tools
-BENCH_FLASH_ATTN := $(OUT_DIR)/tools/bench_flash_attn
-GPU_STUB_SRC := $(SRC_DIR)/generated/tyr_gpu_kernel_stubs.cpp
 BUILD_FLAGS := $(OUT_DIR)/build-flags.txt
 
 SRCS := \
 	tyr.cpp\
 	tyr_qwen35.cpp\
-	tyr_ops.cpp\
 	tyr_distributed.cpp\
 	tyr_polar.cpp\
 	tyr_media_stub.cpp\
@@ -211,40 +183,15 @@ APPLE_FRAMEWORK_FLAGS := \
 else
 APPLE_FRAMEWORK_FLAGS :=
 endif
-# tk_vendor_mha_h100.cu emits Hopper `wgmma` instructions; ptxas rejects it for
-# sm_10x/sm_12x (Blackwell) targets like B200/GB10. The launcher stubs are
-# weak so the runtime dispatcher's Hopper-arch gate routes those problems to
-# the portable SDPA fallback when the kernels are absent.
-ifeq ($(GPU),H100)
-STATIC_CU_SRCS := $(SRC_DIR)/tk_vendor_mha_h100.cu
+# tyr_laguna_moe.cu (fused NVFP4 MoE expert forward) is arch-portable CUDA and
+# compiles for every selected GPU target.
+ifeq ($(HAS_NVCC),1)
+CU_SRCS := $(SRC_DIR)/tyr_laguna_moe.cu
 else
-STATIC_CU_SRCS :=
-endif
-# tyr_laguna_moe.cu (fused NVFP4 MoE expert forward) is arch-portable CUDA —
-# no Hopper WGMMA or Blackwell tcgen05/TMEM instructions — so it compiles for
-# every selected GPU target (including GB10 sm_121), unlike the H100-only
-# vendored kernel above.
-STATIC_CU_SRCS += $(SRC_DIR)/tyr_laguna_moe.cu
-GPU_CODEGEN_MODULES := $(strip $(TYR_GPU_CODEGEN_MODULE))
-GPU_CODEGEN_CU_NAMES := $(addsuffix .cu,$(subst .,_,$(GPU_CODEGEN_MODULES)))
-# A module that registers no kernels of its own generates no .cu file.
-CU_SRCS := $(STATIC_CU_SRCS) $(wildcard $(addprefix $(SRC_DIR)/generated/,$(GPU_CODEGEN_CU_NAMES)))
-# CPU build: no CUDA kernels; the weak launcher stubs stand in for them.
-ifneq ($(HAS_NVCC),1)
 CU_SRCS :=
 endif
-ifeq ($(filter $(SRC_DIR)/tk_vendor_mha_h100.cu,$(CU_SRCS)),)
-SRCS += tk_vendor_stubs.cpp
-endif
-# Always compile the kernel-launcher stubs, written by the Lean build
-# (`GenerateGpuKernels --stubs`). They define every `lean_launch_...` symbol
-# with `__attribute__((weak))`: a generated .cu linked into the same library
-# defines it strongly, which wins; otherwise the stub keeps links that
-# reference it working (CPU builds, and kernels not in -Kkernels).
-SRCS += generated/tyr_gpu_kernel_stubs.cpp
-REQUIRES_TK := $(if $(strip $(CU_SRCS)),1,0)
-# Without NVCC, src/tyr_laguna_moe.cu is not compiled (CU_SRCS is cleared
-# above). Compile its non-CUDA stub branch (the #ifndef __CUDACC__ section of
+# Without NVCC, src/tyr_laguna_moe.cu is not compiled. Compile its non-CUDA
+# stub branch (the #ifndef __CUDACC__ section of
 # the same file) as plain C++ so the `lean_torch_laguna_moe_fp4_forward`
 # extern symbol still resolves for Lean executables.
 ifneq ($(HAS_NVCC),1)
@@ -266,7 +213,7 @@ CPP_OBJ_FILES := $(addprefix $(OUT_DIR)/,$(SRCS:.cpp=.o))
 MM_OBJ_FILES := $(addprefix $(OUT_DIR)/,$(MM_SRCS:.mm=.o))
 CU_OBJ_FILES := $(patsubst $(SRC_DIR)/%.cu,$(OUT_DIR)/%.o,$(CU_SRCS))
 OBJ_FILES := $(CPP_OBJ_FILES) $(MM_OBJ_FILES) $(CU_OBJ_FILES) $(LAGUNA_MOE_STUB_OBJ)
-DEP_FILES := $(OBJ_FILES:.o=.d) $(SOXR_OBJS:.o=.d) $(BENCH_FLASH_ATTN).d
+DEP_FILES := $(OBJ_FILES:.o=.d) $(SOXR_OBJS:.o=.d)
 
 # Lean runtime library
 LEAN_LIB := $(LEAN_HOME)/lib/lean
@@ -294,22 +241,22 @@ DYLIB_LINK_FLAGS := $(DYLIB_LEAN_FLAGS) \
 	-L$(TORCH_LIBPATH) -ltorch -ltorch_cpu -lc10 $(TORCH_CUDA_LINK_FLAGS) \
 	$(ARROW_LINK_FLAGS) \
 	-L$(SOXR_LIBPATH) -lsoxr \
-	$(CUDA_LIB_FLAGS) $(CUDA_DRIVER_LINK_FLAGS) $(NCCL_LIB_FLAGS) \
+	$(CUDA_LIB_FLAGS) $(NCCL_LIB_FLAGS) \
 	$(DYLIB_RPATH_FLAGS) \
 	$(APPLE_FRAMEWORK_FLAGS)
 
 # Build Rules
 
 # Everything that changes compiled output, one `KEY=value` per line. Objects
-# depend on this file, so a changed compiler, flag, GPU or kernel set rebuilds
+# depend on this file, so a changed compiler, flag or GPU rebuilds
 # them. It is rewritten only when its content changes (FORCE runs the recipe
 # every time; an unchanged timestamp leaves dependents alone).
 shell_quote = '$(subst ','"'"',$(1))'
-BUILD_FLAGS_KEYS := CC CXX NVCC LEAN_HOME TORCHDIR SOXR_DIR TKDIR GLOO_DIR \
-	CXX_STD_FLAG EXTRA_CXX_FLAGS CPP_CUDA_FLAGS NVCCFLAGS SOXR_CFLAGS \
+BUILD_FLAGS_KEYS := CC CXX NVCC LEAN_HOME TORCHDIR SOXR_DIR GLOO_DIR \
+	CXX_STD_FLAG EXTRA_CXX_FLAGS NVCCFLAGS SOXR_CFLAGS \
 	TORCH_INC_FLAGS CUDA_INC_FLAGS NCCL_INC_FLAGS ARROW_INC_FLAGS \
-	GPU GPU_FAMILY GPU_COMPUTE GPU_CODE HAS_NVCC HAS_CUDA_TOOLKIT \
-	CUDA_HOME CUDA_MAJOR_VERSION GPU_CODEGEN_MODULES OBJ_FILES DYLIB_LINK_FLAGS
+	GPU GPU_COMPUTE GPU_CODE HAS_NVCC HAS_CUDA_TOOLKIT \
+	CUDA_HOME CUDA_MAJOR_VERSION OBJ_FILES DYLIB_LINK_FLAGS
 
 .PHONY: check-deps FORCE
 FORCE:
@@ -322,10 +269,6 @@ $(BUILD_FLAGS): FORCE
 -include $(DEP_FILES)
 
 check-deps:
-	@if [ -n "$(filter generated/tyr_gpu_kernel_stubs.cpp,$(SRCS))" ] && [ ! -f "$(GPU_STUB_SRC)" ]; then \
-		echo "Missing $(GPU_STUB_SRC); it is written by the Lean build. Run: lake build"; \
-		exit 1; \
-	fi
 	@for compiler in $(firstword $(CC)) $(firstword $(CXX)); do \
 		if ! command -v "$$compiler" >/dev/null 2>&1; then \
 			echo "Missing C/C++ compiler $$compiler. On Debian/Ubuntu: sudo apt install g++"; \
@@ -334,10 +277,6 @@ check-deps:
 	done
 	@if [ ! -f "$(SOXR_DIR)/CMakeLists.txt" ]; then \
 		echo "Missing $(SOXR_DIR). Run: deps/fetch.sh"; \
-		exit 1; \
-	fi
-	@if [ "$(REQUIRES_TK)" = "1" ] && [ ! -d "$(TKDIR)/include" ]; then \
-		echo "Missing $(TKDIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
 	@if [ ! -f "$(TORCHDIR)/include/torch/csrc/api/include/torch/torch.h" ] || [ ! -d "$(TORCH_LIBPATH)" ]; then \
@@ -356,8 +295,6 @@ check-deps:
 all: dylib
 
 dylib: check-deps soxr $(OUT_DIR)/$(DYLIB)
-
-bench-flash-attn: check-deps soxr $(OUT_DIR)/$(DYLIB) $(BENCH_FLASH_ATTN)
 
 soxr: check-deps $(SOXR_LIB)
 
@@ -404,25 +341,17 @@ $(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(DYLIB_EXPORTS) $(BUILD_FLAGS) $
 	$(CXX) $(SHARED_FLAG) -o $@ $(OBJ_FILES) $(DYLIB_LINK_FLAGS) $(DYLIB_EXPORT_FLAGS)
 	@$(TOOLS_DIR)/check_libstdcxx.sh $(CXX) $@
 
-$(BENCH_FLASH_ATTN): $(TOOLS_DIR)/bench_flash_attn.cpp $(OUT_DIR)/$(DYLIB) $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $@.d -MT $@ -o $@ $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(EXTRA_CXX_FLAGS) -L$(OUT_DIR) -l$(LIB_NAME) $(DYLIB_LINK_FLAGS) $(foreach dir,$(OUT_DIR) $(TORCH_LIBPATH) $(ARROW_DIR) $(LEAN_LIB),-Wl,-rpath,$(abspath $(dir))) -L$(LEAN_LIB) -lleanshared
-
 $(OUT_DIR)/%.o : $(SRC_DIR)/%.cpp $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(CPP_CUDA_FLAGS) $(EXTRA_CXX_FLAGS) -fPIC
+	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(EXTRA_CXX_FLAGS) -fPIC
 
 $(OUT_DIR)/%.o : $(SRC_DIR)/%.mm $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	$(CXX) -x objective-c++ $(CXX_STD_FLAG) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(CPP_CUDA_FLAGS) $(EXTRA_CXX_FLAGS) -fPIC -fobjc-arc
+	$(CXX) -x objective-c++ $(CXX_STD_FLAG) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(EXTRA_CXX_FLAGS) -fPIC -fobjc-arc
 
 $(OUT_DIR)/%.o : $(SRC_DIR)/%.cu $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	@if [ "$(GPU)" = "GB10" ] && grep -Eq 'tcgen05|tensor_allocator<|warpgroup::(mma_|mm_)|mma_async_wait|mma_commit_group' "$<"; then \
-		echo "error: $< requires Hopper WGMMA or SM100a tcgen05/TMEM, neither of which is supported by GB10 sm_121" >&2; \
-		exit 2; \
-	fi
-	$(NVCC) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(TK_INC_FLAGS) $(NVCCFLAGS)
+	$(NVCC) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NVCCFLAGS)
 
 # No-CUDA-toolkit builds: compile the stub branch of tyr_laguna_moe.cu as C++.
 $(OUT_DIR)/tyr_laguna_moe_stub.o : $(SRC_DIR)/tyr_laguna_moe.cu $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)

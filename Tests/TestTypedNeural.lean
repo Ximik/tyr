@@ -48,24 +48,24 @@ open torch
     "Lean Int64 bounds cross the C ABI with their signed bit pattern intact"
 
 example (_q : Tensor ⟨#[1, 1, 2, 2], .Float32, .CPU⟩) (_ints : Tensor ⟨#[1, 1, 2, 2], .Int64, .CPU⟩) : True := by
-  have _ := Tensor.flashAttention _q _q _q
-  fail_if_success have _ := Tensor.flashAttention _ints _ints _ints
+  have _ := Tensor.attentionGQAQKV _q _q _q
+  fail_if_success have _ := Tensor.attentionGQAQKV _ints _ints _ints
   trivial
 
-@[test] def testTypedFlashAttentionValuesAndDropoutErrors : IO Unit := do
+@[test] def testTypedAttentionValuesAndDropoutErrors : IO Unit := do
   let q := Tensor.zeros #[1, 1, 2, 2]
   let v := (Tensor.fromFloatArray #[2, 4, 6, 8]).reshape #[1, 1, 2, 2]
-  let result := Tensor.flashAttention q q v
+  let result := Tensor.attentionGQAQKV q q v
   LeanTest.assertEqual (← result.toFloatArray) #[4, 6, 4, 6]
   LeanTest.assertTrue (result.actualSpec == q.actualSpec)
   for dropout in #[-0.5, 1.5] do
     let rejected ← try
-      let _ ← Tensor.flashAttentionIO q q v dropout true
+      let _ ← Tensor.attentionGQAQKVIO q q v dropout true
       pure false
     catch error =>
       LeanTest.assertTrue (!error.toString.isEmpty)
       pure true
-    LeanTest.assertTrue rejected "Invalid FlashAttention dropout must return IO.error"
+    LeanTest.assertTrue rejected "Invalid attention dropout must return IO.error"
 
 @[test] def testTypedRandintRecoverableErrors : IO Unit := do
   for (low, high, device) in #[(3, 3, Device.CPU), (4, 3, Device.CPU)] do

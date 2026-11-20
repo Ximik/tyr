@@ -1,6 +1,6 @@
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -113,4 +113,4 @@ instance elliptopeManifold (n k : Nat) : DifferentiableManifold (Elliptope n k d
   exp x v := Elliptope.project n k (Tensor.add x.factor v.vec)
   retract x v := Elliptope.project n k (Tensor.add x.factor v.vec)
 
-end Tyr.AD
+end Tyr.Manifolds

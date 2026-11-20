@@ -1,6 +1,6 @@
 import Tyr.Manifolds.Basic
 
-namespace Tyr.AD
+namespace Tyr.Manifolds
 
 open torch
 open DifferentiableManifold
@@ -62,4 +62,4 @@ instance fixedRankEmbeddedManifold (m n k : Nat) : DifferentiableManifold (Fixed
   exp x v := FixedRankEmbedded.project m n k (Tensor.add x.matrix v.vec) x.rankBound
   retract x v := FixedRankEmbedded.project m n k (Tensor.add x.matrix v.vec) x.rankBound
 
-end Tyr.AD
+end Tyr.Manifolds

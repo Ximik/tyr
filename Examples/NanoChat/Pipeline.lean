@@ -15,7 +15,7 @@
 import Tyr.Pipeline
 import Tyr.Distributed
 import Tyr.DataLoader
-import Tyr.Data.Pretraining
+import Tyr.RawTensor.Parquet
 import Tyr.Data.Task
 import Tyr.Data.TaskClass
 import Tyr.Train.ChatSFT
@@ -36,7 +36,7 @@ open torch
 open torch.Pipeline
 open torch.ModdedTrain
 open torch.moddedGpt
-open torch.Data.Pretraining
+open torch.Data.Parquet
 open torch.Data.Task
 open torch.Data.TaskClass
 open torch.Data.Download

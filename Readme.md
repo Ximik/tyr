@@ -84,9 +84,6 @@ lake exe TrainGPT
 ```bash
 lake test                            # builds and runs test_runner
 lake exe test_runner --filter GPT    # with arguments
-
-# Experimental/in-progress suites
-lake exe test_runner_experimental
 ```
 
 ## Environment Variables
@@ -106,7 +103,6 @@ them until the next `lake -R`, which replaces all of them):
 |---|---|
 | `-Kcuda=<toolkit>` | CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
 | `-Kgpu=<name>` | with `-Kcuda`, required: GPU to build kernels for, `H100`, `A100`, `B200`, `B300` or `GB10` |
-| `-Kkernels="<module> ..."` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
 
 **Build:**
 
@@ -127,8 +123,8 @@ See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler ov
 ## Documentation
 
 Per-component guides live in [docs/](docs/README.md) — covering the core
-tensor/FFI layer, training stack, model families, GPU kernel DSL, scientific
-computing, and the C++/build internals. An exhaustive API reference can be
+tensor/FFI layer, training stack, model families, scientific computing, and
+the C++/build internals. An exhaustive API reference can be
 generated with doc-gen4 (see `docbuild/`).
 
 ## Examples
@@ -141,7 +137,6 @@ See [Examples/README.md](Examples/README.md) for detailed per-example documentat
 | **TrainDiffusion** | Discrete masked diffusion on ASCII text | `lake build TrainDiffusion` |
 | **TrainNanoChat** | Modded-nanogpt distributed training | `lake build TrainNanoChat` |
 | **FluxDemo** | Flux Klein 4B image generation | `lake build FluxDemo` |
-| **BranchingFlows** | Dataset-backed molecule branching-flow training and generation | `lake build BranchingFlowsMoleculeTrainGenerate` |
 | **NanoProof** | Transformer theorem prover (model only) | Part of `Examples` lib |
 
 ### Distributed NanoChat (GPU Node)
@@ -162,34 +157,6 @@ NPROC_PER_NODE=4 ./scripts/nanochat/run_train_torchrun.sh \
 
 Notes:
 - Override process counts in the benchmark script with `SIZES="2 4"` (or any space-separated list).
-
-### GPU Kernel Parity
-
-The ThunderKittens-style GPU coverage now has a reusable end-to-end parity path
-centered on seeded fixture generation plus hardware-backed validation:
-
-```bash
-# Run the current GPU parity suite
-./scripts/gpu/test_parity_suite.sh
-
-# Add randomized MHA trials on top of the deterministic suite
-RANDOMIZED_MHA_TRIALS=10 ./scripts/gpu/test_parity_suite.sh
-```
-
-Notes:
-- The suite runs three deterministic checks: the LeanTest GPU executable
-  (`TestGPUE2E`) covering `copy`, `rotary`, `layernorm` (f32/bf16), `rmsnorm`
-  (f32/bf16), `flashattn`, and `mha_h100`; the deterministic `mha_h100_768`
-  end-to-end run; and the `b200_bf16_gemm` end-to-end run (Blackwell-only, it
-  skips itself on other GPUs). `RANDOMIZED_MHA_TRIALS=N` adds N randomized
-  `mha_h100` trials with freshly regenerated fixtures.
-- PyTorch (via the libtorch FFI) is the default numerical oracle for fixture
-  generation and parity.
-- A vendored ThunderKittens reference runner is called as
-  `runner <suite-name> <fixture-dir>` after each suite and should exit nonzero
-  on mismatch. It defaults to `scripts/gpu/run_vendored_reference.sh` (needs a
-  Python env; see `./scripts/gpu/setup_python_venv.sh`) and can be overridden
-  with `TYR_GPU_VENDORED_REF_RUNNER=/path/to/runner`.
 
 ## Key Concepts
 

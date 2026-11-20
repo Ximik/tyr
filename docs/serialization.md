@@ -283,8 +283,7 @@ SafeTensors export.
 
 ## Usage examples
 
-Reconstructed example (from `Tests/TestSafeTensorsTypeProvider.lean:13-219` and
-`launch/demos/safetensors_schema.lean`):
+Reconstructed example (from `Tests/TestSafeTensorsTypeProvider.lean:13-219`):
 
 ```lean
 import Tyr.SafeTensors
@@ -352,12 +351,6 @@ def resume (initParams : α) [TensorStruct α] :
     IO (α × α × α × CheckpointMeta) := do
   loadTrainingCheckpoint initParams "checkpoints/gpt"
 ```
-
-The molecule BranchingFlows executable publishes model parameters, metadata,
-Muon momentum leaves (`optim_muon_momentum_*`), and `optim_muon_count.txt`
-together. Resume pins that snapshot and checks the optimizer step against the
-metadata. Its generation launcher also pins the snapshot before hashing and
-loading it.
 
 NanoChat publishes its heterogeneous optimizer state with the same protocol.
 Its versioned `state_meta.json` preserves exact scalar values, per-parameter
