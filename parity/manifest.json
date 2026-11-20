@@ -79,6 +79,15 @@
         "model-00001-of-00002.safetensors": "1127684971bbca40465435a5cad69d67ad603bf5e61c6dfd5561fae4a3bcfdb3",
         "model-00002-of-00002.safetensors": "aab47033e1e8a492ef8e581efae1cf36478d0433567e7729b3c1728bc8970db7"
       }
+    },
+    "whisper-base.en": {
+      "repo": "openai/whisper-base.en",
+      "revision": "911407f4214e0e1d82085af863093ec0b66f9cd6",
+      "files": {
+        "config.json": "160c1df40a60d4ef5a6014d536fd845c33aabfd1f318458ac7f87cfe91ebbe76",
+        "preprocessor_config.json": "9b5cd03a36fbb8a627c64d98a5b5b126ead95a77720723944487311f0110b666",
+        "model.safetensors": "d4dd5542fd6a1d35639e21384238f3bfe6c557c849d392b5905d33ee29e71db5"
+      }
     }
   },
   "code": {}

@@ -364,6 +364,10 @@ lean_exe ParityGemma4 where
   root := `Examples.Parity.Gemma4
   supportInterpreter := true
 
+lean_exe ParityWhisper where
+  root := `Examples.Parity.Whisper
+  supportInterpreter := true
+
 /-- Focused native acceptance path while model tensor migration is in progress. -/
 lean_exe test_typed_models where
   root := `Tests.RunTypedModels

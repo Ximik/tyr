@@ -63,3 +63,24 @@ class LmTokens:
                 )
             rows.append(entry)
         return {"verdict": worst(r["verdict"] for r in rows), "max_logit_diff": max_diff, "rows": rows}
+
+
+@dataclass(frozen=True)
+class TensorsClose:
+    """Each named tensor in both `tensors.safetensors` files has the same shape
+    and differs from the reference by at most its tolerance in `atol`."""
+
+    atol: dict[str, float]
+    name: str = "tensors"
+
+    def __call__(self, case_dir: Path, device: str) -> dict:
+        _, ref_tensors = probe.read(case_dir / "reference")
+        _, tyr_tensors = probe.read(case_dir / "tyr")
+        tensors = {}
+        for name, atol in self.atol.items():
+            ref, tyr = ref_tensors[name], tyr_tensors[name]
+            if ref.shape != tyr.shape:
+                raise ValueError(f"{name}: reference {ref.shape}, tyr {tyr.shape}")
+            diff = float(np.abs(ref.astype(np.float64) - tyr).max())
+            tensors[name] = {"verdict": "PASS" if diff <= atol else "FAIL", "max_abs_diff": diff, "atol": atol}
+        return {"verdict": worst(t["verdict"] for t in tensors.values()), "tensors": tensors}
