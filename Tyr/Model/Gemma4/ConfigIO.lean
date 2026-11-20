@@ -38,9 +38,18 @@ def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except Strin
   let hidden ← fieldD? textCfg "hidden_size" d.hidden_size
   let heads ← fieldD? textCfg "num_attention_heads" d.num_attention_heads
   let kvHeads ← fieldD? textCfg "num_key_value_heads" d.num_key_value_heads
-  let globalKVHeads : FullSize ← match ← field? textCfg "num_global_key_value_heads" with
+  let kEqV : Bool ← fieldD? textCfg "attention_k_eq_v" d.attention_k_eq_v
+  -- The reference gives full-attention layers their own K/V head count only with
+  -- `attention_k_eq_v`; `null` keeps the sliding layers' count.
+  let globalKVHeads : FullSize ← match ← member? textCfg "num_global_key_value_heads" with
     | none => pure d.num_global_key_value_heads
-    | some n => pure (if h : 0 < n then .distinct ⟨n, h⟩ else .same)
+    | some .null => pure .same
+    | some _ =>
+      let n : Nat ← fieldD? textCfg "num_global_key_value_heads" 0
+      unless kEqV do
+        throw s!"unsupported 'num_global_key_value_heads' = {n} with attention_k_eq_v = false; the reference ignores it there"
+      if h : 0 < n then pure (.distinct ⟨n, h⟩) else
+        throw "Invalid Gemma4 config: num_global_key_value_heads must be positive"
   let ⟨hHeads⟩ ← if h : 0 < heads ∧ 0 < kvHeads then pure (PLift.up h) else
     throw s!"Invalid Gemma4 config: num_attention_heads={heads} and num_key_value_heads={kvHeads} must be positive"
   let ⟨hSliding⟩ ← if h : kvHeads ∣ heads then pure (PLift.up h) else
@@ -89,9 +98,15 @@ def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except Strin
   let ⟨hSharing⟩ ← if h : kvSharingValid layerTypes numLayers shared = true then pure (PLift.up h) else
     throw s!"Invalid Gemma4 config: num_kv_shared_layers={shared} needs fewer shared than total layers ({numLayers}) and an earlier source layer of each shared kind"
   let enableMoe ← fieldD? textCfg "enable_moe_block" d.enable_moe_block
-  let numExperts ← fieldD? textCfg "num_experts" d.num_experts
-  let topK ← fieldD? textCfg "top_k_experts" d.top_k_experts
-  let moeInter ← fieldD? textCfg "moe_intermediate_size" d.moe_intermediate_size
+  -- `null` leaves a MoE size unset, as the reference does without a MoE block;
+  -- an enabled block then fails the positivity check below.
+  let moeSize (key : String) (default : Nat) : Except String Nat := do
+    match ← member? textCfg key with
+    | some .null => pure 0
+    | _ => fieldD? textCfg key default
+  let numExperts ← moeSize "num_experts" d.num_experts
+  let topK ← moeSize "top_k_experts" d.top_k_experts
+  let moeInter ← moeSize "moe_intermediate_size" d.moe_intermediate_size
   let ⟨hTopK⟩ ← if h : topK ≤ numExperts then pure (PLift.up h) else
     throw s!"Invalid Gemma4 config: top_k_experts={topK} exceeds num_experts={numExperts}"
   let ⟨hMoe⟩ ← if h : enableMoe = true → 0 < topK ∧ 0 < moeInter then pure (PLift.up h) else
@@ -143,7 +158,7 @@ def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except Strin
     half_full_rotary_dim := fullRotaryDim / 2
     rms_norm_eps := eps
     hidden_activation := ← fieldD? textCfg "hidden_activation" d.hidden_activation
-    attention_k_eq_v := ← fieldD? textCfg "attention_k_eq_v" d.attention_k_eq_v
+    attention_k_eq_v := kEqV
     use_bidirectional_attention := bidirectional
     layer_types := layerTypes
     num_kv_shared_layers := shared

@@ -2,6 +2,7 @@ import Tests.Assertions
 import Tyr.Model.Gemma4.Multimodal
 import Tyr.Model.Gemma4.Media
 import Tyr.Model.Gemma4.Weights
+import Tyr.Model.Gemma4.ConfigIO
 import Tyr.Model.Gemma4.VLWeights
 import Tyr.Checkpoint
 import LeanTest
@@ -380,5 +381,34 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
         Tests.assertThrows (do
           discard <| Gemma4ForConditionalGeneration.load (if sharded then directory.toString else (directory / "model.safetensors").toString) c)
           (some "shape")
+
+
+private def gemma4Config (fields : String) : Lean.Json :=
+  match Lean.Json.parse ("{\"text_config\":{\"num_attention_heads\":8,\"num_key_value_heads\":1," ++ fields ++ "}}") with
+  | .ok j => j
+  | .error e => panic! e
+
+/-- `null` means unset, as in the reference: full layers keep the sliding K/V head
+count, and a disabled MoE block has no sizes. -/
+@[test]
+def testGemma4ConfigNullFieldsAreUnset : IO Unit := do
+  let cfg ← IO.ofExcept <| Config.parseJson (gemma4Config
+    ("\"attention_k_eq_v\":false,\"num_global_key_value_heads\":null,\"enable_moe_block\":false," ++
+     "\"num_experts\":null,\"top_k_experts\":null"))
+  LeanTest.assertTrue (cfg.num_global_key_value_heads == .same) "null global K/V heads keep the sliding count"
+  LeanTest.assertEqual cfg.num_experts 0
+  LeanTest.assertEqual cfg.top_k_experts 0
+  let moe ← IO.ofExcept <| Config.parseJson (gemma4Config
+    "\"attention_k_eq_v\":true,\"num_global_key_value_heads\":2")
+  LeanTest.assertTrue (moe.num_global_key_value_heads == .distinct ⟨2, by decide⟩) "a count with attention_k_eq_v"
+
+@[test]
+def testGemma4ConfigRejectsWhatTheReferenceIgnores : IO Unit := do
+  let rejected (fields : String) : Bool := (Config.parseJson (gemma4Config fields)).toOption.isNone
+  LeanTest.assertTrue (rejected "\"attention_k_eq_v\":false,\"num_global_key_value_heads\":2")
+    "a global count the reference ignores without attention_k_eq_v"
+  LeanTest.assertTrue (rejected "\"attention_k_eq_v\":true,\"num_global_key_value_heads\":0") "zero heads"
+  LeanTest.assertTrue (rejected "\"enable_moe_block\":true,\"num_experts\":null,\"top_k_experts\":null")
+    "an enabled MoE block without sizes"
 
 end Tests.Gemma4Typed
