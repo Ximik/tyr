@@ -76,7 +76,7 @@ def detect_devices() -> list[str]:
 def fetch_weights(tests: dict, root: Path) -> dict[str, str]:
     """Errors by weights key; an empty map means every test's weights are in place."""
     errors = {}
-    keys = {m.TEST.weights_for(stage) for m in tests.values() for stage in STAGES}
+    keys = {m.TEST.weights_for(stage) for m in tests.values() for stage in STAGES} - {None}
     for key in sorted(keys):
         try:
             weight_files.fetch(key, root)
@@ -116,7 +116,7 @@ def run_stages(module, case: str, device: str, dtype: str, weights: Path, case_d
         with open(case_dir / f"{stage}.log", "w") as log:
             code = subprocess.run(
                 [sys.executable, __file__, "--stage", stage, "--test", module.TEST.name, "--case", case,
-                 "--device", device, "--dtype", dtype, "--weights", str(weights / module.TEST.weights_for(stage)),
+                 "--device", device, "--dtype", dtype, "--weights", str(weights / key) if (key := module.TEST.weights_for(stage)) else "",
                  "--out", str(case_dir / stage)],
                 stdout=log, stderr=subprocess.STDOUT,
             ).returncode

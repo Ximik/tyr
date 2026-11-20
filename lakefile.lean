@@ -380,6 +380,10 @@ lean_exe ParityQwen3ASRAligner where
   root := `Examples.Parity.Qwen3ASRAligner
   supportInterpreter := true
 
+lean_exe ParitySileroVAD where
+  root := `Examples.Parity.SileroVAD
+  supportInterpreter := true
+
 /-- Focused native acceptance path while model tensor migration is in progress. -/
 lean_exe test_typed_models where
   root := `Tests.RunTypedModels
