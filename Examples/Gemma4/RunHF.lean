@@ -134,19 +134,8 @@ private def encodePromptToIdsMultimodal
   let prompt' ← injectImageExpansions prompt softTokenCounts
   pure (encodePromptToIds tok enableThinking prompt')
 
-private def pushUnique (xs : Array UInt64) (x : UInt64) : Array UInt64 :=
-  if xs.contains x then xs else xs.push x
-
-private def eosStopTokenIds (tok : tokenizer.gemma4.GemmaTokenizer) (cfg : Config) : Array UInt64 :=
-  Id.run do
-    let mut out : Array UInt64 := #[]
-    match cfg.eos_token_id with
-    | some id => out := pushUnique out id
-    | none =>
-      match tok.eosToken with
-      | some id => out := pushUnique out id.toUInt64
-      | none => pure ()
-    out
+private def eosStopTokenIds (tok : tokenizer.gemma4.GemmaTokenizer) (cfg : Config) : Array tokenizer.TokenId :=
+  if cfg.eos_token_id.isEmpty then tok.eosToken.toArray else cfg.eos_token_id
 
 private def movePatchGridTo {cfg : VLConfig} {sourceDevice : Device} (device : Device) (x : ImagePatchGrid (device := sourceDevice) cfg) : ImagePatchGrid (device := device) cfg :=
   match x with

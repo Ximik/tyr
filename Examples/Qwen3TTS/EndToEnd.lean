@@ -340,7 +340,7 @@ private def parseThinkMode (s : String) : ThinkMode :=
   | "no_think" => .noThink
   | _ => .auto
 
-private def lookupLanguageId? (cfg : Qwen3TTSConfig) (language : String) : Option UInt64 := Id.run do
+private def lookupLanguageId? (cfg : Qwen3TTSConfig) (language : String) : Option tokenizer.TokenId := Id.run do
   let q := lowerAsciiString language
   for (k, v) in cfg.talkerConfig.codecLanguageId do
     if lowerAsciiString k == q then
@@ -378,7 +378,7 @@ private def buildTalkerInputsEquivalent
     (cfg : Qwen3TTSConfig)
     (model : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (inputIds : Array UInt64)
-    (languageId : Option UInt64)
+    (languageId : Option tokenizer.TokenId)
     (thinkMode : ThinkMode := .auto)
     (speakerEmbed : Option (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device }) := none)
     : IO ((Sigma fun seq => Tensor { shape := #[1, seq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device }) × Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device }) := do
@@ -405,7 +405,7 @@ private def buildTalkerInputsEquivalent
   let ttsEosEmbed : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.slice ttsSpecialEmb 1 1 1
   let ttsPadEmbed : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.slice ttsSpecialEmb 1 2 1
 
-  let codecPrefillIds : Array UInt64 :=
+  let codecPrefillIds : Array tokenizer.TokenId :=
     match thinkMode, languageId with
     | .noThink, _ =>
         #[
@@ -439,8 +439,9 @@ private def buildTalkerInputsEquivalent
           cfg.talkerConfig.codecThinkBosId,
           cfg.talkerConfig.codecThinkEosId
         ]
-  let codecPrefillLen : Nat := codecPrefillIds.size
-  let codecPrefillTensor : Tensor { shape := #[1, codecPrefillLen], dtype := .Int64, device := device } := idsTensor1 codecPrefillIds
+  let codecPrefillRaw : Array UInt64 := codecPrefillIds.map (·.toUInt64)
+  let codecPrefillLen : Nat := codecPrefillRaw.size
+  let codecPrefillTensor : Tensor { shape := #[1, codecPrefillLen], dtype := .Int64, device := device } := idsTensor1 codecPrefillRaw
   let codecEmb0 : Tensor { shape := #[1, codecPrefillLen, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedCodec model.talker.model codecPrefillTensor
 
   let codecPadBosIds : Tensor { shape := #[1, 2], dtype := .Int64, device := device } := Tensor.reshape ((Tensor.fromInt64Array #[
@@ -449,23 +450,24 @@ private def buildTalkerInputsEquivalent
   ]).to device) #[1, 2]
   let codecEmb1 : Tensor { shape := #[1, 2, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedCodec model.talker.model codecPadBosIds
 
-  let codecInputResult : (Sigma fun n => Tensor { shape := #[1, n, hidden], dtype := dtypes.talker.val, device := device }) :=
+  let codecInputResult : (Sigma fun k => Tensor { shape := #[1, k + 2, hidden], dtype := dtypes.talker.val, device := device }) :=
     match speakerEmbed with
     | some spk =>
+        let spk : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := spk
         let codecWithSpeaker : Tensor { shape := #[1, codecPrefillLen + 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.cat codecEmb0 spk 1
         let codecInput : Tensor { shape := #[1, (codecPrefillLen + 1) + 2, hidden], dtype := dtypes.talker.val, device := device } := Tensor.cat codecWithSpeaker codecEmb1 1
-        ⟨((codecPrefillLen + 1) + 2), codecInput⟩
+        ⟨codecPrefillLen + 1, codecInput⟩
     | none =>
         let codecInput : Tensor { shape := #[1, codecPrefillLen + 2, hidden], dtype := dtypes.talker.val, device := device } := Tensor.cat codecEmb0 codecEmb1 1
-        ⟨(codecPrefillLen + 2), codecInput⟩
+        ⟨codecPrefillLen, codecInput⟩
 
-  let ⟨codecInputLen, codecInput⟩ := codecInputResult
-  let codecPrefix : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.slice codecInput 1 0 (codecInputLen - 1)
-  let padScaffold : Tensor { shape := #[1, codecInputLen - 2, hidden], dtype := dtypes.talker.val, device := device } := Tensor.broadcastTo ttsPadEmbed #[1, codecInputLen - 2, hidden]
-  let scaffold0 : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } :=
+  let ⟨codecPrefixLen, codecInput⟩ := codecInputResult
+  let codecPrefix : Tensor { shape := #[1, codecPrefixLen + 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.slice codecInput 1 0 (codecPrefixLen + 1)
+  let padScaffold : Tensor { shape := #[1, codecPrefixLen, hidden], dtype := dtypes.talker.val, device := device } := Tensor.broadcastTo ttsPadEmbed #[1, codecPrefixLen, hidden]
+  let scaffold0 : Tensor { shape := #[1, codecPrefixLen + 1, hidden], dtype := dtypes.talker.val, device := device } :=
     Tensor.cat padScaffold ttsBosEmbed 1
-  let scaffold : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.add scaffold0 codecPrefix
-  let partA : Tensor { shape := #[1, 3 + (codecInputLen - 1), hidden], dtype := dtypes.talker.val, device := device } := Tensor.cat roleEmbed scaffold 1
+  let scaffold : Tensor { shape := #[1, codecPrefixLen + 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.add scaffold0 codecPrefix
+  let partA : Tensor { shape := #[1, 3 + (codecPrefixLen + 1), hidden], dtype := dtypes.talker.val, device := device } := Tensor.cat roleEmbed scaffold 1
 
   let textMainTensor : Tensor { shape := #[1, textMainLen], dtype := .Int64, device := device } := idsTensor1 textMainIds
   let textMainEmbed : Tensor { shape := #[1, textMainLen, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedText model.talker.model textMainTensor
@@ -479,7 +481,7 @@ private def buildTalkerInputsEquivalent
   let codecBosEmbed : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedCodec model.talker.model codecBosOnlyIds
   let partC : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.add ttsPadEmbed codecBosEmbed
 
-  let partABLen : Nat := (3 + (codecInputLen - 1)) + (textMainLen + 1)
+  let partABLen : Nat := (3 + (codecPrefixLen + 1)) + (textMainLen + 1)
   let partAB : Tensor { shape := #[1, partABLen, hidden], dtype := dtypes.talker.val, device := device } := Tensor.cat partA partB 1
   let outLen : Nat := partABLen + 1
   let talkerInputs : Tensor { shape := #[1, outLen, hidden], dtype := dtypes.talker.val, device := device } := Tensor.cat partAB partC 1
@@ -711,7 +713,7 @@ def runEndToEnd (args : Args) : IO Unit := do
       args.repetitionPenalty args.suppressTail
       (some ⟨1, ttsPadEmbed⟩) (some ttsPadEmbed)
       args.subtalkerTemperaturesByGroup subtalkerTopKsByGroup args.subtalkerTopPsByGroup
-    let codeLen := out.lengths.getD 0 maxFrames
+    let codeLen := min (out.lengths.getD 0 maxFrames) maxFrames
 
     let codes3 : Tensor { shape := #[1, maxFrames, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := targetDevice } := Tensor.slice out.codes 0 0 1
     let codes2 : Tensor { shape := #[maxFrames, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := targetDevice } :=

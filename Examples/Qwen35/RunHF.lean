@@ -110,13 +110,13 @@ private def visionPrefixIds (cfg : VLConfig) (imageTokenCount videoTokenCount : 
   Id.run do
     let mut out : Array UInt64 := #[]
     if imageTokenCount > 0 then
-      out := out.push cfg.vision_start_token_id
-      for _ in [:imageTokenCount] do out := out.push cfg.image_token_id
-      out := out.push cfg.vision_end_token_id
+      out := out.push cfg.vision_start_token_id.toUInt64
+      for _ in [:imageTokenCount] do out := out.push cfg.image_token_id.toUInt64
+      out := out.push cfg.vision_end_token_id.toUInt64
     if videoTokenCount > 0 then
-      out := out.push cfg.vision_start_token_id
-      for _ in [:videoTokenCount] do out := out.push cfg.video_token_id
-      out := out.push cfg.vision_end_token_id
+      out := out.push cfg.vision_start_token_id.toUInt64
+      for _ in [:videoTokenCount] do out := out.push cfg.video_token_id.toUInt64
+      out := out.push cfg.vision_end_token_id.toUInt64
     out
 
 private def encodePromptToIdsMultimodal
@@ -134,7 +134,7 @@ private def encodePromptToIdsMultimodal
   let suffix := (tokenizer.qwen35.encodeText tok suffixText).map (fun t => t.toUInt64)
   return userPrefixIds ++ (visionPrefixIds cfg imageTokenCount videoTokenCount) ++ promptIds ++ suffix
 
-private def eosFromCfg (cfg : Config) : Array UInt64 :=
+private def eosFromCfg (cfg : Config) : Array tokenizer.TokenId :=
   match cfg.eos_token_id with
   | some id => #[id]
   | none => #[]

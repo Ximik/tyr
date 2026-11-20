@@ -80,7 +80,7 @@ private def runBatches
     (args : Args)
     (prompts : Array String)
     : IO Unit := do
-  let eos : Array UInt64 := #[]
+  let eos : Array tokenizer.TokenId := #[]
   let buildBatch chunk := do
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInput tok.padToken.toUInt64 chunk (encodePromptToIds tok)
