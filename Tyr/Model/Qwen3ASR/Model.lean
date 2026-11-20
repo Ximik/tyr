@@ -829,6 +829,54 @@ def generateGreedy {batch seq frames : Nat}
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 logits0 hSeq (Nat.le_add_right _ _)
   greedyLoopCached m cosAll sinAll eosTokenIds eosVector maxNewTokens cachesPrefill lastLogits none inputIds (Nat.le_refl _)
 
+private partial def forcedLoopCached {batch maxLen steps : Nat}
+    (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    (fed : Nat)
+    {curSeq : Nat}
+    (caches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen curSeq))
+    (lastLogits : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] })
+    (acc : Array (Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] }))
+    (hfit : curSeq + steps ≤ maxLen + fed)
+    : IO (Array (Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] })) := do
+  let acc := acc.push (lastLogits.reshape #[batch, 1, ThinkerLmVocabSize cfg])
+  if h : fed + 1 < steps then
+    let tok : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.slice forced 1 fed 1
+    let (logits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll (embedText m tok) caches (by omega)
+    forcedLoopCached m cosAll sinAll forced (fed + 1) caches' logits acc (by omega)
+  else
+    pure acc
+
+/-- Logits after the prompt (`inputIds` with the audio features in its
+placeholders, as in `generateGreedy`) and after each token of `forced` but the
+last, fed one at a time through the cache. Position `i` of the result scores the
+choice of `forced[:, i]`. -/
+def forcedLogits {batch seq frames steps : Nat}
+    (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (inputFeatures : Option (Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] }))
+    (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }))
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, steps, ThinkerLmVocabSize cfg] }) := do
+  let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
+    throw <| IO.userError "forcedLogits requires non-empty prompt sequence"
+  if steps == 0 then
+    throw <| IO.userError "forcedLogits requires at least one forced token"
+  let inputsEmbeds ← buildInputsEmbeds m inputIds inputFeatures featureAttentionMask
+  let cacheDevice := inputsEmbeds.device
+  let cacheMaxLen : Nat := seq + steps
+  let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
+  let support ← dtype.acquireConstantSupport cacheDevice
+  let _ := support.down
+  let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := by omega)
+  let tok0 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := Tensor.slice inputsEmbeds 1 0 1
+  let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 caches0 (by omega)
+  let (lastLogits, cachesPrefill) ← prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 logits0 hSeq (by omega)
+  let steps' ← forcedLoopCached m cosAll sinAll forced 0 cachesPrefill lastLogits #[] (by omega)
+  IO.ofExcept <| Tensor.catMany? (steps'.map Tensor.packShape) 1 #[batch, steps, ThinkerLmVocabSize cfg]
+
 /-- Greedy generation with reusable batch=1 prompt-prefix cache.
     Intended for streaming decode where successive prompts typically extend
     previously accepted text prefixes. -/
