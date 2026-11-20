@@ -19,6 +19,8 @@ def prompts(case: Path) -> list[list[int]]:
 def reference(model, case: Path, device: str, out: Path) -> None:
     """Greedy decoding of `model` (a Hugging Face causal LM) over the case's
     prompts, left-padded into one batch, for `STEPS` tokens without stopping."""
+    import inspect
+
     import torch
     from safetensors.torch import save_file
 
@@ -34,8 +36,8 @@ def reference(model, case: Path, device: str, out: Path) -> None:
 
     tokens, logits, margins = [], [], []
     with torch.inference_mode():
-        output = model(input_ids=ids, attention_mask=mask, position_ids=positions, use_cache=True,
-                       logits_to_keep=1)
+        last_only = {"logits_to_keep": 1} if "logits_to_keep" in inspect.signature(model.forward).parameters else {}
+        output = model(input_ids=ids, attention_mask=mask, position_ids=positions, use_cache=True, **last_only)
         for step in range(STEPS):
             last = output.logits[:, -1, :].float()
             top2 = last.topk(2, dim=-1).values
