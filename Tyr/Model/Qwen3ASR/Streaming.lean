@@ -880,10 +880,7 @@ def decodeStreamingChunkWithModelStateCached
       let ⟨hValid⟩ ← if h : validFrames ≤ frames then pure (PLift.up h) else
         throw <| IO.userError s!"feature attention mask counts {validFrames} valid frames of {frames}"
       let audioLenRaw := AudioEncoderConfig.featExtractOutputLength validFrames
-      let audioLenCap :=
-        AudioEncoderConfig.framesAfterConv3
-          cfg.thinkerConfig.audioConfig
-          frames
+      let audioLenCap := AudioEncoderConfig.featExtractOutputLength frames
       let audioLen := minU64 audioLenRaw audioLenCap
 
       let processor : Qwen3ASRProcessor := {}
@@ -972,9 +969,9 @@ def decodeStreamingChunkWithModelStateCached
             decodeMode == .fullAccumulation &&
             ac.validFeatureLen <= validFrames
           if !canReuse then
-            let audioRaw : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames, cfg.thinkerConfig.audioConfig.outputDim] } :=
+            let audioRaw : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength frames, cfg.thinkerConfig.audioConfig.outputDim] } :=
               model.thinker.encodeAudioVarLen ((Tensor.reshape inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel]))) #[validFrames]
-            let audioProj : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames, cfg.thinkerConfig.textConfig.hiddenSize] } :=
+            let audioProj : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength frames, cfg.thinkerConfig.textConfig.hiddenSize] } :=
               model.thinker.projectAudio audioRaw
             let audioValid : Tensor { dtype := dtype, device := device, shape := #[1, audioLen, cfg.thinkerConfig.textConfig.hiddenSize] } := Tensor.slice audioProj 1 0 audioLen (_bounds := by simpa [audioLen] using minU64_le_right audioLenRaw audioLenCap)
             let nextAudioCache :=
@@ -1036,12 +1033,12 @@ def decodeStreamingChunkWithModelStateCached
               let tailFrames := frames - reuseFeatureLen
               let tailInput : Tensor { device := device, shape := #[1, preprocessor.featureSize, tailFrames], dtype := .Float32 } :=
                 Tensor.slice inputFeaturesDev 2 reuseFeatureLen tailFrames
-              let tailAudioRaw : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig tailFrames, cfg.thinkerConfig.audioConfig.outputDim] } :=
+              let tailAudioRaw : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength tailFrames, cfg.thinkerConfig.audioConfig.outputDim] } :=
                 model.thinker.encodeAudioVarLen ((Tensor.reshape tailInput #[1, cfg.thinkerConfig.audioConfig.numMelBins, tailFrames] (by simp [hMel]))) #[tailFeatureLen]
-              let tailAudioProj : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig tailFrames, cfg.thinkerConfig.textConfig.hiddenSize] } :=
+              let tailAudioProj : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength tailFrames, cfg.thinkerConfig.textConfig.hiddenSize] } :=
                 model.thinker.projectAudio tailAudioRaw
               let tailAudioLenRaw := AudioEncoderConfig.featExtractOutputLength tailFeatureLen
-              let tailAudioCap := AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig tailFrames
+              let tailAudioCap := AudioEncoderConfig.featExtractOutputLength tailFrames
               let tailAudioLen := minU64 tailAudioLenRaw tailAudioCap
               let tailValid : Tensor { dtype := dtype, device := device, shape := #[1, tailAudioLen, cfg.thinkerConfig.textConfig.hiddenSize] } :=
                 Tensor.slice tailAudioProj 1 0 tailAudioLen
@@ -1076,9 +1073,9 @@ def decodeStreamingChunkWithModelStateCached
                   none
               pure (audioValid, nextAudioCache)
         | none =>
-          let audioRaw : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames, cfg.thinkerConfig.audioConfig.outputDim] } :=
+          let audioRaw : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength frames, cfg.thinkerConfig.audioConfig.outputDim] } :=
             model.thinker.encodeAudioVarLen ((Tensor.reshape inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel]))) #[validFrames]
-          let audioProj : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames, cfg.thinkerConfig.textConfig.hiddenSize] } :=
+          let audioProj : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength frames, cfg.thinkerConfig.textConfig.hiddenSize] } :=
             model.thinker.projectAudio audioRaw
           let audioValid : Tensor { dtype := dtype, device := device, shape := #[1, audioLen, cfg.thinkerConfig.textConfig.hiddenSize] } := Tensor.slice audioProj 1 0 audioLen (_bounds := by simpa [audioLen] using minU64_le_right audioLenRaw audioLenCap)
           let nextAudioCache :=
