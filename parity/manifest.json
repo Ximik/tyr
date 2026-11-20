@@ -25,7 +25,8 @@
         "model.safetensors.index.json": "5b7629198e2ef80e37612a491d9bfd71639d2f212632d36d8ab086922e74e129",
         "model-00001-of-00003.safetensors": "349972cebff443030e9e96e1e930d7230979c6961cf046fa29fc580e4bcf49a6",
         "model-00002-of-00003.safetensors": "b29a76dfefb3aa33a5bd0faa19c681d039a44de57223653ea0e933df728c6d8c",
-        "model-00003-of-00003.safetensors": "8f2138170a87ec604b53232491a96d6dcf19e0724aca37e69aace143e508b170"
+        "model-00003-of-00003.safetensors": "8f2138170a87ec604b53232491a96d6dcf19e0724aca37e69aace143e508b170",
+        "spk_dict.pt": "6a05609b28f5d42b7b748f0f07592545c8f1f6885b9ae8fff64baf56e86b2a18"
       }
     },
     "gemma-4-e2b-it": {
