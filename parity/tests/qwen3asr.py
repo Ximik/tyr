@@ -14,7 +14,7 @@ TEST = Test(
     reference_weights="qwen3-asr-0.6b-hf",
     probe="Qwen3ASR",
     devices=("cpu", "cuda"),
-    gpu_dtype="bfloat16",
+    gpu_dtype="float32",
     cases=["qwen3asr/short", "qwen3asr/long"],
 )
 

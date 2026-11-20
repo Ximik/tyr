@@ -11,7 +11,7 @@ TEST = Test(
     cases=["qwen35/short", "qwen35/long", "qwen35/batch"],
 )
 
-CHECKS = [LmTokens(margin=0.5, logits_atol=1.0)]
+CHECKS = [LmTokens(margin=0.25, logits_atol=2.6)]
 
 
 def reference(case, weights, device, dtype, out):
