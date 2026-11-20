@@ -69,6 +69,16 @@
         "model-00025-of-00026.safetensors": "778e7f76602f05042b69ba7f3ec91f1fdffef390540b16074041c258fb81d154",
         "model-00026-of-00026.safetensors": "1a97404220077ed3d4182e10385b152004cab608377f50cec9f54a6b8d28b613"
       }
+    },
+    "gemma-4-26b-a4b-it": {
+      "repo": "google/gemma-4-26B-A4B-it",
+      "revision": "4d7ae4984b7db7de8f8457170b3f1a419ee76d52",
+      "files": {
+        "config.json": "ed0c1eb3633de771906e9ba004a44cc5635bcc06ee2062077c3d2e88a50707d3",
+        "model.safetensors.index.json": "907826a6e46ff454272bd6db1fee629d5531a2303be22986d825a0871d7dc7a7",
+        "model-00001-of-00002.safetensors": "1127684971bbca40465435a5cad69d67ad603bf5e61c6dfd5561fae4a3bcfdb3",
+        "model-00002-of-00002.safetensors": "aab47033e1e8a492ef8e581efae1cf36478d0433567e7729b3c1728bc8970db7"
+      }
     }
   },
   "code": {}
