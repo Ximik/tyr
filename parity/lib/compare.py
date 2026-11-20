@@ -84,3 +84,29 @@ class TensorsClose:
             diff = float(np.abs(ref.astype(np.float64) - tyr).max())
             tensors[name] = {"verdict": "PASS" if diff <= atol else "FAIL", "max_abs_diff": diff, "atol": atol}
         return {"verdict": worst(t["verdict"] for t in tensors.values()), "tensors": tensors}
+
+
+@dataclass(frozen=True)
+class IntsEqual:
+    """Each named integer list in both `result.json` files is the same; on a
+    difference, the first differing flat index and both values."""
+
+    keys: tuple[str, ...]
+    name: str = "ints"
+
+    def __call__(self, case_dir: Path, device: str) -> dict:
+        ref, _ = probe.read(case_dir / "reference")
+        tyr, _ = probe.read(case_dir / "tyr")
+        fields = {}
+        for key in self.keys:
+            a = np.asarray(ref[key]).ravel()
+            b = np.asarray(tyr[key]).ravel()
+            entry = {"verdict": "PASS", "count": int(a.size)}
+            if a.shape != b.shape:
+                entry.update(verdict="FAIL", reference_count=int(a.size), tyr_count=int(b.size))
+            elif (differ := np.flatnonzero(a != b)).size:
+                i = int(differ[0])
+                entry.update(verdict="FAIL", differing=int(differ.size), index=i,
+                             reference=int(a[i]), tyr=int(b[i]))
+            fields[key] = entry
+        return {"verdict": worst(f["verdict"] for f in fields.values()), "fields": fields}
