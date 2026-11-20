@@ -1,0 +1,1 @@
+{"audio": "audio/short_24k.wav", "language": "English", "text": "Each test runs the original Python implementation next to tyr on the same input, and the outputs have to agree token for token before anything is called a pass."}

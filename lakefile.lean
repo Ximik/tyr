@@ -384,6 +384,22 @@ lean_exe ParitySileroVAD where
   root := `Examples.Parity.SileroVAD
   supportInterpreter := true
 
+lean_exe ParityQwen3TTSEncode where
+  root := `Examples.Parity.Qwen3TTSEncode
+  supportInterpreter := true
+
+lean_exe ParityQwen3TTSSpeaker where
+  root := `Examples.Parity.Qwen3TTSSpeaker
+  supportInterpreter := true
+
+lean_exe ParityQwen3TTSDecode where
+  root := `Examples.Parity.Qwen3TTSDecode
+  supportInterpreter := true
+
+lean_exe ParityQwen3TTSTalker where
+  root := `Examples.Parity.Qwen3TTSTalker
+  supportInterpreter := true
+
 /-- Focused native acceptance path while model tensor migration is in progress. -/
 lean_exe test_typed_models where
   root := `Tests.RunTypedModels
