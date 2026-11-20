@@ -101,9 +101,8 @@ jobs:
           bash scripts/test_native_distributed_recovery.sh
           bash scripts/test_functional_grad_callback.sh
 
-      - name: Build examples and FFI probe
-        run: |
-          lake build --wfail Examples ffi_crash_probe
+      - name: Build examples and every executable
+        run: .github/scripts/build_executables.sh
 
       - name: Check FFI crash reporting
         run: .github/scripts/check_ffi_crash_probe.sh
