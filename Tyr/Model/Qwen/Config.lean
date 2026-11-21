@@ -61,22 +61,6 @@ def head_dim (cfg : QwenConfig) : Nat := 2 * cfg.half_head_dim
 /-- Default Qwen3-4B configuration -/
 def qwen3_4B : QwenConfig := {}
 
-/-- Flux Klein text encoder configuration.
-    This is based on Qwen3 but with different architecture parameters.
-    Notable: 36 layers, 32 attention heads, 8 KV heads, larger intermediate size.
-    Also uses Q/K norms in attention layers. -/
-def fluxKleinTextEncoder : QwenConfig := {
-  vocab_size := 151936
-  hidden_size := 2560
-  intermediate_size := 9728  -- larger than standard Qwen3-4B
-  num_hidden_layers := 36    -- more layers than Qwen3-4B (28)
-  num_attention_heads := 32  -- more heads than Qwen3-4B (20)
-  num_key_value_heads := 8   -- more KV heads than Qwen3-4B (4)
-  half_head_dim := 64        -- same
-  rope_theta := 1000000.0    -- different base (10000 for standard)
-  rms_norm_eps := 1e-6
-}
-
 end QwenConfig
 
 end torch.qwen
