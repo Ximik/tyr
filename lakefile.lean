@@ -405,3 +405,7 @@ lean_exe ParityFluxStep where
 lean_exe ParityFluxSample where
   root := `Examples.Parity.FluxSample
   supportInterpreter := true
+
+lean_exe ParityTokenizer where
+  root := `Examples.Parity.Tokenizer
+  supportInterpreter := true

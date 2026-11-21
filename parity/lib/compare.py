@@ -110,3 +110,32 @@ class IntsEqual:
                              reference=int(a[i]), tyr=int(b[i]))
             fields[key] = entry
         return {"verdict": worst(f["verdict"] for f in fields.values()), "fields": fields}
+
+
+@dataclass(frozen=True)
+class ListsEqual:
+    """Each named list of integer lists in both `result.json` files is the same,
+    item by item; on a difference, how many items differ and, for the first, its
+    index, the first differing position and both lengths."""
+
+    keys: tuple[str, ...]
+    name: str = "lists"
+
+    def __call__(self, case_dir: Path, device: str) -> dict:
+        ref, _ = probe.read(case_dir / "reference")
+        tyr, _ = probe.read(case_dir / "tyr")
+        fields = {}
+        for key in self.keys:
+            a, b = ref[key], tyr[key]
+            entry = {"verdict": "PASS", "count": len(a)}
+            if len(a) != len(b):
+                entry.update(verdict="FAIL", reference_count=len(a), tyr_count=len(b))
+            elif differ := [i for i, (x, y) in enumerate(zip(a, b)) if x != y]:
+                i = differ[0]
+                x, y = a[i], b[i]
+                at = next((j for j, (u, v) in enumerate(zip(x, y)) if u != v), min(len(x), len(y)))
+                entry.update(verdict="FAIL", differing=len(differ), item=i, position=at,
+                             reference_length=len(x), tyr_length=len(y),
+                             reference=x[at:at + 8], tyr=y[at:at + 8])
+            fields[key] = entry
+        return {"verdict": worst(f["verdict"] for f in fields.values()), "fields": fields}
