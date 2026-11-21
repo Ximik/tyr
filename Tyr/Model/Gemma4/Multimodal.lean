@@ -539,6 +539,20 @@ def generate {batch seq : Nat}
     eosTokenIds
     prefillMasks
 
+/-- Logits of feeding `forced` through the KV cache after the prompt, with the
+    image features injected at their placeholder tokens. -/
+def forcedLogits {batch seq steps : Nat}
+    (cfg : VLConfig)
+    (m : Gemma4ForConditionalGeneration (visionDType := visionDType) (projectorDType := projectorDType) (dtype := dtype) (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    (imageFeatures : Option (ImageFeatures (dtype := projectorDType) (device := device) cfg) := none)
+    : IO (Tensor { device := device, shape := #[batch, steps, cfg.text_config.vocab_size], dtype := dtype }) := do
+  let (inputsEmbeds, perLayerInputs) ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures
+  let prefillMasks ← bidirectionalVisionPrefillMasks? cfg inputIds
+  m.language_model.forcedLogitsFromEmbedsWithPerLayerInputs cfg.text_config inputIds inputsEmbeds perLayerInputs forced
+    prefillMasks
+
 def generateStream {batch seq : Nat}
     (cfg : VLConfig)
     (m : Gemma4ForConditionalGeneration (visionDType := visionDType) (projectorDType := projectorDType) (dtype := dtype) (device := device) cfg)

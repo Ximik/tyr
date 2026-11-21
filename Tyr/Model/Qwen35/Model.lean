@@ -1435,10 +1435,10 @@ private partial def forcedLoopCached {batch maxLen steps : Nat}
 /-- Logits after `inputIds` and after each token of `forced` but the last, the
 prompt prefilled in one pass and the tokens fed one at a time through the cache.
 Position `i` of the result scores the choice of `forced[:, i]`. -/
-def forcedLogits {batch seq steps : Nat}
+def forcedLogitsFromEmbeds {batch seq steps : Nat}
     (cfg : Config)
     (m : Qwen35ForCausalLM (dtype := dtype) (device := device) cfg)
-    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
     : IO (Tensor { device := device, shape := #[batch, steps, cfg.vocab_size], dtype := dtype }) := do
   let support ← dtype.acquireConstantSupport device
@@ -1447,13 +1447,20 @@ def forcedLogits {batch seq steps : Nat}
     throw <| IO.userError "forcedLogits requires non-empty prompt sequence"
   if steps == 0 then
     throw <| IO.userError "forcedLogits requires at least one forced token"
-  let inputsEmbeds := m.embedTokens inputIds
   let maxLen := seq + steps
   let (cosAll, sinAll) := Tensor.rotaryFreqs maxLen (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device
   let cache := Qwen35Model.initCache cfg m.model maxLen inputsEmbeds.device (h := by omega)
   let (logits, cache') ← prefillCachesFromEmbeds cfg m cosAll sinAll inputsEmbeds cache (by omega) hSeq
   let steps' ← forcedLoopCached cfg m cosAll sinAll forced 0 cache' logits #[] (by omega)
   IO.ofExcept <| Tensor.catMany? (steps'.map Tensor.packShape) 1 #[batch, steps, cfg.vocab_size]
+
+def forcedLogits {batch seq steps : Nat}
+    (cfg : Config)
+    (m : Qwen35ForCausalLM (dtype := dtype) (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    : IO (Tensor { device := device, shape := #[batch, steps, cfg.vocab_size], dtype := dtype }) :=
+  m.forcedLogitsFromEmbeds cfg (m.embedTokens inputIds) forced
 
 /-- Convenience wrapper for greedy generation. -/
 def generateGreedy {batch seq : Nat}
