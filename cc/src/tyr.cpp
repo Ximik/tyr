@@ -755,6 +755,11 @@ UNOP_FUN(sigmoid)
 UNOP_FUN(sin)
 UNOP_FUN(cos)
 UNOP_FUN(atan)
+
+lean_object* lean_torch_tensor_gelu_tanh(b_lean_obj_arg a) {
+  auto a_ = borrowTensor(a);
+  return fromTorchTensor(torch::gelu(a_, "tanh"));
+}
 UNOP_FUN(floor)
 UNOP_FUN(tanh)
 UNOP_FUN(exp)

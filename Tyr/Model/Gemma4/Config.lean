@@ -88,7 +88,6 @@ structure Gemma4Config where
   half_full_rotary_dim : Nat := 64
   rms_norm_eps : Float := 1e-6
 
-  hidden_activation : String := "gelu_pytorch_tanh"
   attention_k_eq_v : Bool := false
   use_bidirectional_attention : String := ""
 
@@ -163,7 +162,6 @@ def gemma4_E4B : Gemma4Config :=
     sliding_rope_theta := 10000.0
     full_rope_theta := 1000000.0
     rms_norm_eps := 1e-6
-    hidden_activation := "gelu_pytorch_tanh"
     attention_k_eq_v := false
     use_bidirectional_attention := ""
     layer_types := #[
@@ -233,7 +231,6 @@ def gemma4_26B_A4B : Gemma4Config :=
     sliding_rope_theta := 10000.0
     full_rope_theta := 1000000.0
     rms_norm_eps := 1e-6
-    hidden_activation := "gelu_pytorch_tanh"
     attention_k_eq_v := true
     use_bidirectional_attention := "vision"
     layer_types := #[

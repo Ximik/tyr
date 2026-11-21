@@ -103,7 +103,7 @@ def forward {tokens : Nat}
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
   let h : Tensor { device := device, shape := #[tokens, cfg.intermediate_size], dtype := dtype } :=
     linear2d x m.linear_fc1_weight m.linear_fc1_bias
-  linear2d (Tensor.gelu h) m.linear_fc2_weight m.linear_fc2_bias
+  linear2d (Tensor.geluTanh h) m.linear_fc2_weight m.linear_fc2_bias
 
 end Qwen35VisionMLP
 

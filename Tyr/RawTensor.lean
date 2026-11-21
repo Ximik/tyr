@@ -56,6 +56,8 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_tensor_gelu"] opaque gelu! (t : @& RawTensor) : RawTensor
 
+@[extern "lean_torch_tensor_gelu_tanh"] opaque geluTanh! (t : @& RawTensor) : RawTensor
+
 @[extern "lean_torch_tensor_silu"] opaque silu! (t : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_transpose_2d"] opaque transpose2d (t : @& RawTensor) : RawTensor

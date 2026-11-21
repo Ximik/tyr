@@ -13,6 +13,7 @@ namespace torch.gemma4
 open Lean ConfigJson
 
 def VisionConfig.parseJson (j : Json) (d : VisionConfig := {}) : Except String VisionConfig := do
+  requireOneOf j "hidden_activation" ["gelu_pytorch_tanh"]
   let hidden_size ← fieldD? j "hidden_size" d.hidden_size
   let num_attention_heads ← fieldD? j "num_attention_heads" d.num_attention_heads
   let num_key_value_heads ← fieldD? j "num_key_value_heads" d.num_key_value_heads

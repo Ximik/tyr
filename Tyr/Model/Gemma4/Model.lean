@@ -128,7 +128,7 @@ def forward {batch seq : Nat}
     (m : Gemma4MLP (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
-  Tensor.linear3d (Tensor.mul (Tensor.gelu (Tensor.linear3d x m.gate_proj)) (Tensor.linear3d x m.up_proj)) m.down_proj
+  Tensor.linear3d (Tensor.mul (Tensor.geluTanh (Tensor.linear3d x m.gate_proj)) (Tensor.linear3d x m.up_proj)) m.down_proj
 
 end Gemma4MLP
 
@@ -845,7 +845,7 @@ private def applyPerLayerInput {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let residual := hidden
   let gated : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size_per_layer_input], dtype := dtype } :=
-    Tensor.gelu (Tensor.linear3d hidden block.per_layer_input_gate)
+    Tensor.geluTanh (Tensor.linear3d hidden block.per_layer_input_gate)
   let mixed := Tensor.mul gated perLayerInput
   let projected : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.linear3d mixed block.per_layer_projection
   let projected := block.post_per_layer_input_norm.forward3d projected

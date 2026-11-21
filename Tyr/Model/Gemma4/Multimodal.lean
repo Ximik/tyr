@@ -186,7 +186,7 @@ def forward {tokens : Nat}
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
   let gate : Tensor { device := device, shape := #[tokens, cfg.intermediate_size], dtype := dtype } := m.gate_proj.forward2d x
   let up : Tensor { device := device, shape := #[tokens, cfg.intermediate_size], dtype := dtype } := m.up_proj.forward2d x
-  m.down_proj.forward2d (Tensor.mul (Tensor.gelu gate) up)
+  m.down_proj.forward2d (Tensor.mul (Tensor.geluTanh gate) up)
 
 end Gemma4VisionMLP
 
