@@ -34,6 +34,7 @@ text-only checkpoint). Behavior the decoder hard-codes is required of the file. 
 def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except String Config := do
   let textCfg := (← objectField? j "text_config").getD j
   requireEq textCfg "attention_bias" false
+  requireOneOf textCfg "hidden_activation" ["gelu_pytorch_tanh"]
   let vocab ← fieldD? textCfg "vocab_size" d.vocab_size
   let hidden ← fieldD? textCfg "hidden_size" d.hidden_size
   let heads ← fieldD? textCfg "num_attention_heads" d.num_attention_heads
@@ -157,7 +158,6 @@ def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except Strin
     full_rope_theta := fullTheta
     half_full_rotary_dim := fullRotaryDim / 2
     rms_norm_eps := eps
-    hidden_activation := ← fieldD? textCfg "hidden_activation" d.hidden_activation
     attention_k_eq_v := kEqV
     use_bidirectional_attention := bidirectional
     layer_types := layerTypes

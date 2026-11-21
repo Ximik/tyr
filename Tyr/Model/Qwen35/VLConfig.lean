@@ -11,7 +11,6 @@ namespace torch.qwen35
 structure Qwen35VisionConfig where
   depth : Nat := 27
   hidden_size : Nat := 1152
-  hidden_act : String := "gelu_pytorch_tanh"
   intermediate_size : Nat := 4304
   num_heads : Nat := 16
   /-- Half the per-head channel count (`hidden_size / num_heads / 2`). -/
@@ -36,7 +35,6 @@ namespace Qwen35VisionConfig
 def qwen35_0_8B : Qwen35VisionConfig := {
   depth := 12
   hidden_size := 768
-  hidden_act := "gelu_pytorch_tanh"
   intermediate_size := 3072
   num_heads := 12
   half_head_dim := 32
@@ -52,7 +50,6 @@ def qwen35_0_8B : Qwen35VisionConfig := {
 def qwen36_35B_A3B : Qwen35VisionConfig := {
   depth := 27
   hidden_size := 1152
-  hidden_act := "gelu_pytorch_tanh"
   intermediate_size := 4304
   num_heads := 16
   half_head_dim := 36

@@ -503,6 +503,13 @@ def gelu {σ : StaticSpec} (t : Tensor σ)
     (_domain : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide) : Tensor σ :=
   gelu! t
 
+def geluTanh! {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  Tensor.ofRaw! (RawTensor.geluTanh! t.raw)
+
+def geluTanh {σ : StaticSpec} (t : Tensor σ)
+    (_domain : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide) : Tensor σ :=
+  geluTanh! t
+
 def silu! {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
   Tensor.ofRaw! (RawTensor.silu! t.raw)
 

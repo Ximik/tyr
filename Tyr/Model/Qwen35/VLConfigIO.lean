@@ -11,6 +11,7 @@ namespace torch.qwen35
 open Lean ConfigJson
 
 private def parseVisionConfig (j : Json) (d : VisionConfig := {}) : Except String VisionConfig := do
+  requireOneOf j "hidden_act" ["gelu_pytorch_tanh"]
   let hidden_size ← fieldD? j "hidden_size" d.hidden_size
   let num_heads ← fieldD? j "num_heads" d.num_heads
   let ⟨hHeads⟩ ← if h : 0 < num_heads ∧ num_heads ∣ hidden_size then pure (PLift.up h) else
@@ -23,7 +24,6 @@ private def parseVisionConfig (j : Json) (d : VisionConfig := {}) : Except Strin
   pure {
     depth := ← fieldD? j "depth" d.depth
     hidden_size
-    hidden_act := ← fieldD? j "hidden_act" d.hidden_act
     intermediate_size := ← fieldD? j "intermediate_size" d.intermediate_size
     num_heads
     in_channels := ← fieldD? j "in_channels" d.in_channels
