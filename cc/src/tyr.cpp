@@ -1528,8 +1528,7 @@ lean_object* lean_torch_gemma4_text_experts_forward(
     }
 
     auto selected_hidden = torch::index_select(hidden_, 0, selected_tokens);
-    auto selected_weights =
-        flat_vals.masked_select(mask).to(selected_hidden.scalar_type()).unsqueeze(1);
+    auto selected_weights = flat_vals.masked_select(mask).unsqueeze(1);
 
     auto gate_up = gate_up_proj_.select(0, expert_id).contiguous();
     auto gate_up_out = torch::matmul(selected_hidden, gate_up.transpose(0, 1));
@@ -1542,7 +1541,7 @@ lean_object* lean_torch_gemma4_text_experts_forward(
 
     auto down = down_proj_.select(0, expert_id).contiguous();
     auto out = torch::matmul(intermediate, down.transpose(0, 1));
-    result_.index_add_(0, selected_tokens, out * selected_weights);
+    result_.index_add_(0, selected_tokens, (out * selected_weights).to(result_.scalar_type()));
   }
 
   return fromTorchTensor(result_);
