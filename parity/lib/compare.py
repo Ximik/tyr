@@ -139,3 +139,34 @@ class ListsEqual:
                              reference=x[at:at + 8], tyr=y[at:at + 8])
             fields[key] = entry
         return {"verdict": worst(f["verdict"] for f in fields.values()), "fields": fields}
+
+
+@dataclass(frozen=True)
+class IntsTiedWhereUnstable:
+    """The integer list `key` in both `result.json` files is the same, except that off
+    the CPU a difference where the reference's own `unstable` list (the same
+    computation on the CPU) differs from its `key` is a tie."""
+
+    key: str
+    unstable: str
+    name: str = "ints"
+
+    def __call__(self, case_dir: Path, device: str) -> dict:
+        ref, _ = probe.read(case_dir / "reference")
+        tyr, _ = probe.read(case_dir / "tyr")
+        a = np.asarray(ref[self.key]).ravel()
+        b = np.asarray(tyr[self.key]).ravel()
+        if a.shape != b.shape:
+            return {"verdict": "FAIL", "reference_count": int(a.size), "tyr_count": int(b.size)}
+        differ = np.flatnonzero(a != b)
+        if differ.size == 0:
+            return {"verdict": "PASS", "count": int(a.size)}
+        unstable = np.zeros(a.shape, dtype=bool)
+        if device != "cpu":
+            unstable = a != np.asarray(ref[self.unstable]).ravel()
+        failing = differ[~unstable[differ]]
+        entry = {"count": int(a.size), "differing": int(differ.size), "unstable": int(unstable.sum())}
+        if failing.size:
+            i = int(failing[0])
+            return {"verdict": "FAIL", **entry, "index": i, "reference": int(a[i]), "tyr": int(b[i])}
+        return {"verdict": "TIE", **entry}
