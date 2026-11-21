@@ -1,13 +1,18 @@
 """Run the parity tests of the current commit on Modal.
 
-    python parity/modal/run_modal.py [--tests a,b]
+    python parity/modal/run_modal.py start [--tests a,b]
+    python parity/modal/run_modal.py status <sandbox id>
+    python parity/modal/run_modal.py download <sandbox id> [--tests a,b] [--tensors]
 
-The image fetches HEAD from the remote that has it and runs
-`parity/modal/build.sh`. `run.py --weights-only` fills the volume
-`tyr-parity-weights`; then `run.py` runs on a CPU machine and on an H100 at
-once, and their results are copied from the volume `tyr-parity-out` to
-`output/parity/<sha>/{cpu,gpu}/`. Exits nonzero if a step fails or any case is
-FAIL or ERROR.
+`start` builds the commit's image, which fetches HEAD from the remote that has
+it and runs `parity/modal/build.sh`, fills the volume `tyr-parity-weights`
+with `run.py --weights-only`, then starts `run.py` on a CPU machine and on an
+H100 and prints the two sandboxes' ids; it does not wait for them. Each writes
+its results under its id in the volume `tyr-parity-out`, as `run.py` lays them
+out (`<id>/<sha>/<device>/`), committed every minute. `status` shows whether a
+sandbox is running or its exit code, and the verdicts written so far;
+`download` copies its results, without the tensor files unless `--tensors`, to
+`output/parity/<id>/`.
 
 Runs itself in `parity/modal/.venv`, created on first use with
 `parity/modal/requirements.txt`. `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (a
@@ -16,6 +21,7 @@ the environment or the repository's `.env`."""
 
 import argparse
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -39,6 +45,7 @@ ENVS = "/opt/parity-envs"
 WEIGHTS = "/weights"
 OUT = "/out"
 TIMEOUT = 6 * 3600
+RUNS = (("cpu", "cpu", {"cpu": 16.0, "memory": 65536}), ("gpu", "cuda", {"gpu": "H100", "cpu": 8.0, "memory": 65536}))
 
 
 def git(*args: str) -> str:
@@ -56,10 +63,13 @@ def https_url(url: str) -> str:
 
 def checked_commit() -> tuple[str, str]:
     """HEAD and an https URL of a remote with a branch containing it; exits if
-    the tree has other changes or no remote branch contains HEAD."""
-    dirty = [line[3:] for line in git("status", "--porcelain").splitlines() if line[3:] not in LOCAL_ONLY]
+    the tree has other changes or no remote branch contains HEAD. Markdown
+    changes are allowed: nothing the image builds or runs reads them."""
+    dirty = [path for path in (line[3:] for line in git("status", "--porcelain").splitlines())
+             if path not in LOCAL_ONLY and not path.endswith(".md")]
     if dirty:
-        sys.exit("the working tree has changes besides " + " and ".join(LOCAL_ONLY) + ":\n  " + "\n  ".join(dirty))
+        sys.exit("the working tree has changes besides " + ", ".join(LOCAL_ONLY) + " and Markdown files:\n  "
+                 + "\n  ".join(dirty))
     sha = git("rev-parse", "HEAD").strip()
     branches = [line.strip().split(" -> ")[0] for line in git("branch", "-r", "--contains", sha).splitlines()]
     if not branches:
@@ -86,75 +96,117 @@ def build_image(sha: str, url: str) -> modal.Image:
     )
 
 
-def start(label: str, command: str, mounts: list[str], **options) -> modal.Sandbox:
-    """Start `command` in the checkout; its output is printed prefixed with
-    `label`, and the mounted volumes are synced before it exits."""
-    script = f"{command} 2>&1; status=$?; sync {' '.join(mounts)}; exit $status"
-    sandbox = modal.Sandbox.create("bash", "-c", script, workdir=CHECKOUT, timeout=TIMEOUT, **options)
-    threading.Thread(target=lambda: [print(f"[{label}] {line}", end="", flush=True) for line in sandbox.stdout],
-                     daemon=True).start()
-    return sandbox
+def sandbox(command: str, mount: str, **options) -> modal.Sandbox:
+    """Start `command` in the checkout; the volume at `mount` is committed every
+    minute and before it exits."""
+    script = (f"(while sleep 60; do sync {mount}; done) & syncer=$!; {command} 2>&1; status=$?; "
+              f"kill $syncer; sync {mount}; exit $status")
+    return modal.Sandbox.create("bash", "-c", script, workdir=CHECKOUT, timeout=TIMEOUT, **options)
 
 
-def finish(sandbox: modal.Sandbox) -> int:
-    sandbox.wait(raise_on_termination=False)
-    return sandbox.returncode if sandbox.returncode is not None else 1
+def fetch_weights(selection: str, weights: modal.Volume, **options) -> int:
+    """Run `run.py --weights-only`, printing its output, and wait for it."""
+    fetch = sandbox(f"python3 parity/run.py --envs {ENVS} --weights-only --weights {WEIGHTS}{selection}", WEIGHTS,
+                    volumes={WEIGHTS: weights}, cpu=4.0, **options)
+    reader = threading.Thread(target=lambda: [print(f"[weights] {line}", end="", flush=True) for line in fetch.stdout])
+    reader.start()
+    fetch.wait(raise_on_termination=False)
+    reader.join()
+    return fetch.returncode if fetch.returncode is not None else 1
 
 
-def download(volume: modal.Volume, source: str, target: Path) -> None:
-    shutil.rmtree(target, ignore_errors=True)
-    for entry in volume.listdir(source, recursive=True):
-        if entry.type != modal.volume.FileEntryType.FILE:
-            continue
-        path = target / Path(entry.path).relative_to(source)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as f:
-            for chunk in volume.read_file(entry.path):
-                f.write(chunk)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--tests", help="comma-separated test names; default: all")
-    args = parser.parse_args()
+def start(args) -> int:
     sha, url = checked_commit()
-
     app = modal.App.lookup("tyr-parity", create_if_missing=True)
     weights = modal.Volume.from_name("tyr-parity-weights", create_if_missing=True)
     out = modal.Volume.from_name("tyr-parity-out", create_if_missing=True)
     common = {"app": app, "image": build_image(sha, url)}
-
     hf_secret = [modal.Secret.from_dict({"HF_TOKEN": os.environ["HF_TOKEN"]})] if "HF_TOKEN" in os.environ else []
+    selection = f" --tests {args.tests}" if args.tests else ""
 
     with modal.enable_output():
-        selection = f" --tests {args.tests}" if args.tests else ""
-        fetch = start("weights", f"python3 parity/run.py --envs {ENVS} --weights-only --weights {WEIGHTS}{selection}", [WEIGHTS],
-                        volumes={WEIGHTS: weights}, secrets=hf_secret,
-                        cpu=4.0, **common)
-        if finish(fetch) != 0:
+        if fetch_weights(selection, weights, secrets=hf_secret, **common) != 0:
             print("fetching weights failed", file=sys.stderr)
             return 1
+    for device, kind, resources in RUNS:
+        run = sandbox(f"python3 parity/run.py --envs {ENVS} --device {kind} --weights {WEIGHTS}"
+                      f" --out {OUT}/$MODAL_SANDBOX_ID{selection}",
+                      OUT, volumes={WEIGHTS: weights.read_only(), OUT: out}, **resources, **common)
+        run.set_tags({"sha": sha, "device": device, "tests": args.tests or ""})
+        print(f"{device}: {run.object_id}")
+    return 0
 
-        volumes = {WEIGHTS: weights.read_only(), OUT: out}
-        runs = {
-            device: start(device, f"python3 parity/run.py --envs {ENVS} --device {kind} --weights {WEIGHTS} --out {OUT}{selection}",
-                          [OUT], volumes=volumes, **resources, **common)
-            for device, kind, resources in (
-                ("cpu", "cpu", {"cpu": 16.0, "memory": 65536}),
-                ("gpu", "cuda", {"gpu": "H100", "cpu": 8.0, "memory": 65536}),
-            )
-        }
-        codes = {device: finish(sandbox) for device, sandbox in runs.items()}
 
-    for device in runs:
-        try:
-            download(out, f"{sha}/{device}", REPO / "output" / "parity" / sha / device)
-        except Exception as error:
-            print(f"{device}: no results downloaded: {error}", file=sys.stderr)
-            codes[device] = codes[device] or 1
-    for device, code in codes.items():
-        print(f"{device}: exit {code}")
-    return 0 if all(code == 0 for code in codes.values()) else 1
+def tagged(sandbox_id: str) -> tuple[modal.Sandbox, str, str]:
+    """The sandbox `start` created, its commit and its device."""
+    run = modal.Sandbox.from_id(sandbox_id)
+    tags = run.get_tags()
+    if "sha" not in tags or "device" not in tags:
+        sys.exit(f"{sandbox_id} is not a sandbox `start` created")
+    return run, tags["sha"], tags["device"]
+
+
+def results(out: modal.Volume, source: str) -> list[str]:
+    """The files under `source` in the out volume, or none yet."""
+    try:
+        return [e.path for e in out.listdir(source, recursive=True) if e.type == modal.volume.FileEntryType.FILE]
+    except Exception:
+        return []
+
+
+def status(args) -> int:
+    run, sha, device = tagged(args.id)
+    code = run.poll()
+    print(f"{sha} {device}: " + ("running" if code is None else f"exited {code}"))
+    out = modal.Volume.from_name("tyr-parity-out")
+    source = f"{args.id}/{sha}/{device}"
+    cases = (p for p in results(out, source)
+             if p.endswith("/result.json") and Path(p).parent.name not in ("reference", "tyr"))
+    for path in sorted(cases):
+        case = str(Path(path).parent.relative_to(source))
+        verdict = json.loads(b"".join(out.read_file(path))).get("verdict")
+        print(f"  {case}: {verdict}")
+    return 0
+
+
+def download(args) -> int:
+    _, sha, device = tagged(args.id)
+    out = modal.Volume.from_name("tyr-parity-out")
+    source = f"{args.id}/{sha}/{device}"
+    target = REPO / "output" / "parity" / args.id / sha / device
+    tests = set(args.tests.split(",")) if args.tests else None
+    for test in tests or [""]:
+        shutil.rmtree(target / test, ignore_errors=True)
+    copied = 0
+    for path in results(out, source):
+        relative = Path(path).relative_to(source)
+        if tests is not None and relative.parts[0] not in tests:
+            continue
+        if path.endswith(".safetensors") and not args.tensors:
+            continue
+        local = target / relative
+        local.parent.mkdir(parents=True, exist_ok=True)
+        with open(local, "wb") as f:
+            for chunk in out.read_file(path):
+                f.write(chunk)
+        copied += 1
+    print(f"{copied} files to {target}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command", required=True)
+    start_parser = commands.add_parser("start", help="build, fetch weights and start the CPU and GPU runs")
+    start_parser.add_argument("--tests", help="comma-separated test names; default: all")
+    status_parser = commands.add_parser("status", help="a run's state and its verdicts so far")
+    status_parser.add_argument("id", help="a sandbox id `start` printed")
+    download_parser = commands.add_parser("download", help="copy a run's results")
+    download_parser.add_argument("id", help="a sandbox id `start` printed")
+    download_parser.add_argument("--tests", help="comma-separated test names; default: all")
+    download_parser.add_argument("--tensors", action="store_true", help="also the tensor files")
+    args = parser.parse_args()
+    return {"start": start, "status": status, "download": download}[args.command](args)
 
 
 if __name__ == "__main__":

@@ -107,9 +107,12 @@ if the system has none. It then downloads and checks the weights listed in
 the current Lake configuration, and runs the tests.
 
 On Modal, for the current commit, which must be on a remote branch and have
-a clean tree; CPU and H100 run in parallel:
+a clean tree apart from Markdown files. `start` builds the image and fetches the weights, then starts the
+CPU and H100 runs and prints their sandbox ids without waiting for them:
 ```bash
-python parity/modal/run_modal.py [--tests qwen3]
+python parity/modal/run_modal.py start [--tests qwen3]
+python parity/modal/run_modal.py status <id>                # running or exit code, verdicts so far
+python parity/modal/run_modal.py download <id> [--tensors]  # to output/parity/<id>/
 ```
 On first run it creates `parity/modal/.venv` with the pinned `modal` package
 (`parity/modal/requirements.txt`) and runs itself there. It needs only the
