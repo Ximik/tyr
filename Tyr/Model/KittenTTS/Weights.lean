@@ -597,12 +597,15 @@ structure Loaded where
   device : Device
   model : Model (device := device) cfg
 
+/-- Loads onto `device?`, or else the device `TYR_DEVICE` names. -/
 def loadAutoConfig (path : String) (cfg : KittenTTSConfig := {}) (log : Handlers := {})
-    : IO Loaded := do
+    (device? : Option Device := none) : IO Loaded := do
   log.onInfo s!"Loading KittenTTS weights from {path}..."
   checkKokoroV1 cfg log
   let weights ← loadCheckpointWeights path log
-  let device ← resolveKittenDevice log
+  let device ← match device? with
+    | some device => pure device
+    | none => resolveKittenDevice log
   let model ← buildModelFromCheckpointWeights weights log device
   pure { cfg := kokoro, device, model }
 
