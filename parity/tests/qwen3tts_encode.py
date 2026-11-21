@@ -1,7 +1,7 @@
 import json
 
 from lib import audio, probe
-from lib.compare import IntsEqual
+from lib.compare import IntsTiedWhereUnstable
 from lib.test import Test
 
 TEST = Test(
@@ -14,7 +14,7 @@ TEST = Test(
     env="qwen-tts",
 )
 
-CHECKS = [IntsEqual(keys=("codes",))]
+CHECKS = [IntsTiedWhereUnstable(key="codes", unstable="cpu_codes")]
 
 
 def reference(case, weights, device, dtype, out):
@@ -27,11 +27,18 @@ def reference(case, weights, device, dtype, out):
     # Mimi's sdpa/eager path drops the config's `sliding_window`; only flash attention applies it.
     mimi.create_causal_mask = create_sliding_window_causal_mask
     rate, samples = audio.read(audio.case_audio(case))
-    tokenizer = Qwen3TTSTokenizer.from_pretrained(str(weights / "speech_tokenizer"), dtype=torch.float32,
-                                                  device_map=device)
-    codes = tokenizer.encode(samples, sr=rate).audio_codes[0]
+    def encode(on):
+        tokenizer = Qwen3TTSTokenizer.from_pretrained(str(weights / "speech_tokenizer"), dtype=torch.float32,
+                                                      device_map=on)
+        return tokenizer.encode(samples, sr=rate).audio_codes[0].tolist()
+
+    result = {"codes": encode(device)}
+    if device != "cpu":
+        # About 5% of the codes sit so close to a quantizer tie that the reference's own GPU
+        # run picks differently from its CPU run; there a differing tyr code is a tie.
+        result["cpu_codes"] = encode("cpu")
     out.mkdir(parents=True, exist_ok=True)
-    (out / "result.json").write_text(json.dumps({"codes": codes.tolist()}))
+    (out / "result.json").write_text(json.dumps(result))
 
 
 def tyr(case, weights, device, dtype, out):
