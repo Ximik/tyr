@@ -7,6 +7,7 @@
 import Tyr.Torch
 import Tyr.Model.Qwen
 import Tyr.Model.Qwen.Weights
+import Tyr.Model.Qwen3.ConfigIO
 import Tyr.Model.VAE
 import Tyr.Model.VAE.Weights
 import Tyr.Model.Flux
@@ -148,7 +149,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "Loading models..."
 
   -- Load Qwen text encoder (sharded, with Flux Klein config)
-  let qwenCfg := QwenConfig.fluxKleinTextEncoder
+  let qwenCfg ← qwen3.Config.loadFromPretrainedDir cfg.qwenDir
   let qwen ← loadQwenFluxEmbedder cfg.qwenDir qwenCfg maxSeqLen #[8, 17, 26]
   IO.println "  ✓ Qwen text encoder loaded (Flux Klein variant)"
 

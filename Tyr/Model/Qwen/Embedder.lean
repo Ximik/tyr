@@ -16,41 +16,36 @@ import Tyr.Model.Qwen.RoPE
 namespace torch.qwen
 
 variable {device : Device}
-/-- Configuration for Flux text embedding.
-    Specifies which layers to extract hidden states from. -/
-structure FluxEmbedderConfig where
-  /-- Layer indices to extract (0-indexed) -/
-  output_layers : Array Nat := #[8, 17, 26]
-  /-- Maximum sequence length -/
-  max_seq_len : Nat := 512
-  deriving Repr, Inhabited
-
 /-- Qwen-based text embedder for Flux.
     Extracts hidden states from specified layers and concatenates them. -/
 structure QwenFluxEmbedder (cfg : QwenConfig) (max_seq : Nat) where
   /-- The Qwen3 model -/
   model : Qwen3Model (device := device) cfg
+  layersSize : model.layers.size = cfg.num_hidden_layers
   /-- RoPE cache for position embeddings -/
   ropeCache : RoPECache (device := device) max_seq cfg.half_head_dim
-  /-- Which layers to extract -/
-  outputLayers : Array Nat
+  /-- Decoder layers whose outputs are concatenated, 0-indexed -/
+  outputLayers : Array (Fin cfg.num_hidden_layers)
 
 namespace QwenFluxEmbedder
 
-/-- Compute output dimension: num_layers * hidden_size -/
-def outputDim (cfg : QwenConfig) (numLayers : Nat) : Nat :=
-  numLayers * cfg.hidden_size
-
-/-- Create a text embedder from a Qwen3 model -/
+/-- Create a text embedder from a Qwen3 model; `outputLayers` must be nonempty
+    and name layers of `cfg`, and the model must have `cfg.num_hidden_layers` layers. -/
 def fromModel (cfg : QwenConfig) (max_seq : Nat) (model : Qwen3Model (device := device) cfg)
-    (outputLayers : Array Nat := #[8, 17, 26])
+    (outputLayers : Array Nat)
     : IO (QwenFluxEmbedder (device := device) cfg max_seq) := do
+  let ⟨layersSize⟩ ← if h : model.layers.size = cfg.num_hidden_layers then pure (PLift.up h) else
+    throw <| IO.userError s!"the model has {model.layers.size} layers, the config {cfg.num_hidden_layers}"
+  if outputLayers.isEmpty then
+    throw <| IO.userError "no output layers"
+  let outputLayers ← outputLayers.mapM fun i =>
+    if h : i < cfg.num_hidden_layers then pure (⟨i, h⟩ : Fin cfg.num_hidden_layers) else
+      throw <| IO.userError s!"output layer {i} is not below num_hidden_layers = {cfg.num_hidden_layers}"
   let ropeCache ← RoPECache.init (device := device) max_seq cfg.half_head_dim cfg.rope_theta
-  pure { model, ropeCache, outputLayers }
+  pure { model, layersSize, ropeCache, outputLayers }
 
 /-- Concatenate equal-spec tensors along `dim`, validating the runtime
-    result against the claimed output shape (the legacy code reshaped the
-    shape-erased cat result, which libtorch validated with a throw). -/
+    result against the claimed output shape. -/
 private def catAlong {s : Shape} {d : DType} {dev : Device}
     (tensors : Array (Tensor ⟨s, d, dev⟩)) (dim : Nat) (out : Shape)
     : Tensor ⟨out, d, dev⟩ :=
@@ -58,43 +53,10 @@ private def catAlong {s : Shape} {d : DType} {dev : Device}
   | .ok t => t
   | .error message => nativeInvariantFailure s!"{decl_name%}: {message}"
 
-/-- Encode text tokens to Flux-compatible embeddings.
-    Input: [batch, seq] token IDs
-    Output: [batch, seq, output_dim] where output_dim = num_layers * hidden_size
-
-    For Qwen3-4B with layers [8, 17, 26]:
-    output_dim = 3 * 2560 = 7680
-
-    If `outputLayers` names a layer index that produced no hidden state, the
-    concatenated tensor is smaller than the return type claims; `catAlong`
-    panics on the mismatch, exactly where the legacy `reshape` threw. -/
-def encode {batch seq : Nat} (cfg : QwenConfig) (max_seq : Nat)
-    (embedder : QwenFluxEmbedder (device := device) cfg max_seq)
-    (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (hseq : seq ≤ max_seq := by omega)
-    : Tensor { device := device, shape := #[batch, seq, embedder.outputLayers.size * cfg.hidden_size], dtype := .Float32 } :=
-  -- Slice RoPE cache to current sequence length
-  let cos := embedder.ropeCache.cos.slice 0 0 seq
-  let sin := embedder.ropeCache.sin.slice 0 0 seq
-
-  -- Get hidden states from all layers
-  let allHiddenStates := embedder.model.forwardWithHiddenStates cfg input_ids cos sin
-
-  -- Extract specified layers using filterMap
-  let selectedStates : Array (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 }) :=
-    embedder.outputLayers.filterMap fun layerIdx =>
-      if h : layerIdx < allHiddenStates.size then
-        some (allHiddenStates[layerIdx]'h)
-      else
-        none
-
-  -- Concatenate selected states along dim 2
-  if selectedStates.size > 0 then
-    catAlong selectedStates 2 #[batch, seq, embedder.outputLayers.size * cfg.hidden_size]
-  else
-    -- Fallback: return zeros if no layers specified
-    Tensor.zeros (device := device) #[batch, seq, embedder.outputLayers.size * cfg.hidden_size]
-
+/-- Encode text tokens to Flux-compatible embeddings: the outputs of
+    `outputLayers`, concatenated along the feature axis.
+    Input: [batch, seq] token IDs and attention mask
+    Output: [batch, seq, outputLayers.size * hidden_size] -/
 def encodeMasked {batch seq : Nat} (cfg : QwenConfig) (max_seq : Nat)
     {maskDtype : DType}
     (embedder : QwenFluxEmbedder (device := device) cfg max_seq)
@@ -102,27 +64,16 @@ def encodeMasked {batch seq : Nat} (cfg : QwenConfig) (max_seq : Nat)
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, device⟩)
     (hseq : seq ≤ max_seq := by omega)
     : Tensor { device := device, shape := #[batch, seq, embedder.outputLayers.size * cfg.hidden_size], dtype := .Float32 } :=
-  -- Slice RoPE cache to current sequence length
   let cos := embedder.ropeCache.cos.slice 0 0 seq
   let sin := embedder.ropeCache.sin.slice 0 0 seq
-
-  -- Get hidden states from all layers
-  let allHiddenStates := embedder.model.forwardWithHiddenStatesMasked cfg input_ids cos sin attn_mask
-
-  -- Extract specified layers using filterMap
-  let selectedStates : Array (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 }) :=
-    embedder.outputLayers.filterMap fun layerIdx =>
-      if h : layerIdx < allHiddenStates.size then
-        some (allHiddenStates[layerIdx]'h)
-      else
-        none
-
-  -- Concatenate selected states along dim 2
-  if selectedStates.size > 0 then
-    catAlong selectedStates 2 #[batch, seq, embedder.outputLayers.size * cfg.hidden_size]
-  else
-    -- Fallback: return zeros if no layers specified
-    Tensor.zeros (device := device) #[batch, seq, embedder.outputLayers.size * cfg.hidden_size]
+  -- The embedding, then each layer's output.
+  let states := List.scanl
+    (fun h layer => layer.forwardMasked cfg.headsValid.2.2 h cos sin attn_mask true)
+    (Tensor.embedding input_ids embedder.model.embed_tokens) embedder.model.layers.toList
+  have hStates : states.length = cfg.num_hidden_layers + 1 := by
+    simp [states, List.length_scanl, embedder.layersSize]
+  let selected := embedder.outputLayers.map fun i => states[i.val + 1]'(by omega)
+  catAlong selected 2 #[batch, seq, embedder.outputLayers.size * cfg.hidden_size]
 
 end QwenFluxEmbedder
 

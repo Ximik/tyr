@@ -129,7 +129,7 @@ def loadQwen3Model (src : Source) (cfg : QwenConfig := QwenConfig.qwen3_4B)
 
 /-- Load a Qwen model as the Flux text embedder from a SafeTensors file or a
     directory of shards. -/
-def loadQwenFluxEmbedder (path : String) (cfg : QwenConfig := QwenConfig.fluxKleinTextEncoder)
+def loadQwenFluxEmbedder (path : String) (cfg : QwenConfig)
     (max_seq : Nat := 512)
     (outputLayers : Array Nat := #[8, 17, 26])  -- Flux2 reference uses [9,18,27] with embedding state
     (log : Handlers := {})
