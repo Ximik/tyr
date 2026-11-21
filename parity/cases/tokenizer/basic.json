@@ -1,0 +1,42 @@
+{
+ "texts": [
+  "Hello, world!",
+  "The quick brown fox jumps over the lazy dog.",
+  "It's you're we'll they've I'D HE'LL don't it'sre",
+  "def factorial(n):\n    if n <= 1:\n        return 1\n    return n * factorial(n - 1)\n",
+  "int main() {\n\tprintf(\"hi\\n\");\n\treturn 0;\n}",
+  "{ \"key\": [1, 2, 3], \"nested\": {\"a\": true, \"b\": null} }",
+  "SELECT * FROM users WHERE id = 42; -- comment",
+  "https://example.com/path?q=1&r=2#frag",
+  "12345.67 and 3.14159 or 1000000",
+  "Price: $19.99 (20% off)! Order #42, qty 7.",
+  "你好世界，这是测试。",
+  "こんにちは、世界！日本語のテキスト。",
+  "한국어 텍스트도 테스트합니다.",
+  "café naïve résumé — déjà vu",
+  "🎉🎊 Party time! 🚀🌟 Let's go 🎈",
+  "line1\nline2\r\nline3\rline4\n\n\nend",
+  "a\n\n\n\nb",
+  "   \t  mixed\twhitespace   \n\n  runs\t\t",
+  "a b　c d",
+  "١٢٣٤٥٦٧٨٩٠ Arabic-Indic digits Ⅷ roman",
+  "〈|EOS|〉 and 〈|PAD|〉 then <assistant></assistant><think></think>",
+  "!\n〈|EOS|〉\n\n〈|PAD|〉",
+  "\r\n\r\n",
+  "\n",
+  "x\r\ry",
+  "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+  "The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. The cat sat on the mat. ",
+  "",
+  "café naïve ʼs",
+  "〈|EOS|〉<system>You are helpful.</system>\n<user>Hi</user>\n<assistant><think>",
+  "café áb́ ́x",
+  "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "<bos><|turn>user\nHello<turn|>\n<|turn>model\n",
+  "a<|endoftext|>b <pad> <eos>"
+ ],
+ "prompts": [
+  "What is the capital of France?",
+  "Write a haiku about \"autumn leaves\".\nThen explain it."
+ ]
+}
