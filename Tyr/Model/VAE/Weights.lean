@@ -51,6 +51,16 @@ def loadConv2dAtDType [DType.RealFloating dtype] (path : String) (name : String)
     bias := Tensor.detach bias
   }
 
+/-- Load a linear layer (`[out_ch, in_ch]` weight) as the equivalent 1x1 convolution. -/
+def loadLinearAsConv1x1 [DType.RealFloating dtype] (path : String) (name : String) (in_ch out_ch : Nat)
+    (device : Device := .CPU) : IO (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch 1 0) := do
+  let weight ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.weight"] #[out_ch, in_ch]
+  let bias ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.bias"] #[out_ch]
+  pure {
+    weight := Tensor.detach (weight.reshape #[out_ch, in_ch, 1, 1] (by simp))
+    bias := Tensor.detach bias
+  }
+
 /-- Load a convolution with its stored dtype, checking that bias agrees. -/
 def loadConv2d (path : String) (name : String)
     (in_ch out_ch kernel_size padding : Nat) (device : Device := .CPU) :
@@ -82,15 +92,15 @@ def loadResnetBlockChange [DType.RealFloating dtype] (path : String) (name : Str
   let shortcut ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.conv_shortcut" in_ch out_ch 1 0
   pure { norm1, conv1, norm2, conv2, nin_shortcut := .conv shortcut }
 
-/-- Load AttnBlock from Diffusers format
-    Diffusers uses: to_q, to_k, to_v, to_out.0, group_norm -/
+/-- Load AttnBlock from Diffusers format: group_norm, and to_q, to_k, to_v,
+    to_out.0 stored as linear layers -/
 def loadAttnBlock [DType.RealFloating dtype] (path : String) (name : String) (channels : Nat)
     (device : Device := .CPU) : IO (AttnBlock (device := device) (dtype := dtype) channels) := do
   let norm ← loadGroupNorm (dtype := dtype) (device := device) path s!"{name}.group_norm" 32 channels
-  let q ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.to_q" channels channels 1 0
-  let k ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.to_k" channels channels 1 0
-  let v ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.to_v" channels channels 1 0
-  let proj_out ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.to_out.0" channels channels 1 0
+  let q ← loadLinearAsConv1x1 (dtype := dtype) (device := device) path s!"{name}.to_q" channels channels
+  let k ← loadLinearAsConv1x1 (dtype := dtype) (device := device) path s!"{name}.to_k" channels channels
+  let v ← loadLinearAsConv1x1 (dtype := dtype) (device := device) path s!"{name}.to_v" channels channels
+  let proj_out ← loadLinearAsConv1x1 (dtype := dtype) (device := device) path s!"{name}.to_out.0" channels channels
   pure { norm, q, k, v, proj_out }
 
 /-- Load Upsample from Diffusers format -/
