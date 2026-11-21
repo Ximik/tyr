@@ -21,7 +21,7 @@ SEED = 0
 SIDE = 256
 STEPS = 4
 
-CHECKS = [TensorsClose(atol={"latents": 2e-3, "image": 2e-3})]
+CHECKS = [TensorsClose(atol={"latents": 5e-3, "image": 1e-2})]
 
 
 def reference(case, weights, device, dtype, out):

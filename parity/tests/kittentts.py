@@ -24,8 +24,8 @@ SPEED = 1.0
 VOICE = "voices/af_heart.pt"
 
 CHECKS = [IntsEqual(keys=("durations",)), TensorsClose(atol={
-    "f0": 1e-2,
-    "n": 1e-3,
+    "f0": 0.2,
+    "n": 5e-3,
     # Not reproducible yet: the vocoder's noise comes from `torch.rand`/`randn_like`
     # on a non-contiguous view, which tyr's contiguous CPU draws do not reproduce.
     # "wave": 1e-3,

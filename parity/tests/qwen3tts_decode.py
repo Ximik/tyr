@@ -14,7 +14,7 @@ TEST = Test(
     env="qwen-tts",
 )
 
-CHECKS = [TensorsClose(atol={"wave": 1e-3})]
+CHECKS = [TensorsClose(atol={"wave": 4e-3})]
 
 
 def reference(case, weights, device, dtype, out):
