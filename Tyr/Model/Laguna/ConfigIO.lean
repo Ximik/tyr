@@ -28,9 +28,62 @@ private def rotaryDim? (headDim : Nat) (factor : Float) (kind : String) : Except
     throw s!"Invalid Laguna config: {kind} partial_rotary_factor={factor} does not select a whole number of the {headDim} head channels"
   pure r
 
+/-- The `compressed-tensors` pattern naming the routed experts' projections. -/
+private def routedExpertsTarget : String := "re:.*experts\\.[0-9]+\\.(gate_proj|up_proj|down_proj)$"
+
+private def isNullOrAbsent (j : Json) (key : String) : Except String Bool := do
+  match ← member? j key with
+  | none | some .null => pure true
+  | some _ => pure false
+
+private def isEmptyOrAbsent (j : Json) (key : String) : Except String Bool := do
+  match ← member? j key with
+  | none | some .null => pure true
+  | some (.obj fields) => pure fields.isEmpty
+  | some _ => pure false
+
+/-- `quantization_config` must be absent, or name exactly what the loader
+implements: `compressed-tensors` NVFP4 weights (4-bit float, groups of 16,
+symmetric, static) on the routed experts only, with activations and the KV
+cache unquantized. -/
+private def checkQuantization (j : Json) : Except String Unit := do
+  let some q ← member? j "quantization_config" | pure ()
+  if q matches .null then return
+  let unsupported (what : String) :=
+    s!"unsupported quantization_config: {what}; tyr implements NVFP4 weights on the routed experts only"
+  let method : Option String ← field? q "quant_method"
+  unless method == some "compressed-tensors" do throw (unsupported s!"quant_method {method}")
+  let format : Option String ← field? q "format"
+  unless format == some "nvfp4-pack-quantized" do throw (unsupported s!"format {format}")
+  unless ← isNullOrAbsent q "kv_cache_scheme" do throw (unsupported "a kv_cache_scheme")
+  unless (← isEmptyOrAbsent q "sparsity_config") && (← isEmptyOrAbsent q "transform_config") do
+    throw (unsupported "a sparsity_config or transform_config")
+  let some (.obj groups) ← member? q "config_groups" | throw (unsupported "no config_groups object")
+  if groups.isEmpty then throw (unsupported "no config groups")
+  for (name, group) in groups.toArray do
+    let groupFormat : Option String ← field? group "format"
+    unless groupFormat.all (· == "nvfp4-pack-quantized") do
+      throw (unsupported s!"group {name} format {groupFormat}")
+    unless (← isNullOrAbsent group "input_activations") && (← isNullOrAbsent group "output_activations") do
+      throw (unsupported s!"group {name} quantizes activations")
+    let targets : Array String ← fieldD? group "targets" #[]
+    unless targets.all (· == routedExpertsTarget) && !targets.isEmpty do
+      throw (unsupported s!"group {name} targets {targets}")
+    let some weights ← objectField? group "weights" | throw (unsupported s!"group {name} has no weights scheme")
+    let numBits : Option Nat ← field? weights "num_bits"
+    let kind : Option String ← field? weights "type"
+    let strategy : Option String ← field? weights "strategy"
+    let groupSize : Option Nat ← field? weights "group_size"
+    let symmetric : Option Bool ← field? weights "symmetric"
+    let dynamic : Option Bool ← field? weights "dynamic"
+    unless numBits == some 4 && kind == some "float" && strategy == some "tensor_group" &&
+        groupSize == some 16 && symmetric == some true && dynamic == some false do
+      throw (unsupported s!"group {name} weights {weights.compress}")
+
 /-- Parse a Laguna `config.json` root. Behavior the model hard-codes (SiLU MLP, no
-attention bias) is required of the file. -/
+attention bias, the quantization `checkQuantization` admits) is required of the file. -/
 def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Except String Config := do
+  checkQuantization j
   requireOneOf j "hidden_act" ["silu"]
   requireEq j "attention_bias" false
   let numLayers ← fieldD? j "num_hidden_layers" d.num_hidden_layers
