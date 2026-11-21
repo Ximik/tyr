@@ -47,7 +47,8 @@ private def tinyVisionCfg : VisionConfig := {
   spatial_merge_size := 1
   temporal_patch_size := 1
   out_hidden_size := 16
-  num_position_embeddings := 32
+  num_position_embeddings := 16
+  position_grid_side := 4
 }
 
 private def tinyVLCfg : VLConfig := {
@@ -72,7 +73,7 @@ def testQwen35MultimodalConfigLoad : IO Unit := do
     "\"rope_parameters\":{\"rope_theta\":500000.0,\"partial_rotary_factor\":0.5," ++
     "\"mrope_interleaved\":true,\"mrope_section\":[2,2,2]}}," ++
     "\"vision_config\":{" ++
-    "\"depth\":3,\"hidden_size\":24,\"intermediate_size\":48,\"num_heads\":4," ++
+    "\"depth\":3,\"hidden_size\":32,\"intermediate_size\":48,\"num_heads\":4," ++
     "\"in_channels\":3,\"patch_size\":2,\"temporal_patch_size\":1,\"spatial_merge_size\":1," ++
     "\"out_hidden_size\":48,\"num_position_embeddings\":64}}"
   IO.FS.writeFile path json
@@ -90,7 +91,7 @@ def testQwen35MultimodalForwardWithImagePatches : IO Unit := do
 
   let ids : Tensor { shape := #[1, 6], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[2, 50, 50, 50, 50, 3]) #[1, 6]
   let patches ← randnDynamic #[4, VisionConfig.patchDim tinyVLCfg.vision_config]
-  let logits ← model.forwardWithImagePatches tinyVLCfg ids patches none
+  let logits ← model.forwardWithImagePatches tinyVLCfg ids patches #[(2, 2)]
 
   LeanTest.assertEqual logits.runtimeShape #[1, 6, tinyVLCfg.text_config.vocab_size]
     "multimodal forward should return [batch, seq, vocab]"
@@ -105,7 +106,7 @@ def testQwen35MultimodalPlaceholderCountMismatch : IO Unit := do
 
   let didThrow ←
     try
-      let _ ← model.forwardWithImagePatches tinyVLCfg ids patches none
+      let _ ← model.forwardWithImagePatches tinyVLCfg ids patches #[(2, 2)]
       pure false
     catch _ =>
       pure true
@@ -172,8 +173,8 @@ def testQwen35MultimodalGenerateStreamWithImageAndVideoFeatures : IO Unit := do
       3
       .greedy
       #[]
-      (some ⟨2, imageFeat⟩)
-      (some ⟨3, videoFeat⟩)
+      (some ⟨#[(1, 2)], 2, imageFeat⟩)
+      (some ⟨#[(1, 3)], 3, videoFeat⟩)
 
   let ⟨seqPlain, outPlain⟩ ←
     model.generate
@@ -182,8 +183,8 @@ def testQwen35MultimodalGenerateStreamWithImageAndVideoFeatures : IO Unit := do
       3
       .greedy
       #[]
-      (some ⟨2, imageFeat⟩)
-      (some ⟨3, videoFeat⟩)
+      (some ⟨#[(1, 2)], 2, imageFeat⟩)
+      (some ⟨#[(1, 3)], 3, videoFeat⟩)
 
   LeanTest.assertEqual seqStream seqPlain
     "multimodal streaming and non-streaming generation should have equal output length"

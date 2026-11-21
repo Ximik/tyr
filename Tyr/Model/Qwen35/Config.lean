@@ -64,6 +64,10 @@ structure Qwen35Config where
   rope_theta : Float := 1000000.0
   /-- Half the leading channels of each head that RoPE rotates (`head_dim * partial_rotary_factor / 2`). -/
   half_rotary_dim : Nat := 32
+  /-- Rotary frequency pair `j` of an image token uses its height position when
+      `j % 3 = 1` and `j < 3 * mrope_section[1]`, its width position when `j % 3 = 2`
+      and `j < 3 * mrope_section[2]`, else its temporal position. -/
+  mrope_section : Array Nat := #[11, 11, 10]
   rms_norm_eps : Float := 1e-6
 
   linear_conv_kernel_dim : Nat := 4

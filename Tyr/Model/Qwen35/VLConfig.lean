@@ -21,12 +21,17 @@ structure Qwen35VisionConfig where
   temporal_patch_size : Nat := 2
   out_hidden_size : Nat := 3584
   num_position_embeddings : Nat := 2304
+  position_grid_side : Nat := 48
+  /-- Base of the axial 2-D rotary embedding. -/
+  rope_theta : Float := 10000.0
   /-- Attention splits `hidden_size` into a nonzero number of equal heads of an even
       size; checked when the config is built. -/
   headsSplit : num_heads * (2 * half_head_dim) = hidden_size := by decide
   headsPos : 0 < num_heads := by decide
   /-- Patches merge in nonempty `spatial_merge_size²` groups; checked when the config is built. -/
   mergePos : 0 < spatial_merge_size := by decide
+  /-- The learned position table is a `position_grid_side²` grid; checked when the config is built. -/
+  positionGridSquare : position_grid_side * position_grid_side = num_position_embeddings := by decide
   deriving Repr
 
 

@@ -65,6 +65,12 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
         unless kind.all (fun k => k == "default" || k == "mrope") do
           throw s!"unsupported '{key}' = {scaling.compress}; this model implements plain RoPE"
   let ropeTheta := (← ropeField? textCfg "rope_theta").getD d.rope_theta
+  let mropeSection : Array Nat := (← ropeField? textCfg "mrope_section").getD d.mrope_section
+  unless mropeSection.size == 3 do
+    throw s!"Invalid Qwen3.5 config: mrope_section {mropeSection} must have three parts"
+  if let some (interleaved : Bool) ← ropeField? textCfg "mrope_interleaved" then
+    unless interleaved do
+      throw "unsupported 'mrope_interleaved' = false; this model implements interleaved multimodal RoPE"
   let ⟨hTheta⟩ ← if h : 0 < ropeTheta then pure (PLift.up h) else
     throw s!"Invalid Qwen3.5 config: rope_theta={ropeTheta} must be positive"
   let eps ← fieldD? textCfg "rms_norm_eps" d.rms_norm_eps
@@ -109,6 +115,7 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
     head_dim := headDim
     rope_theta := ropeTheta
     half_rotary_dim := rotaryDim / 2
+    mrope_section := mropeSection
     rms_norm_eps := eps
     linear_conv_kernel_dim := convKernel
     linear_key_head_dim := keyHeadDim

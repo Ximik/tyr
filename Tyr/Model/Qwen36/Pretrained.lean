@@ -69,13 +69,11 @@ export torch.qwen35.Qwen35ForConditionalGeneration (
   getImageFeatures
   getVideoFeatures
   forwardText
-  forwardWithImageFeatures
-  forwardWithImageAndVideoFeatures
+  forwardWithFeatures
   forwardWithImagePatches
-  forwardWithImageAndVideoPatches
   generate
   generateStream
-  generateUncached
+  forcedLogits
   loadFromPretrained
 )
 
