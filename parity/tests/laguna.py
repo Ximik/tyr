@@ -4,7 +4,7 @@ from lib.test import Test
 
 TEST = Test(
     name="laguna",
-    weights="laguna-xs-2.1-nvfp4",
+    weights="laguna-xs-2.1",
     probe="Laguna",
     devices=("cuda",),
     gpu_dtype="bfloat16",
