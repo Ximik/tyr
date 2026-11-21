@@ -21,7 +21,7 @@ Tyr.Sharding       Tyr.Distributed              -- ShardedTensor over collective
 ```
 
 The layers compose bottom-up; each one is usable independently. All Lean
-modules are re-exported from the umbrella `Tyr.lean` (`Tyr.lean:30-54`) and
+modules are re-exported from the umbrella `Tyr.lean` (`Tyr.lean`) and
 live in `torch.*` namespaces. The C++ side is a single global
 `c10d::ProcessGroup` plus a `TCPStore` in `cc/src/tyr_distributed.cpp`; NCCL
 is compile-time gated (`USE_C10D_NCCL`) and Gloo is always built. `deps/fetch.sh`
@@ -75,7 +75,7 @@ operation fails or is aborted; a second wait is an error. `waitAll` attempts eve
 handle before reporting the first error.
 
 For whole models, TensorStruct-aware helpers map the collective over every
-leaf (`Tyr/Distributed.lean:280-311`) — the functions most loops call:
+leaf (`Tyr/Distributed.lean`) — the functions most loops call:
 
 ```lean
 def broadcastParams [TensorStruct α] (params : α) : IO α          -- from rank 0
@@ -86,7 +86,7 @@ def allReduceGradsAsync [TensorStruct α] (grads : α) (op := .avg) : IO (IO α)
 The standard data-parallel recipe: `broadcastParams` once after init, local
 forward/backward per rank, `allReduceGrads .avg` after backward, one
 identical optimizer step on every rank using the returned gradient tree (see
-`Examples/NanoChat/ModdedTrain.lean:1167-1196`).
+`Examples/NanoChat/ModdedTrain.lean`).
 
 `Tests/RunDistributedValues.lean` checks retained inputs and earlier outputs,
 repeated list collectives, actual integer dtypes behind dynamic specifications,
@@ -112,7 +112,7 @@ preserving the action's error when cleanup also fails. Teardown drains every
 pending work item and resets process-group state before reporting its first
 failure. Invalid initialization arguments fail before rendezvous, and process-group
 state is published only after native construction succeeds. A
-`DistributedSampler` (`Tyr/Distributed.lean:318-423`) shards a dataset
+`DistributedSampler` (`Tyr/Distributed.lean`) shards a dataset
 deterministically per rank with an LCG-seeded Fisher–Yates shuffle; the
 examples currently shard data ad hoc instead.
 
@@ -157,16 +157,16 @@ Operations retain the full tensor's dtype and concrete device:
 
 This is the ZeRO pattern: keep one shard of each parameter (and optimizer
 state) per rank, `gather` lazily for the forward pass, `scatterGrad` the
-gradients back after backward. `MaybeSharded` (`Tyr/Sharding.lean:192`) models
+gradients back after backward. `MaybeSharded` (`Tyr/Sharding.lean`) models
 a parameter that is either sharded or replicated, with `updateWithGrad`
 choosing all-reduce vs reduce-scatter accordingly. The production consumer is
 `torch.Optim.DistAdam` (`Tyr/Optim/DistAdam.lean`); `ShardedEmbedding` and
 `ShardedAdamState` here are sketches.
 
 Caveats: `fromFull` and `gather` slice and reassemble along dimension 0
-regardless of `shardDim` (`Tyr/Sharding.lean:122-130`), so non-`.first`
+regardless of `shardDim` (`Tyr/Sharding.lean`), so non-`.first`
 shardings are not honored at runtime, and `shardedShape` silently returns the
-unsharded shape for cases it does not handle (`Tyr/Sharding.lean:81`).
+unsharded shape for cases it does not handle (`Tyr/Sharding.lean`).
 
 ### Orchestration: `torch.Pipeline` (`Tyr/Pipeline.lean`)
 
@@ -200,11 +200,11 @@ def checkAllRanksHealthy : PipelineM Bool
 
 Each `stage` records a `StageInfo` (status `pending | running | completed |
 failed error`, timestamps, metrics, retry count) and, on master, appends a
-ledger event under scope `stage/<name>` (`Tyr/Pipeline.lean:660-675`). With
+ledger event under scope `stage/<name>` (`Tyr/Pipeline.lean`). With
 `checkpointAfterStage`, stage results are written to
 `<baseDir>/.pipeline_checkpoint.json` after every stage; on startup, completed
 stages are skipped. Resume is refused when the saved `repr config` does not
-match the current config (`Tyr/Pipeline.lean:707-718`), so
+match the current config (`Tyr/Pipeline.lean`), so
 `resumeFromCheckpoint := true` is safe against config drift. On clean
 completion the checkpoint file is removed.
 
@@ -220,17 +220,17 @@ def withDistributedWithHandlers (config) (logHandlers := {}) (action) : IO α
 `Pipeline.withDistributed` (not to be confused with `dist.withDistributed`)
 reads the torchrun environment — `WORLD_SIZE`, `RANK`, `LOCAL_RANK`,
 `MASTER_ADDR`, `MASTER_PORT` — and initializes NCCL only when `WORLD_SIZE > 1`
-(`Tyr/Pipeline.lean:804-823`). `resolveTrainingDevice`
-(`Tyr/Pipeline.lean:306`) honors `TYR_DEVICE=cpu|mps|cuda|auto` and maps
+(`Tyr/Pipeline.lean`). `resolveTrainingDevice`
+(`Tyr/Pipeline.lean`) honors `TYR_DEVICE=cpu|mps|cuda|auto` and maps
 `LOCAL_RANK` to the CUDA ordinal. Logging is silent unless you pass
-`LogHandlers` (`onInfo`/`onError` callbacks, `Tyr/Pipeline.lean:373`).
+`LogHandlers` (`onInfo`/`onError` callbacks, `Tyr/Pipeline.lean`).
 
 There is a background-task API (`background`, `await`, `backgroundTracked`,
-`awaitTrackedOrThrow`, `Tyr/Pipeline.lean:580-625`). `spawnBackground`
-(`Tyr/Pipeline.lean:154-163`) starts the action immediately via `IO.asTask`
+`awaitTrackedOrThrow`, `Tyr/Pipeline.lean`). `spawnBackground`
+(`Tyr/Pipeline.lean`) starts the action immediately via `IO.asTask`
 and defers the wait to `await`, so these tasks run concurrently. At the end,
 `finalizePipeline` writes `report.md` via the `Report` accumulator
-(`Tyr/Pipeline.lean:216-231`).
+(`Tyr/Pipeline.lean`).
 
 ### Run ledger: `torch.Train.RunLedger` (`Tyr/Train/RunLedger.lean`)
 
@@ -298,11 +298,11 @@ def trainLoop {device : Device} [TensorStruct P]
     : IO (P × Optim.AdamWState P × SFTState)
 ```
 
-`SFTConfig` (`Tyr/Train/ChatSFT.lean:30`) holds epochs/iterations, batch
+`SFTConfig` (`Tyr/Train/ChatSFT.lean`) holds epochs/iterations, batch
 geometry (`deviceBatchSize`, `targetExamplesPerStep` — `gradAccumSteps` is
 derived per world size), LRs, `maxSeqLen`, eval cadences, `device`, and
 `logInterval`. The loop checks that `cfg.device` matches the forward function’s
-concrete device, then moves CPU data batches to that device. Inside the loop (`Tyr/Train/ChatSFT.lean:404-473`):
+concrete device, then moves CPU data batches to that device. Inside the loop (`Tyr/Train/ChatSFT.lean`):
 `gradAccumSteps` micro-batches accumulate gradients, averaged via
 `dist.allReduceGrads .avg` when distributed, then one `Optim.adamw` step at
 `cfg.embeddingLr * cfg.initLrFrac * linearLRMultiplier ...`. Note the loop
@@ -352,7 +352,7 @@ def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P]
 
 Each step generates rollouts, accumulates the per-sample PG losses into one
 backward, all-reduces gradients when distributed, and applies one AdamW step
-at `config.matrixLr * getLrMultiplier ...` (`Tyr/RL/GRPO.lean:766-879`).
+at `config.matrixLr * getLrMultiplier ...` (`Tyr/RL/GRPO.lean`).
 `grpoStepWithModelUpdate` currently requires `b = 1`. Evaluation is pass@k via
 `computePassK`; `Callbacks` + `artifactCallbacks` mirror the SFT design.
 
@@ -360,20 +360,20 @@ at `config.matrixLr * getLrMultiplier ...` (`Tyr/RL/GRPO.lean:766-879`).
 
 | Task | API | Where |
 |---|---|---|
-| Init/teardown a process group | `dist.initProcessGroup`, `dist.destroyProcessGroup`, `dist.setCudaDevice`, `dist.barrier` | `Tyr/Distributed.lean:61-86` |
-| Rank/world queries | `dist.getRankAndWorldSize`, `dist.isMaster`, `dist.isInitialized` | `Tyr/Distributed.lean:269-277` |
-| Sync parameters across ranks | `dist.broadcastParams` | `Tyr/Distributed.lean:280` |
-| Average gradients across ranks | `dist.allReduceGrads grads .avg` | `Tyr/Distributed.lean:292` |
-| Raw collectives | `dist.allReduce`, `dist.broadcast`, `dist.reduceScatter`, `dist.allGather` (+ `*Async`, `WorkHandle`) | `Tyr/Distributed.lean:103-188` |
-| ZeRO-style sharding | `Sharding.ShardedTensor` (`fromFull`/`gather`/`scatterGrad`/`updateShard`), `shardedShape`, `ValidShard` | `Tyr/Sharding.lean:73-183` |
-| Run a staged pipeline | `Pipeline.withDistributedWithHandlers`, `stage`, `recordMetrics`, `log`, `PipelineConfig.resumeFromCheckpoint` | `Tyr/Pipeline.lean:542,660,804` |
-| Run artifacts | `RunLedger.RunArtifacts.ofBaseDir`, `prepare`, `appendMetricEvent`, `appendCheckpointEvent` | `Tyr/Train/RunLedger.lean:42-152` |
-| Chat SFT | `ChatSFT.trainLoop`, `SFTConfig`, `makeTaskDataGenerator`, `artifactCallbacks` | `Tyr/Train/ChatSFT.lean:30-526` |
-| RL fine-tuning | `GRPO.trainOnPromptsWithUpdates`, `GRPOConfig`, `mathReward`, `artifactCallbacks` | `Tyr/RL/GRPO.lean:39-991` |
+| Init/teardown a process group | `dist.initProcessGroup`, `dist.destroyProcessGroup`, `dist.setCudaDevice`, `dist.barrier` | `Tyr/Distributed.lean` |
+| Rank/world queries | `dist.getRankAndWorldSize`, `dist.isMaster`, `dist.isInitialized` | `Tyr/Distributed.lean` |
+| Sync parameters across ranks | `dist.broadcastParams` | `Tyr/Distributed.lean` |
+| Average gradients across ranks | `dist.allReduceGrads grads .avg` | `Tyr/Distributed.lean` |
+| Raw collectives | `dist.allReduce`, `dist.broadcast`, `dist.reduceScatter`, `dist.allGather` (+ `*Async`, `WorkHandle`) | `Tyr/Distributed.lean` |
+| ZeRO-style sharding | `Sharding.ShardedTensor` (`fromFull`/`gather`/`scatterGrad`/`updateShard`), `shardedShape`, `ValidShard` | `Tyr/Sharding.lean` |
+| Run a staged pipeline | `Pipeline.withDistributedWithHandlers`, `stage`, `recordMetrics`, `log`, `PipelineConfig.resumeFromCheckpoint` | `Tyr/Pipeline.lean` |
+| Run artifacts | `RunLedger.RunArtifacts.ofBaseDir`, `prepare`, `appendMetricEvent`, `appendCheckpointEvent` | `Tyr/Train/RunLedger.lean` |
+| Chat SFT | `ChatSFT.trainLoop`, `SFTConfig`, `makeTaskDataGenerator`, `artifactCallbacks` | `Tyr/Train/ChatSFT.lean` |
+| RL fine-tuning | `GRPO.trainOnPromptsWithUpdates`, `GRPOConfig`, `mathReward`, `artifactCallbacks` | `Tyr/RL/GRPO.lean` |
 
 ## Usage example
 
-Reconstructed example (from `Examples/NanoChat/Pipeline.lean:1660-1940,
+Reconstructed example (from `Examples/NanoChat/Pipeline.lean
 2117`). The real entry point builds its config from environment variables;
 this sketch keeps the essential shape — torchrun env drives distributed
 setup, each stage runs on every rank, only rank 0 writes checkpoints:
@@ -405,7 +405,7 @@ def main : IO Unit :=
 ```
 
 Without the pipeline layer, the raw data-parallel pattern (from
-`Examples/NanoChat/TrainNanoChat.lean:147-161`, `Examples/NanoChat/ModdedTrain.lean:1167-1186`):
+`Examples/NanoChat/TrainNanoChat.lean`, `Examples/NanoChat/ModdedTrain.lean`):
 
 ```lean
 if worldSize > 1 then
@@ -420,7 +420,7 @@ if isDistributed then dist.barrier; dist.destroyProcessGroup
 ```
 
 A lighter-weight path for tests — no distributed init, no report — is
-`initPipeline cfg` then `(do stage "a" ...; stage "b" ...).run initial` (`Tests/TestPipeline.lean:120-142`).
+`initPipeline cfg` then `(do stage "a" ...; stage "b" ...).run initial` (`Tests/TestPipeline.lean`).
 
 ## Running under torchrun
 

@@ -23,7 +23,7 @@ structure Handlers where
   deriving Inhabited
 ```
 
-All sinks default to no-ops, so the library-side pattern is to accept `(log : Handlers := {})` and call `log.onInfo ...` etc. — checkpointing is a typical example (`Tyr/Checkpoint.lean:118-134`):
+All sinks default to no-ops, so the library-side pattern is to accept `(log : Handlers := {})` and call `log.onInfo ...` etc. — checkpointing is a typical example (`Tyr/Checkpoint.lean`):
 
 ```lean
 def saveParams [TensorStruct α]
@@ -34,11 +34,11 @@ def saveParams [TensorStruct α]
     : IO Unit
 ```
 
-`Handlers.combine` runs two handler sets in sequence, e.g. to tee output to both console and a log file. `Tyr.Log` is re-exported by the root `Tyr.lean` (`Tyr.lean:3`). Consumers include `Tyr/Checkpoint.lean`, the model weight loaders under `Tyr/Model/*/Weights.lean`, and the data/download code under `Tyr/Data/`.
+`Handlers.combine` runs two handler sets in sequence, e.g. to tee output to both console and a log file. `Tyr.Log` is re-exported by the root `Tyr.lean` (`Tyr.lean`). Consumers include `Tyr/Checkpoint.lean`, the model weight loaders under `Tyr/Model/*/Weights.lean`, and the data/download code under `Tyr/Data/`.
 
 ### Infoview widgets (`Tyr/Widget.lean`)
 
-Three RPC-encodable data types, one JavaScript frontend, two commands. The data model (`Tyr/Widget.lean:106-130`):
+Three RPC-encodable data types, one JavaScript frontend, two commands. The data model (`Tyr/Widget.lean`):
 
 ```lean
 structure TensorDisplayProps where
@@ -63,7 +63,7 @@ structure ModuleDisplayProps where
   root : ModuleNode
 ```
 
-`tensorToProps` snapshots a tensor for display: shape, dtype, device, summary stats, up to 10k values, and gradient values/stats when `requires_grad` is set (`Tyr/Widget.lean:773-791`). The single `@[widget_module] TensorWidget` JavaScript bundle (`Tyr/Widget.lean:132-770`) renders both views: a heatmap with diverging colormap, faceted layout for 3D+ tensors, hover tooltips, and theme awareness; and a collapsible module tree with a search box and per-group trainable-parameter counts.
+`tensorToProps` snapshots a tensor for display: shape, dtype, device, summary stats, up to 10k values, and gradient values/stats when `requires_grad` is set (`Tyr/Widget.lean`). The single `@[widget_module] TensorWidget` JavaScript bundle (`Tyr/Widget.lean`) renders both views: a heatmap with diverging colormap, faceted layout for 3D+ tensors, hover tooltips, and theme awareness; and a collapsible module tree with a search box and per-group trainable-parameter counts.
 
 For module trees there is a typeclass plus a deriving handler:
 
@@ -74,14 +74,14 @@ class ToModuleDisplay (α : Type) where
 def toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "root") : IO ModuleDisplayProps
 ```
 
-Instances exist for `Tensor σ`, `Option α`, `Array α`, `List α`, `α × β`, and `Static α` (rendered as a plain `name: value` label). The deriving handler (`Tyr/Widget.lean:1021-1032`) generates an instance for any structure, producing one `group` node whose children are the fields. The built-in modules already use it — e.g. `Linear` derives `TensorStruct, ToModuleDisplay` (`Tyr/Module/Linear.lean:18`), as do `RMSNorm` and `LayerNorm`.
+Instances exist for `Tensor σ`, `Option α`, `Array α`, `List α`, `α × β`, and `Static α` (rendered as a plain `name: value` label). The deriving handler (`Tyr/Widget.lean`) generates an instance for any structure, producing one `group` node whose children are the fields. The built-in modules already use it — e.g. `Linear` derives `TensorStruct, ToModuleDisplay` (`Tyr/Module/Linear.lean`), as do `RMSNorm` and `LayerNorm`.
 
 The two elaboration commands:
 
 - `#tensor t` — accepts a pure `Tensor σ` term or an `IO (Tensor σ)` term (e.g. `Tensor.randn`, which is in `IO`).
 - `#module t` — accepts `ModuleDisplayProps` or `IO ModuleDisplayProps`.
 
-Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` (behind `unsafe`/`@[implemented_by]` wrappers, `Tyr/Widget.lean:853-892`), and pin the panel to the command line. Caveat: this runs the given `IO` in the compiler process at elaboration time, so treat `#tensor`/`#module` as development tools for trusted code, not as something to leave in library files.
+Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` (behind `unsafe`/`@[implemented_by]` wrappers, `Tyr/Widget.lean`), and pin the panel to the command line. Caveat: this runs the given `IO` in the compiler process at elaboration time, so treat `#tensor`/`#module` as development tools for trusted code, not as something to leave in library files.
 
 `Tyr.Widget` is not re-exported by the root `Tyr.lean`; import it directly. The import also registers the `deriving ToModuleDisplay` handler.
 
@@ -113,7 +113,7 @@ Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` 
 Reconstructed example (from `Tyr/Checkpoint.lean` and `Examples/KittenTTSPretrained.lean`):
 
 ```lean
--- Library side: accept handlers with a silent default (Tyr/Checkpoint.lean:157-165).
+-- Library side: accept handlers with a silent default (Tyr/Checkpoint.lean).
 def saveCheckpoint [TensorStruct α]
     (params : α)
     (iteration : Nat)
@@ -124,7 +124,7 @@ def saveCheckpoint [TensorStruct α]
     (log : Handlers := {})
     : IO Unit
 
--- Executable side: wire sinks to the console (Examples/KittenTTSPretrained.lean:40-45).
+-- Executable side: wire sinks to the console (Examples/KittenTTSPretrained.lean).
 let log : torch.Log.Handlers := {
   onInfo := IO.println
   onWarn := fun msg => IO.eprintln s!"warning: {msg}"
@@ -161,7 +161,7 @@ def exampleMLP : IO ModuleDisplayProps := do
 #module exampleMLP
 ```
 
-Place the cursor on a `#tensor` or `#module` line in VS Code to open the panel. For full control over the hierarchy you can also build `ModuleNode.group`/`ModuleNode.tensor` trees manually, as `mlpModule` does in `Examples/TestGuard.lean:24-44`.
+Place the cursor on a `#tensor` or `#module` line in VS Code to open the panel. For full control over the hierarchy you can also build `ModuleNode.group`/`ModuleNode.tensor` trees manually, as `mlpModule` does in `Examples/TestGuard.lean`.
 
 ## Related guides
 

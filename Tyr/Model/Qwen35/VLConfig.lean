@@ -22,7 +22,6 @@ structure Qwen35VisionConfig where
   out_hidden_size : Nat := 3584
   num_position_embeddings : Nat := 2304
   position_grid_side : Nat := 48
-  /-- Base of the axial 2-D rotary embedding. -/
   rope_theta : Float := 10000.0
   /-- Attention splits `hidden_size` into a nonzero number of equal heads of an even
       size; checked when the config is built. -/

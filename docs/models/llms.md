@@ -20,8 +20,8 @@
 The reuse structure matters more than the table suggests:
 
 - `torch.qwen` (`Tyr/Model/Qwen/`) is the base layer: config, GQA attention with KV cache, SwiGLU MLP, pre-norm layer, and the `Qwen3Model` backbone. Its header still says "for Flux text encoding"; it is also the substrate for Qwen3 and Qwen2.5-Omni.
-- `torch.qwen3` wraps `qwen.Qwen3Model` with an LM head and KV-cached greedy generation. `torch.qwen25omni` is just 3B/7B config defaults plus HF name-prefix-aware (`thinker.`/`language_model.`) weight loading over `qwen3.Qwen3ForCausalLM` (`abbrev` at `Tyr/Model/Qwen25Omni/Weights.lean:214`).
-- `torch.qwen35` is an independent, much larger implementation (own config, norms, MoE, hybrid linear/full attention) but reuses `qwen.QwenAttention.KVCache` (aliased at `Tyr/Model/Qwen35/Model.lean:320`). `torch.qwen36` has no `Model.lean` at all — it is `abbrev`s/`export`s over `qwen35` with Qwen3.6-specific defaults (`Tyr/Model/Qwen36/Pretrained.lean:40-41`).
+- `torch.qwen3` wraps `qwen.Qwen3Model` with an LM head and KV-cached greedy generation. `torch.qwen25omni` is just 3B/7B config defaults plus HF name-prefix-aware (`thinker.`/`language_model.`) weight loading over `qwen3.Qwen3ForCausalLM` (`abbrev` at `Tyr/Model/Qwen25Omni/Weights.lean`).
+- `torch.qwen35` is an independent, much larger implementation (own config, norms, MoE, hybrid linear/full attention) but reuses `qwen.QwenAttention.KVCache` (aliased at `Tyr/Model/Qwen35/Model.lean`). `torch.qwen36` has no `Model.lean` at all — it is `abbrev`s/`export`s over `qwen35` with Qwen3.6-specific defaults (`Tyr/Model/Qwen36/Pretrained.lean`).
 - `torch.gemma4` mirrors the qwen35 file layout (Config/Model/Weights/ConfigIO/Pretrained/VL*/Multimodal/Media).
 
 ### The per-family idiom
@@ -29,12 +29,12 @@ The reuse structure matters more than the table suggests:
 Each pretrained-capable family splits into the same files:
 
 - `Config.lean` — a config structure whose fields mirror HF `config.json` names (`hidden_size`, `num_key_value_heads`, …), plus presets (`Config.qwen35_9B`, `Config.gemma4_E4B`, …).
-- `ConfigIO.lean` — hand-rolled JSON parsing on `Lean.Data.Json`: `Config.loadFromFile`, `Config.loadFromPretrainedDir`. Qwen3 additionally validates invariants (head divisibility, nonzero dims) and throws `IO.userError` on violation (`Tyr/Model/Qwen3/ConfigIO.lean:66-88`).
+- `ConfigIO.lean` — hand-rolled JSON parsing on `Lean.Data.Json`: `Config.loadFromFile`, `Config.loadFromPretrainedDir`. Qwen3 additionally validates invariants (head divisibility, nonzero dims) and throws `IO.userError` on violation (`Tyr/Model/Qwen3/ConfigIO.lean`).
 - `Model.lean` — the model structure, forwards, and generation loops.
 - `Weights.lean` — SafeTensors loading: `load path`, where `path` is a model directory (sharded via its index, or its `model.safetensors`) or a single `.safetensors` file. Loaded tensors are frozen via `reqGradFalse`; FP8 checkpoints are dequantized on load.
 - `Pretrained.lean` — `loadFromPretrained` built on `Tyr.Hub.loadModelFromPretrained`, plus the explicit list of covered HF repo ids.
 
-The model itself is a structure over a config value (Qwen3 shown, `Tyr/Model/Qwen3/Model.lean:52`):
+The model itself is a structure over a config value (Qwen3 shown, `Tyr/Model/Qwen3/Model.lean`):
 
 ```lean
 variable {device : Device}
@@ -70,11 +70,11 @@ def applyFinishedEos (tokens : Tensor { shape := #[n], dtype := .Int64, device :
     (eosToken : UInt64) : Tensor { shape := #[n], dtype := .Int64, device := device }
 ```
 
-`sampleFromLogits` semantics (`Generation.lean:26-47`): greedy is `Tensor.argmax`; multinomial throws unless `temperature > 0`, scales logits by `1/temperature` (skipped at exactly 1.0), applies a top-K filter when `topK` is `some k` (`TopK := Option PosNat`), then a top-P filter unless `topP >= 1.0`, then softmax + `Tensor.multinomial`. Qwen3.5 and Gemma 4 decode through this; Qwen3 (and therefore Qwen2.5-Omni) has its own private greedy loops and supports **greedy decoding only** — no temperature/top-k/top-p.
+`sampleFromLogits` semantics (`Generation.lean`): greedy is `Tensor.argmax`; multinomial throws unless `temperature > 0`, scales logits by `1/temperature` (skipped at exactly 1.0), applies a top-K filter when `topK` is `some k` (`TopK := Option PosNat`), then a top-P filter unless `topP >= 1.0`, then softmax + `Tensor.multinomial`. Qwen3.5 and Gemma 4 decode through this; Qwen3 (and therefore Qwen2.5-Omni) has its own private greedy loops and supports **greedy decoding only** — no temperature/top-k/top-p.
 
 ### KV caches
 
-The shared incremental cache is `qwen.QwenAttention.KVCache` (`Tyr/Model/Qwen/Attention.lean:54`):
+The shared incremental cache is `qwen.QwenAttention.KVCache` (`Tyr/Model/Qwen/Attention.lean`):
 
 ```lean
 variable {device : Device}
@@ -93,7 +93,7 @@ stable as the sequence grows. Decode restores the capacity shape with checked
 reshape adapters, writes K/V with indexed slice-scatter, and attends over the
 filled prefix. No scalar shape is used as a stand-in for an unknown shape.
 
-Two families extend it: Qwen3.5's `HybridCache` (`Qwen35/Model.lean:765`) adds per-layer depthwise-conv states `[batch, convDim, kernel]` and recurrent states `[batch, vHeads, kDim, vDim]` for the gated-delta linear-attention layers; Gemma 4's `Gemma4Cache` (`Gemma4/Model.lean:797`) is one KV cache per layer. `QwenAttention.forwardStep` attends over the cache with libtorch scaled-dot-product attention.
+Two families extend it: Qwen3.5's `HybridCache` (`Qwen35/Model.lean`) adds per-layer depthwise-conv states `[batch, convDim, kernel]` and recurrent states `[batch, vHeads, kDim, vDim]` for the gated-delta linear-attention layers; Gemma 4's `Gemma4Cache` (`Gemma4/Model.lean`) is one KV cache per layer. `QwenAttention.forwardStep` attends over the cache with libtorch scaled-dot-product attention.
 
 Laguna generation uses `LagunaCacheSession`, an inference-only cache with private
 storage and serialized IO updates. Full-attention layers reserve `maxLen`
@@ -128,14 +128,14 @@ forks, functional snapshots, and FP32/BF16 parity.
 
 ### Qwen base layer (`torch.qwen`)
 
-`Tyr/Model/Qwen/` contains the shared transformer: `QwenConfig` (defaults are Qwen3-4B; `QwenConfig.fluxKleinTextEncoder` is the 36-layer Flux 2 Klein variant with Q/K norms), `QwenAttention` (GQA with optional per-head Q/K RMSNorm), `QwenMLP` (SwiGLU), `QwenLayer`, and `Qwen3Model cfg` (embedding + `Array QwenLayer` + final `RMSNorm`). `QwenFluxEmbedder` (`Qwen/Embedder.lean:25`) extracts hidden states from selected layers (default `#[8, 17, 26]`) and concatenates them into Flux text embeddings; `loadQwenFluxEmbedderSharded` (`Qwen/Weights.lean:233`) loads it from a sharded checkpoint.
+`Tyr/Model/Qwen/` contains the shared transformer: `QwenConfig` (defaults are Qwen3-4B; the Flux text encoder's comes from its `text_encoder/config.json`), `QwenAttention` (GQA with optional per-head Q/K RMSNorm), `QwenMLP` (SwiGLU), `QwenLayer`, and `Qwen3Model cfg` (embedding + `Array QwenLayer` + final `RMSNorm`). `QwenFluxEmbedder` extracts hidden states from selected layers (default `#[8, 17, 26]`) and concatenates them into Flux text embeddings; `loadQwenFluxEmbedder` loads it from a checkpoint file or a directory of shards.
 
 `forwardEmbeds` instead accepts Float32 embeddings shaped
 `#[batch, seq, cfg.hidden_size]`; both forwards accept an optional Bool mask.
 
 ### Qwen3.5 / Qwen3.6 (`torch.qwen35`, `torch.qwen36`)
 
-`Qwen35Config` (`Tyr/Model/Qwen35/Config.lean:45`) covers dense and MoE checkpoints (`num_experts == 0` means dense — see presets below) and the hybrid layer schedule:
+`Qwen35Config` (`Tyr/Model/Qwen35/Config.lean`) covers dense and MoE checkpoints (`num_experts == 0` means dense — see presets below) and the hybrid layer schedule:
 
 ```lean
 inductive LayerType where
@@ -145,18 +145,18 @@ inductive LayerType where
 
 Presets: `Config.qwen35_0_8B`, `Config.qwen35_9B`, `Config.qwen35_35B_A3B`, `Config.qwen36_35B_A3B`. Derived dimensions (`rotaryDim`, `linearKeyDim`, `linearConvDim`, `numHeadsPerKVGroup`, `isMoE`) are functions of the config; `Config.normalize` fills in `layer_types` from `full_attention_interval` when absent.
 
-`Qwen35ForCausalLM` (`Qwen35/Model.lean:1065`) assembles: `Qwen35RMSNorm` (zero-centered `(1 + w)` convention; `fromCheckpointWeight` absorbs the HF offset), `Qwen35RMSNormGated`, `Qwen35MLP`, a pure-Lean MoE block (`Qwen35TopKRouter` + `Qwen35MoeExperts` + `Qwen35SparseMoeBlock`, one-hot dispatch + `einsum2`), `Qwen35Attention` (fused Q-gate projection, per-head Q/K norm, partial RoPE), and `Qwen35GatedDeltaNet` (linear attention: fused QKV projection + depthwise causal conv1d + gated delta rule through the C++ externs below). The multimodal wrapper `Qwen35ForConditionalGeneration (cfg : VLConfig)` (`Qwen35/Multimodal.lean:319`) pairs a `Qwen35VisionModel` tower with the text model and scatters image/video features into token embeddings; image/video patch loaders in `torch.qwen35.media` are Apple-only. `torch.qwen36` re-exports all of this with Qwen3.6 defaults and its own repo list.
+`Qwen35ForCausalLM` (`Qwen35/Model.lean`) assembles: `Qwen35RMSNorm` (zero-centered `(1 + w)` convention; `fromCheckpointWeight` absorbs the HF offset), `Qwen35RMSNormGated`, `Qwen35MLP`, a pure-Lean MoE block (`Qwen35TopKRouter` + `Qwen35MoeExperts` + `Qwen35SparseMoeBlock`, one-hot dispatch + `einsum2`), `Qwen35Attention` (fused Q-gate projection, per-head Q/K norm, partial RoPE), and `Qwen35GatedDeltaNet` (linear attention: fused QKV projection + depthwise causal conv1d + gated delta rule through the C++ externs below). The multimodal wrapper `Qwen35ForConditionalGeneration (cfg : VLConfig)` (`Qwen35/Multimodal.lean`) pairs a `Qwen35VisionModel` tower with the text model and scatters image/video features into token embeddings; image/video patch loaders in `torch.qwen35.media` are Apple-only. `torch.qwen36` re-exports all of this with Qwen3.6 defaults and its own repo list.
 
 ### Gemma 4 (`torch.gemma4`)
 
-`Gemma4Config` (`Tyr/Model/Gemma4/Config.lean:42`) uses a sliding/full attention schedule (`LayerType.slidingAttention | .fullAttention`), separate RoPE thetas and head dims for the two kinds, KV-shared layers, per-layer input projections, optional MoE, and final logit softcapping (`final_logit_softcapping`, default 30.0, applied via the model softcap helper). Presets: `Config.gemma4_E2B`, `gemma4_E4B`, `gemma4_26B_A4B`, `gemma4_31B`. Embeddings are scaled by `sqrt(hidden_size)` (`Gemma4/Model.lean:1048`). Unlike the other families the MoE path is a fused C++ extern (`routedTextExpertsForward`). The generate family is `generate` / `generateStream` / `generateFromEmbeds(Stream)` (+ per-layer-input variants) — there is no `generateUncached` reference loop. `Gemma4ForConditionalGeneration` (`Gemma4/Multimodal.lean:350`) adds the vision tower. Note there are currently no Gemma 4 tests in `Tests/`.
+`Gemma4Config` (`Tyr/Model/Gemma4/Config.lean`) uses a sliding/full attention schedule (`LayerType.slidingAttention | .fullAttention`), separate RoPE thetas and head dims for the two kinds, KV-shared layers, per-layer input projections, optional MoE, and final logit softcapping (`final_logit_softcapping`, default 30.0, applied via the model softcap helper). Presets: `Config.gemma4_E2B`, `gemma4_E4B`, `gemma4_26B_A4B`, `gemma4_31B`. Embeddings are scaled by `sqrt(hidden_size)` (`Gemma4/Model.lean`). Unlike the other families the MoE path is a fused C++ extern (`routedTextExpertsForward`). The generate family is `generate` / `generateStream` / `generateFromEmbeds(Stream)` (+ per-layer-input variants) — there is no `generateUncached` reference loop. `Gemma4ForConditionalGeneration` (`Gemma4/Multimodal.lean`) adds the vision tower. Note there are currently no Gemma 4 tests in `Tests/`.
 
 ### FFI-backed kernels
 
 Three `@[extern]` opaque kernels sit inside this component (declared `private`, so you cannot call them directly — they run inside the layer forwards):
 
-- `chunkGatedDeltaRule` / `recurrentGatedDeltaRule` — Qwen3.5 gated delta rule, `Qwen35/Model.lean:50-61` → `cc/src/tyr_qwen35.cpp:172`.
-- `routedTextExpertsForward` — Gemma 4 fused MoE expert forward, `Gemma4/Model.lean:27-32` → `cc/src/tyr.cpp:1850`.
+- `chunkGatedDeltaRule` / `recurrentGatedDeltaRule` — Qwen3.5 gated delta rule, `Qwen35/Model.lean` → `cc/src/tyr_qwen35.cpp`.
+- `routedTextExpertsForward` — Gemma 4 fused MoE expert forward, `Gemma4/Model.lean` → `cc/src/tyr.cpp`.
 
 ### Model utils (`torch.Model`)
 
@@ -225,7 +225,7 @@ def Qwen35ForCausalLM.loadFromPretrained
     (device : Device := Device.CPU) : IO (Sigma (fun cfg => Qwen35ForCausalLM (device := device) cfg))
 ```
 
-`loadFromPretrained` accepts a local directory or an HF repo id, downloads via `Tyr.Hub`, parses `config.json` over the defaults, loads the weights from the model directory, and returns the config alongside the model as a `Sigma` (the config is only known at runtime). The covered repo ids are listed in `qwen35.hub.qwen35CollectionRepoIds` (`Qwen35/Pretrained.lean:19`). Qwen3.6 exposes the identical surface as `qwen36.Qwen36ForCausalLM` with `Config.qwen36_35B_A3B` defaults. The multimodal twins `Qwen35ForConditionalGeneration` / `Qwen36ForConditionalGeneration` have the same shape plus `getImageFeatures` / `getVideoFeatures`.
+`loadFromPretrained` accepts a local directory or an HF repo id, downloads via `Tyr.Hub`, parses `config.json` over the defaults, loads the weights from the model directory, and returns the config alongside the model as a `Sigma` (the config is only known at runtime). The covered repo ids are listed in `qwen35.hub.qwen35CollectionRepoIds` (`Qwen35/Pretrained.lean`). Qwen3.6 exposes the identical surface as `qwen36.Qwen36ForCausalLM` with `Config.qwen36_35B_A3B` defaults. The multimodal twins `Qwen35ForConditionalGeneration` / `Qwen36ForConditionalGeneration` have the same shape plus `getImageFeatures` / `getVideoFeatures`.
 
 ### Gemma 4 (`torch.gemma4`)
 
@@ -294,11 +294,11 @@ This tiny-config pattern is how the test suites exercise the models without chec
 
 ### Flux text encoding with the Qwen embedder
 
-Reconstructed example (from `Examples/Flux/FluxDemo.lean:128-174`):
+From `Examples/Flux/FluxDemo.lean`:
 
 ```lean
-let qwenCfg := QwenConfig.fluxKleinTextEncoder
-let qwen ← loadQwenFluxEmbedderSharded qwenDir qwenCfg maxSeqLen #[8, 17, 26]
+let qwenCfg ← qwen3.Config.loadFromPretrainedDir qwenDir
+let qwen ← loadQwenFluxEmbedder qwenDir qwenCfg maxSeqLen #[8, 17, 26]
 -- tokens : Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU }; attnMask has the same shape
 let txtEmb := qwen.encodeMasked qwenCfg maxSeqLen tokens attnMask
 -- txtEmb : Tensor { shape := #[1, maxSeqLen, qwen.outputLayers.size.toUInt64 * qwenCfg.hidden_size], dtype := .Float32, device := .CPU }
@@ -306,7 +306,7 @@ let txtEmb := qwen.encodeMasked qwenCfg maxSeqLen tokens attnMask
 
 ## Caveats
 
-- Some parsed config fields are accepted but never read by the models — e.g. `Qwen35Config.attention_dropout`, `hidden_act`, `mamba_ssm_dtype`, `mrope_*`, `mtp_*`, `use_cache`, and `Gemma4Config.attention_dropout`, `use_bidirectional_attention`. Setting them is a silent no-op.
+- `config.json` keys that do not change inference, such as `attention_dropout`, `mtp_*` and `use_cache`, are not read.
 - Qwen3 / Qwen2.5-Omni generation is greedy-only; `SamplingStrategy.multinomial` is honored by Qwen3.5/Qwen3.6 and Gemma 4 only.
 - `torch.qwen35.media` / `torch.gemma4` media loaders are Apple-only; there is no runtime capability check.
 

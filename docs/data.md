@@ -31,7 +31,7 @@ Token tensors use `Tensor { shape := shape, dtype := .Int64, device := .CPU }`; 
 
 ### BPE tokenizer stack
 
-The core type is `tokenizer.BPETokenizer` (`Tyr/Tokenizer/Types.lean:21`), a
+The core type is `tokenizer.BPETokenizer` (`Tyr/Tokenizer/Types.lean`), a
 purely functional structure of arrays and `Std.HashMap`s:
 
 ```lean
@@ -48,21 +48,21 @@ structure BPETokenizer where
 
 Encoding pipeline (`Tyr/Tokenizer/Encode.lean`): text is split by the
 hand-rolled GPT-style pretokenizer (`pretokenizeFull`,
-`Tyr/Tokenizer/Pretokenize.lean:119`), each chunk is mapped to one token per
+`Tyr/Tokenizer/Pretokenize.lean`), each chunk is mapped to one token per
 byte, then merge rules are applied greedily by priority (`encodeWord`,
-`Encode.lean:119`). Special tokens are split out first and matched
-longest-first (`encodeWithSpecials`, `Encode.lean:156`). Decoding concatenates
+`Encode.lean`). Special tokens are split out first and matched
+longest-first (`encodeWithSpecials`, `Encode.lean`). Decoding concatenates
 token bytes with a lossy UTF-8 fallback (`decode`,
-`Tyr/Tokenizer/Decode.lean:29`).
+`Tyr/Tokenizer/Decode.lean`).
 
-Lifecycle: `trainBPE docs cfg` (`Tyr/Tokenizer/Training.lean:211`) runs a
+Lifecycle: `trainBPE docs cfg` (`Tyr/Tokenizer/Training.lean`) runs a
 pair-counting merge loop and returns a `TrainResult` (tokenizer, `TokenBytes`
 table for bits-per-byte evaluation, statistics). `save`/`load`
-(`Tyr/Tokenizer/IO.lean:190,197`) persist to a little-endian binary format
+(`Tyr/Tokenizer/IO.lean`) persist to a little-endian binary format
 with magic `TYR_BPE1`, version 1.
 
 `Tyr/Tokenizer/SpecialTokens.lean` provides legacy "NanoProof" token sets
-(chat, tool-use, math, Lean keywords) and `addSpecialTokens`; `Training.lean:28`
+(chat, tool-use, math, Lean keywords) and `addSpecialTokens`; `Training.lean`
 defines `defaultChatSpecialTokens`, the nanochat chat set.
 
 ### Hugging Face tokenizer codecs
@@ -71,29 +71,29 @@ Separate structures load HF tokenizers without round-tripping through
 `BPETokenizer`; they reuse only `MergeRule`/`TokenId` and duplicate the merge
 loop internally:
 
-- `tokenizer.qwen3.QwenTokenizer` (`Tyr/Tokenizer/Qwen3.lean:50`) — byte-level
+- `tokenizer.qwen3.QwenTokenizer` (`Tyr/Tokenizer/Qwen3.lean`) — byte-level
   BPE loaded from `tokenizer.json` or `vocab.json` + `merges.txt`
-  (`loadTokenizer`, `Qwen3.lean:82`), plus chat templates and TTS text
+  (`loadTokenizer`, `Qwen3.lean`), plus chat templates and TTS text
   wrappers.
 - `tokenizer.qwen35` / `tokenizer.qwen36` — `abbrev` aliases of the Qwen3
   codec with family-specific chat templates (`chatTemplateThinking`,
-  `userPrefix`, `assistantGenerationSuffix`; `Tyr/Tokenizer/Qwen35.lean:20-38`,
+  `userPrefix`, `assistantGenerationSuffix`; `Tyr/Tokenizer/Qwen35.lean`,
   `Qwen36.lean`).
-- `tokenizer.gemma4.GemmaTokenizer` (`Tyr/Tokenizer/Gemma4.lean:48`) —
+- `tokenizer.gemma4.GemmaTokenizer` (`Tyr/Tokenizer/Gemma4.lean`) —
   SentencePiece-style BPE with `▁` whitespace marker and `<0x..>` byte
-  fallback, loaded from `tokenizer.json` (`loadTokenizer`, `Gemma4.lean:85`).
+  fallback, loaded from `tokenizer.json` (`loadTokenizer`, `Gemma4.lean`).
 
 ### Binary shard loading
 
 `torch.DataLoader` (`Tyr/DataLoader.lean`) streams fixed-shape windows out of
 uint16 `.bin` shards in the fineweb/modded-nanogpt format (256 int32 header
 words, magic `20240520`, version 1; `splitFinewebPayload`,
-`DataLoader.lean:210`). The chain:
+`DataLoader.lean`). The chain:
 
-1. `resolveShardPaths spec kind` (`DataLoader.lean:75`) accepts a file,
+1. `resolveShardPaths spec kind` (`DataLoader.lean`) accepts a file,
    directory, or path prefix and returns sorted `.bin` paths (preferring
    `fineweb_train_*` / `fineweb_val_*`).
-2. `DataShard.loadFromFile` (`DataLoader.lean:239`) reads a shard via the torch
+2. `DataShard.loadFromFile` (`DataLoader.lean`) reads a shard via the torch
    FFI, strips the header, slices the per-rank token range
    `[rank·⌊n/world⌋, ...)`, and builds a `BOSFinder`.
 3. `DataShard.load` retains the actual partition length and returns
@@ -147,17 +147,17 @@ through `@[extern]` declarations implemented in `cc/src/tyr_parquet.cpp`: `listP
 `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson`.
 
 `torch.Data.Download` shells out to `curl`/`unzip` with retry/backoff
-(`downloadWithRetry`, `Tyr/Data/Download.lean:60`) and resolves HF parquet
-URLs (`ensureHFParquet`, `:187`). `torch.Data.HuggingFace` turns parquet into
+(`downloadWithRetry`, `Tyr/Data/Download.lean`) and resolves HF parquet
+URLs (`ensureHFParquet`). `torch.Data.HuggingFace` turns parquet into
 `Lean.Json` rows and ships per-dataset loaders (`loadARC`, `loadGSM8K`,
-`loadMMLU`, `loadSmolTalk`; `Tyr/Data/HuggingFace.lean:59-167`).
+`loadMMLU`, `loadSmolTalk`; `Tyr/Data/HuggingFace.lean`).
 
 ### Tasks, conversations, and mixtures
 
 `torch.Data.Task` (`Tyr/Data/Task.lean`) models chat data:
 `Conversation = Array Message` with `Role` (system/user/assistant/tool) and
 optional structured `ContentPart`s (text/code/toolCall/toolResult).
-`renderConversation` (`Task.lean:236`) is the loss-mask heart:
+`renderConversation` (`Task.lean`) is the loss-mask heart:
 
 ```lean
 def renderConversation
@@ -174,20 +174,20 @@ pads tokenized conversations into a `ConversationBatch`: its `batchSize` and
 `seqLen` fields index Int64 tokens and Float32 masks.
 
 Mixtures come in three forms, all projecting to the function-closure
-`ConversationMixture { size, seed, getAtSeed }` (`Task.lean:179`):
+`ConversationMixture { size, seed, getAtSeed }` (`Task.lean`):
 
-- `TaskMixture` (`Task.lean:125`) — closed, weighted, deterministically
+- `TaskMixture` (`Task.lean`) — closed, weighted, deterministically
   shuffled mixture over `LoadedTask`.
 - `EvalTask` typeclass + `BoxedTask` existential + `GenericTaskMixture`
-  (`Tyr/Data/TaskClass.lean:57,111,165`) — the open extension point; add your
+  (`Tyr/Data/TaskClass.lean`) — the open extension point; add your
   own task type with an `EvalTask` instance, box it with `boxTask`, combine
   with `entry`/`GenericTaskMixture.create`.
 - Built-in toy tasks in `Tyr/Data/Tasks.lean` (identity, math, spelling,
   multiple choice) and mixture presets `createMidtrainingMixture` /
-  `createSFTMixture` (`Tasks.lean:173,182`).
+  `createSFTMixture` (`Tasks.lean`).
 
-Consumers: `TaskIterator` (`Task.lean:391`) yields padded
-`[batch, maxLen]` batches with masks; `TaskTokenStream` (`Task.lean:454`)
+Consumers: `TaskIterator` (`Task.lean`) yields padded
+`[batch, maxLen]` batches with masks; `TaskTokenStream` (`Task.lean`)
 streams rank-strided rendered conversations into a token buffer and emits
 contiguous `batchSize * seqLen + 1` windows, split into `(inputs, targets)` by
 one-token shift — the nanochat midtraining data flow.
@@ -196,11 +196,11 @@ one-token shift — the nanochat midtraining data flow.
 
 `Tyr.Text` (`Tyr/Text/`) serves streaming ASR, not training:
 
-- `updateWithSignals` (`Tyr/Text/StreamingConsensus.lean:72`) stabilizes
+- `updateWithSignals` (`Tyr/Text/StreamingConsensus.lean`) stabilizes
   streaming hypotheses into an append-only stable prefix plus a mutable tail,
   combining prefix agreement with the previous hypothesis, k-window history
   consensus, freeze and VAD-boundary signals.
-- `SileroProvider` (`Tyr/Text/VADProvider.lean:10`) wraps the Silero VAD
+- `SileroProvider` (`Tyr/Text/VADProvider.lean`) wraps the Silero VAD
   model (`Tyr.Model.SileroVAD`), consuming 16 kHz audio in 512-sample chunks
   and emitting the `VADSignal`s (`speechActive`, `boundary`) that feed
   `updateWithSignals`.
@@ -211,28 +211,28 @@ one-token shift — the nanochat midtraining data flow.
 
 | API | Signature | Location |
 | --- | --- | --- |
-| `trainBPE` | `(docs : Array String) (config : TrainConfig) (log : Handlers := {}) : IO TrainResult` | `Tyr/Tokenizer/Training.lean:211` |
-| `save` / `load` | `(tok : BPETokenizer) (path : String) : IO Unit` / `(path : String) : IO BPETokenizer` | `Tyr/Tokenizer/IO.lean:190,197` |
-| `encode` / `encodeWithSpecials` | `(tok : BPETokenizer) (text : String) : Array TokenId` | `Tyr/Tokenizer/Encode.lean:143,156` |
-| `decode` / `decodeToBytes` | `(tok : BPETokenizer) (ids : Array TokenId) : String` / `: ByteArray` | `Tyr/Tokenizer/Decode.lean:29,36` |
-| `countTokens` | `(tok : BPETokenizer) (text : String) : Nat` | `Tyr/Tokenizer/Encode.lean:176` |
-| `TrainConfig` | `{ vocabSize := 32768, maxChars, docCap, splitPattern, specialTokens, seed }` | `Tyr/Tokenizer/Training.lean:41` |
-| `defaultChatSpecialTokens` | `Array String` (nanochat chat token set) | `Tyr/Tokenizer/Training.lean:28` |
-| `createBase` | `BPETokenizer` (256 byte tokens + all special tokens) | `Tyr/Tokenizer/IO.lean:204` |
-| `TokenBytes.fromTokenizer` / `.totalBytes` | `BPETokenizer → TokenBytes` / `TokenBytes → Array UInt32 → IO UInt64` | `Tyr/Tokenizer/TokenBytes.lean:32,50` |
+| `trainBPE` | `(docs : Array String) (config : TrainConfig) (log : Handlers := {}) : IO TrainResult` | `Tyr/Tokenizer/Training.lean` |
+| `save` / `load` | `(tok : BPETokenizer) (path : String) : IO Unit` / `(path : String) : IO BPETokenizer` | `Tyr/Tokenizer/IO.lean` |
+| `encode` / `encodeWithSpecials` | `(tok : BPETokenizer) (text : String) : Array TokenId` | `Tyr/Tokenizer/Encode.lean` |
+| `decode` / `decodeToBytes` | `(tok : BPETokenizer) (ids : Array TokenId) : String` / `: ByteArray` | `Tyr/Tokenizer/Decode.lean` |
+| `countTokens` | `(tok : BPETokenizer) (text : String) : Nat` | `Tyr/Tokenizer/Encode.lean` |
+| `TrainConfig` | `{ vocabSize := 32768, maxChars, docCap, splitPattern, specialTokens, seed }` | `Tyr/Tokenizer/Training.lean` |
+| `defaultChatSpecialTokens` | `Array String` (nanochat chat token set) | `Tyr/Tokenizer/Training.lean` |
+| `createBase` | `BPETokenizer` (256 byte tokens + all special tokens) | `Tyr/Tokenizer/IO.lean` |
+| `TokenBytes.fromTokenizer` / `.totalBytes` | `BPETokenizer → TokenBytes` / `TokenBytes → Array UInt32 → IO UInt64` | `Tyr/Tokenizer/TokenBytes.lean` |
 
 ### HF codecs — `tokenizer.qwen3` / `qwen35` / `qwen36` / `gemma4`
 
 | API | Signature | Location |
 | --- | --- | --- |
-| `qwen3.loadTokenizer` | `(dir : String) : IO QwenTokenizer` | `Tyr/Tokenizer/Qwen3.lean:82` |
-| `qwen3.encodeText` / `decodeText` | `(tok) (text : String) : Array TokenId` / `(tok) (ids) : String` | `Qwen3.lean:530,541` |
-| `qwen3.chatTemplate` | `(prompt : String) : String` | `Qwen3.lean:260` |
-| `qwen3.encodePrompt` | `(tok) (prompt) (maxLen : Nat := 512) : Array TokenId × Array TokenId` (tokens + attention mask) | `Qwen3.lean:566` |
-| `qwen3.ttsAssistantText` / `ttsRefText` / `ttsInstructText` | `String → String` | `Qwen3.lean:264-272` |
-| `qwen35.chatTemplateThinking`, `userPrefix`, `assistantGenerationSuffix` | `String → String` / `String` | `Tyr/Tokenizer/Qwen35.lean:24-38` |
-| `gemma4.loadTokenizer` | `(dir : String) : IO GemmaTokenizer` | `Tyr/Tokenizer/Gemma4.lean:85` |
-| `gemma4.encodeText` / `decodeText` / `chatTemplate` / `chatTemplateThinking` | as Qwen3 | `Gemma4.lean:362,389,235,238` |
+| `qwen3.loadTokenizer` | `(dir : String) : IO QwenTokenizer` | `Tyr/Tokenizer/Qwen3.lean` |
+| `qwen3.encodeText` / `decodeText` | `(tok) (text : String) : Array TokenId` / `(tok) (ids) : String` | `Qwen3.lean` |
+| `qwen3.chatTemplate` | `(prompt : String) : String` | `Qwen3.lean` |
+| `qwen3.encodePrompt` | `(tok) (prompt) (maxLen : Nat := 512) : Array TokenId × Array TokenId` (tokens + attention mask) | `Qwen3.lean` |
+| `qwen3.ttsAssistantText` / `ttsRefText` / `ttsInstructText` | `String → String` | `Qwen3.lean` |
+| `qwen35.chatTemplateThinking`, `userPrefix`, `assistantGenerationSuffix` | `String → String` / `String` | `Tyr/Tokenizer/Qwen35.lean` |
+| `gemma4.loadTokenizer` | `(dir : String) : IO GemmaTokenizer` | `Tyr/Tokenizer/Gemma4.lean` |
+| `gemma4.encodeText` / `decodeText` / `chatTemplate` / `chatTemplateThinking` | as Qwen3 | `Gemma4.lean` |
 
 `qwen35` re-exports the qwen3 codec as `abbrev`s (`loadTokenizer`,
 `encodeText`, ...); `qwen36` re-exports `qwen35`.
@@ -242,8 +242,8 @@ one-token shift — the nanochat midtraining data flow.
 | API | Signature | Location |
 | --- | --- | --- |
 | `Config` | `{ dataPath, valPath, seqLen, bosToken, seed, shuffle }`; synchronous compatibility fields `numWorkers`, `bufferSize` | `Tyr/DataLoader.lean` |
-| `resolveShardPaths` | `(pathSpec : String) (kind : ShardKind) : IO (Array String)` | `Tyr/DataLoader.lean:75` |
-| `DataShard.loadFromFile` | `(path) (shardIdx numShards bosToken : UInt64) : IO (Σ n, DataShard n)` | `Tyr/DataLoader.lean:239` |
+| `resolveShardPaths` | `(pathSpec : String) (kind : ShardKind) : IO (Array String)` | `Tyr/DataLoader.lean` |
+| `DataShard.loadFromFile` | `(path) (shardIdx numShards bosToken : UInt64) : IO (Σ n, DataShard n)` | `Tyr/DataLoader.lean` |
 | `DataShard.load` / `loadValidationData` | Return `IO (Σ n, DataShard n)` with the real partition length | `Tyr/DataLoader.lean` |
 | `DistributedDataGenerator.cursor` / `.restoreCursor` | Versioned `StreamCursor` capture and validated restore | `Tyr/DataLoader.lean` |
 | `BatchIterator.new` / `.next` | `(shard) : BatchIterator` / `(iter) (batchSize seqLen : Nat) : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` | `Tyr/DataLoader.lean` |
@@ -251,46 +251,46 @@ one-token shift — the nanochat midtraining data flow.
 | `DistributedDataGenerator.nextBatch` | `(gen) (batchSize seqLen : Nat) : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × DistributedDataGenerator)` | `Tyr/DataLoader.lean` |
 | `BatchIterator.nextGPT` | `(iter) (batchSize seqLen : Nat) : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` (input/target shift) | `Examples/GPT/GPTDataLoader.lean` |
 | `DistributedDataGenerator.nextBatchGPT` | `(gen) (batchSize seqLen : Nat)`; GPT input/target batch | `Examples/GPT/GPTDataLoader.lean` |
-| `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }` batches | `Examples/GPT/GPTDataLoader.lean:118,159,166` |
-| `loadShakespeareData` | `(trainPath valPath) (batchSize seqLen) : IO (Σ n, SequentialBatchIterator n .. × Option (Σ m, SequentialLoader m))` — one-shot Shakespeare setup | `Examples/GPT/GPTDataLoader.lean:188` |
+| `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }` batches | `Examples/GPT/GPTDataLoader.lean` |
+| `loadShakespeareData` | `(trainPath valPath) (batchSize seqLen) : IO (Σ n, SequentialBatchIterator n .. × Option (Σ m, SequentialLoader m))` — one-shot Shakespeare setup | `Examples/GPT/GPTDataLoader.lean` |
 
 ### Parquet / downloads — `torch.Data.Parquet`, `torch.Data.Download`, `torch.Data.HuggingFace`
 
 | API | Signature | Location |
 | --- | --- | --- |
 | `listParquetFiles`, `getParquetMetadata`, `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson` | `@[extern]` opaque IO functions | `Tyr/RawTensor/Parquet.lean` |
-| `downloadWithRetry` | `(url dest : String) (maxRetries := 5) (initialBackoffMs := 1000) (log := {}) : IO Bool` | `Tyr/Data/Download.lean:60` |
-| `ensureHFParquet` | `(repoId subset split : String) (cacheDir ..) : IO String` | `Download.lean:187` |
-| `loadARC` / `loadGSM8K` / `loadMMLU` / `loadSmolTalk` | `... : IO (Array Lean.Json)` | `Tyr/Data/HuggingFace.lean:59,67,75,167` |
-| `loadJsonlFromUrl` / `loadJsonlFromFile` | `... : IO (Array Lean.Json)` | `HuggingFace.lean:179,195` |
+| `downloadWithRetry` | `(url dest : String) (maxRetries := 5) (initialBackoffMs := 1000) (log := {}) : IO Bool` | `Tyr/Data/Download.lean` |
+| `ensureHFParquet` | `(repoId subset split : String) (cacheDir ..) : IO String` | `Download.lean` |
+| `loadARC` / `loadGSM8K` / `loadMMLU` / `loadSmolTalk` | `... : IO (Array Lean.Json)` | `Tyr/Data/HuggingFace.lean` |
+| `loadJsonlFromUrl` / `loadJsonlFromFile` | `... : IO (Array Lean.Json)` | `HuggingFace.lean` |
 
 ### Tasks — `torch.Data.Task`, `torch.Data.TaskClass`, `torch.Data.Tasks`
 
 | API | Signature | Location |
 | --- | --- | --- |
-| `Message.user` / `.assistant` / `.system` | `(content : String) : Message` | `Tyr/Data/Task.lean:59-61` |
-| `ChatTokens` | special-token id record for rendering | `Task.lean:204` |
-| `renderConversation` | `(conv) (tokens : ChatTokens) (encode : String → Array UInt64) : TokenizedConversation` | `Task.lean:236` |
-| `collate` | `(convs) (maxLen : Nat) (padToken := 0) : IO ConversationBatch` | `Task.lean:352` |
-| `TaskIterator.new` / `.nextBatch` | padded masked batches from a `ConversationMixture` | `Task.lean:400,409` |
-| `TaskTokenStream.new` / `.nextGPTBatch` | rank-strided token windows; indexed Int64 input/target pairs with the stream dimensions | `Task.lean:470,521` |
-| `TaskMixture.create` / `.toConversationMixture` | `(entries : Array MixtureEntry) (seed := 42)` | `Task.lean:153,193` |
-| `EvalTask` class / `boxTask` / `entry` / `GenericTaskMixture.create` | open task typeclass + existential mixture | `Tyr/Data/TaskClass.lean:57,119,237,172` |
-| `createMidtrainingMixture` / `createSFTMixture` | `(modelName : String) : TaskMixture` | `Tyr/Data/Tasks.lean:173,182` |
+| `Message.user` / `.assistant` / `.system` | `(content : String) : Message` | `Tyr/Data/Task.lean` |
+| `ChatTokens` | special-token id record for rendering | `Task.lean` |
+| `renderConversation` | `(conv) (tokens : ChatTokens) (encode : String → Array UInt64) : TokenizedConversation` | `Task.lean` |
+| `collate` | `(convs) (maxLen : Nat) (padToken := 0) : IO ConversationBatch` | `Task.lean` |
+| `TaskIterator.new` / `.nextBatch` | padded masked batches from a `ConversationMixture` | `Task.lean` |
+| `TaskTokenStream.new` / `.nextGPTBatch` | rank-strided token windows; indexed Int64 input/target pairs with the stream dimensions | `Task.lean` |
+| `TaskMixture.create` / `.toConversationMixture` | `(entries : Array MixtureEntry) (seed := 42)` | `Task.lean` |
+| `EvalTask` class / `boxTask` / `entry` / `GenericTaskMixture.create` | open task typeclass + existential mixture | `Tyr/Data/TaskClass.lean` |
+| `createMidtrainingMixture` / `createSFTMixture` | `(modelName : String) : TaskMixture` | `Tyr/Data/Tasks.lean` |
 
 ### Streaming text — `namespace Tyr.Text`
 
 | API | Signature | Location |
 | --- | --- | --- |
-| `updateWithSignals` | `(st : ConsensusState) (ids : Array UInt32) (speechActive := true) (boundary := false) (decode : Array UInt32 → String) : ConsensusState × TextDelta` | `Tyr/Text/StreamingConsensus.lean:72` |
-| `update` | signal-free wrapper | `StreamingConsensus.lean:138` |
-| `initSileroProvider` | `(weightsPath : String) (threshold := 0.5) (minSilenceDurationMs := 100) (speechPadMs := 30) : IO SileroProvider` | `Tyr/Text/VADProvider.lean:29` |
-| `stepSileroProvider` | `(p) (pcm16k : Array Float) : IO (SileroProvider × VADSignal)` | `VADProvider.lean:40` |
+| `updateWithSignals` | `(st : ConsensusState) (ids : Array UInt32) (speechActive := true) (boundary := false) (decode : Array UInt32 → String) : ConsensusState × TextDelta` | `Tyr/Text/StreamingConsensus.lean` |
+| `update` | signal-free wrapper | `StreamingConsensus.lean` |
+| `initSileroProvider` | `(weightsPath : String) (threshold := 0.5) (minSilenceDurationMs := 100) (speechPadMs := 30) : IO SileroProvider` | `Tyr/Text/VADProvider.lean` |
+| `stepSileroProvider` | `(p) (pcm16k : Array Float) : IO (SileroProvider × VADSignal)` | `VADProvider.lean` |
 
 ## Usage examples
 
 Train, persist, and use a BPE tokenizer — reconstructed example (from
-`Examples/NanoChat/Pipeline.lean:668-714`):
+`Examples/NanoChat/Pipeline.lean`):
 
 ```lean
 import Tyr.Tokenizer
@@ -310,7 +310,7 @@ let n := tokenizer.countTokens tok someText
 ```
 
 Pretraining batches from fineweb shards — reconstructed example (from
-`Tests/TestDataLoader.lean:199-214`, `Examples/NanoChat/ModdedTrain.lean:755`):
+`Tests/TestDataLoader.lean`, `Examples/NanoChat/ModdedTrain.lean`):
 
 ```lean
 import Tyr.DataLoader
@@ -331,8 +331,8 @@ returns indexed input/target pairs separated by one token.
 
 
 Fixed-dim Shakespeare batches — reconstructed example (from
-`Tests/TestDataLoader.lean:92-126`, definitions in
-`Examples/GPT/GPTDataLoader.lean:153-198`):
+`Tests/TestDataLoader.lean`, definitions in
+`Examples/GPT/GPTDataLoader.lean`):
 
 ```lean
 import Examples.GPT.GPTDataLoader
@@ -344,7 +344,7 @@ let (pair?, iter') := iter.next    -- pair? : Option (Tensor { shape := #[4, 32]
 ```
 
 Midtraining/SFT token stream over a task mixture — reconstructed example
-(from `Examples/NanoChat/Pipeline.lean:1408-1424`):
+(from `Examples/NanoChat/Pipeline.lean`):
 
 ```lean
 import Tyr.Tokenizer
@@ -360,7 +360,7 @@ let (pair?, stream') ← stream.nextGPTBatch          -- optional indexed Int64 
 ```
 
 HF tokenizer for inference — reconstructed example (from
-`Examples/Qwen35/RunHF.lean:97-105`):
+`Examples/Qwen35/RunHF.lean`):
 
 ```lean
 import Tyr.Tokenizer
@@ -376,10 +376,10 @@ let out := tokenizer.qwen35.decodeText tok generatedIds
 Behavior verified against source that the module docs do not advertise:
 
 - `trainBPE` never pretokenizes and ignores `TrainConfig.{maxChars, docCap,
-  splitPattern, seed}` (`Tyr/Tokenizer/Training.lean:211-278`).
+  splitPattern, seed}` (`Tyr/Tokenizer/Training.lean`).
 - `allSpecialTokens` mixes control tokens with ordinary words ("theorem",
   "def", Greek letters); via `encodeWithSpecials` these match atomically
-  anywhere in text (`Tyr/Tokenizer/SpecialTokens.lean:53-99`).
+  anywhere in text (`Tyr/Tokenizer/SpecialTokens.lean`).
 
 ## Related guides
 

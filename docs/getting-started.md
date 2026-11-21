@@ -116,7 +116,7 @@ Runtime variables a user actually sets:
 
 | Variable | Used by | Effect |
 |---|---|---|
-| `TYR_DEVICE` | `Examples/TrainGPT.lean:92`, NanoChat scripts | `auto` / `cpu` / `cuda` / `mps` device selection (default CPU in TrainGPT, `cuda` in the torchrun scripts) |
+| `TYR_DEVICE` | `Examples/TrainGPT.lean`, NanoChat scripts | `auto` / `cpu` / `cuda` / `mps` device selection (default CPU in TrainGPT, `cuda` in the torchrun scripts) |
 | `RANK` / `LOCAL_RANK` / `WORLD_SIZE` / `MASTER_ADDR` / `MASTER_PORT` | distributed trainers | set by `torchrun`; see `scripts/nanochat/ENV_INVENTORY.md` |
 
 ## Running tests
@@ -211,11 +211,11 @@ open torch.gpt
 open torch.train
 
 def main : IO Unit := do
-  -- device: TYR_DEVICE=auto|cpu|cuda|mps, else CPU (TrainGPT.lean:92)
+  -- device: TYR_DEVICE=auto|cpu|cuda|mps, else CPU (TrainGPT.lean)
   let device ← getBestDevice
 
-  let modelCfg := Config.nanogpt_cpu_shakespeare      -- GPT.lean:42
-  let trainCfg : TrainConfig := {                      -- Train.lean:15
+  let modelCfg := Config.nanogpt_cpu_shakespeare      -- GPT.lean
+  let trainCfg : TrainConfig := {                      -- Train.lean
     maxIters := 5000
     learningRate := 1e-3
     batchSize := 12
@@ -228,7 +228,7 @@ def main : IO Unit := do
   let trainData ← Tensor.loadU16Bin nTrain "data/shakespeare_char/train.bin"
 
   let params ← GPTParams.init modelCfg trainCfg.device
-  let opt := Optim.adamw (lr := trainCfg.learningRate) -- Optim.lean:190
+  let opt := Optim.adamw (lr := trainCfg.learningRate) -- Optim.lean
   let optState := opt.init params
   let _trained ← trainLoop trainCfg params optState trainData
 ```

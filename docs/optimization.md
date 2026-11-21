@@ -23,7 +23,7 @@ umbrella import for the whole geometry layer.
 ### The Optax-style core (`Tyr/Optim.lean`, namespace `torch.Optim`)
 
 An optimizer is an explicit state transition over a tensor structure
-(`Tyr/Optim.lean:105`):
+(`Tyr/Optim.lean`):
 
 ```lean
 structure GradientTransformation (α : Type) (S : Type) where
@@ -34,24 +34,24 @@ structure GradientTransformation (α : Type) (S : Type) where
 ```
 
 `update` returns *transformed gradients*, not new parameters — that is what makes
-transformations composable via `chain` (`Tyr/Optim.lean:173`). State types (`EmptyState`,
+transformations composable via `chain` (`Tyr/Optim.lean`). State types (`EmptyState`,
 `ScaleByAdamState α`, `TraceState α`, `ChainState S1 S2`, `ScaleByScheduleState`) all have
 `TensorStruct` instances, so optimizer state can be mapped and
 checkpointed with the same machinery as model parameters (see
 [tensorstruct.md](core/tensorstruct.md)).
 
-Built-in pieces (`Tyr/Optim.lean:114-297`):
+Built-in pieces (`Tyr/Optim.lean`):
 
 - Primitives: `scale`, `scale_by_adam`, `add_decayed_weights`, `trace`.
 - Composed optimizers: `adamw` = `scale_by_adam → add_decayed_weights → scale(-lr)`
-  (`:190`), `sgd`, `sgd_momentum`.
-- Application: `apply_updates` (detach, add, re-enable `requires_grad`, `:213`) and
-  `step opt params grads state : IO (α × S)` (`:223`).
-- Schedule integration: `Schedule := Nat → Float` (`:235`), `scale_by_schedule`, and
+ , `sgd`, `sgd_momentum`.
+- Application: `apply_updates` (detach, add, re-enable `requires_grad`) and
+  `step opt params grads state : IO (α × S)`.
+- Schedule integration: `Schedule := Nat → Float`, `scale_by_schedule`, and
   schedule-aware variants `adamw_schedule`, `sgd_schedule`, `sgd_momentum_schedule`.
 
 Gradient clipping is not implemented in the core — the section is an explicit TODO
-(`Tyr/Optim.lean:299`); only `RiemannianTreeSGD` carries a private `clipScale`, and
+(`Tyr/Optim.lean`); only `RiemannianTreeSGD` carries a private `clipScale`, and
 training loops clip inline (e.g. `clipGPTGrads` in `Examples/GPT/Train.lean`).
 
 ### Schedules (`Tyr/Optim/Scheduler.lean`, namespace `torch.Optim.Scheduler`)
@@ -59,16 +59,16 @@ training loops clip inline (e.g. `clipGPTGrads` in `Examples/GPT/Train.lean`).
 Schedules are bare functions `Nat → Float`, so they compose without any framework support.
 Constructors: `constant`, `cosine_decay`, `linear_decay`, `step_decay`, `one_cycle`,
 `warmup_plateau_cosine`, `exponential_decay`, `polynomial_decay`, `warmup`
-(`Scheduler.lean:28-112`). Combinators: `join`, `sequence`, `scale_schedule`, `multiply`,
-`add`, `clamp` (`Scheduler.lean:121-145`), plus weight-decay schedules
+(`Scheduler.lean`). Combinators: `join`, `sequence`, `scale_schedule`, `multiply`,
+`add`, `clamp` (`Scheduler.lean`), plus weight-decay schedules
 `linear_weight_decay` / `cosine_weight_decay`. A legacy config-struct API
-(`ScheduleConfig`, `getLr`, `*.toSchedule`, `Scheduler.lean:165-294`) duplicates every
+(`ScheduleConfig`, `getLr`, `*.toSchedule`, `Scheduler.lean`) duplicates every
 modern constructor; prefer the function form.
 
 ### The manifold layer (`Tyr/Manifolds/Basic.lean`, namespace `Tyr.Manifolds`)
 
 The central abstraction is a point-dependent bundle typeclass
-(`Tyr/Manifolds/Basic.lean:36`):
+(`Tyr/Manifolds/Basic.lean`):
 
 ```lean
 class DifferentiableManifold (M : Type) where
@@ -87,18 +87,18 @@ class DifferentiableManifold (M : Type) where
 
 Three ways in:
 
-- `EuclideanSpace M` (`zero`/`add`/`smul`/`inner`, `Basic.lean:75`) gets a free
+- `EuclideanSpace M` (`zero`/`add`/`smul`/`inner`, `Basic.lean`) gets a free
   `DifferentiableManifold` instance with `sharp`/`flat := id` and `exp x v := x + v`.
   Instances exist for `Float`, `Static α` (0-dimensional), and any
-  `[TensorStruct α] [Inhabited α]` as a product manifold (`Basic.lean:101-129`).
-- `DifferentiableManifold.gradientStep x grad lr` (`Basic.lean:134`) is the generic
+  `[TensorStruct α] [Inhabited α]` as a product manifold (`Basic.lean`).
+- `DifferentiableManifold.gradientStep x grad lr` (`Basic.lean`) is the generic
   Riemannian gradient step: `retract x (-lr • sharp grad)`.
 - Concrete manifold families are structures wrapping one shape-typed tensor with a
   matching tangent structure and `project`/`random` constructors (table below).
   The table shows default Float32/unrestricted-placement tensors; manifold
   carriers also retain explicit dtype and device parameters.
 
-`abbrev Differentiable := DifferentiableManifold` (`Basic.lean:143`) is a
+`abbrev Differentiable := DifferentiableManifold` (`Basic.lean`) is a
 backward-compatibility alias.
 
 Concrete families (all in `Tyr.Manifolds`, one file each under `Tyr/Manifolds/`):
@@ -119,11 +119,11 @@ Concrete families (all in `Tyr.Manifolds`, one file each under `Tyr/Manifolds/`)
 | `Hyperbolic n` | hyperboloid `⟨x,x⟩_L = -1`, `coords : Tensor { shape := #[n+1], dtype := .Float32, device := .CPU }` | Minkowski normalize; `sharp`/`flat` apply the Minkowski metric |
 
 Grassmann also ships geometry extras: `principalAngles`, `distance` (chordal, despite the
-geodesic docstring), and a `log` map (`Grassmann.lean:62-136`).
+geodesic docstring), and a `log` map (`Grassmann.lean`).
 
 ### Steepest descent beyond the metric (`Tyr/Manifolds/Optimizer.lean`)
 
-`DualMapGeometry` (`Optimizer.lean:43`) is the hook for Finsler-style steepest descent
+`DualMapGeometry` (`Optimizer.lean`) is the hook for Finsler-style steepest descent
 where the update direction is *not* the Riemannian `sharp`:
 
 ```lean
@@ -134,11 +134,11 @@ class DualMapGeometry (M : Type) [DifferentiableManifold M] where
 ```
 
 User-facing entry points: `DualMapGeometry.dualMapStep x g lr : M` and
-`dualMapStepWithDiagnostics` (`Optimizer.lean:59-81`). Instances: `Float` (sign descent),
+`dualMapStepWithDiagnostics` (`Optimizer.lean`). Instances: `Float` (sign descent),
 `Stiefel`, `Orthogonal`, `Grassmann` (spectral/nuclear norms, tangent-projected and
 Frobenius-normalized dual map), `Hyperbolic` (Minkowski metric + L2 normalization).
 
-`EmbeddedManifold` (`Tyr/Manifolds/Embedded.lean:17`) exposes an ambient representation
+`EmbeddedManifold` (`Tyr/Manifolds/Embedded.lean`) exposes an ambient representation
 (`Ambient`, `toAmbient`, `projectAmbientTangent`) plus `retractAmbientStep`; instances for
 `Tensor σ`, `Stiefel`, `Orthogonal`, `Grassmann`, `Hyperbolic`. Downstream consumers build on
 `DualMapGeometry` rather than this class: `DualOptimizer`'s generic manifold path and
@@ -156,7 +156,7 @@ per-parameter idiom, shared with the other first-order optimizers:
 
 ```lean
 def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
-    (cfg : Config) (lrMul wdMul : Float) : IO (Tensor σ × ParamState σ)   -- NorMuon.lean:221
+    (cfg : Config) (lrMul wdMul : Float) : IO (Tensor σ × ParamState σ)   -- NorMuon.lean
 ```
 
 `stepSingle` does: momentum-buffer update on the raw gradient, Nesterov blend,
@@ -172,8 +172,8 @@ nanochat's 0.85→base momentum warmup.
 
 `DistAdam` (`Tyr/Optim/DistAdam.lean`) is AdamW for embeddings, heads, and scalars:
 `ParamState s` holds `expAvg`/`expAvgSq`/`step`, `stepSingle` is textbook bias-corrected
-Adam with decoupled weight decay (`DistAdam.lean:107`), and `stepDistributed`
-(`DistAdam.lean:175`) reduce-scatters gradients and all-gathers updated shards when the
+Adam with decoupled weight decay (`DistAdam.lean`), and `stepDistributed`
+(`DistAdam.lean`) reduce-scatters gradients and all-gathers updated shards when the
 first dimension shards evenly, otherwise falls back to all-reduce + local step. A sharded
 API (`ShardedParamState`, `stepSharded`, `ShardedEmbeddingAdam`) layered on
 `Tyr.Sharding.ShardedTensor` has no call sites outside its own file — treat as
@@ -183,17 +183,17 @@ experimental.
 
 `DualOptimizer` (`Tyr/Optim/DualOptimizer.lean`) wires the nanochat strategy: matrix
 parameters go to a Muon-family backend, embeddings/LM head/scalars to AdamW. The
-top-level `Config` (`DualOptimizer.lean:40`) carries per-group LRs (`matrixLr`,
+top-level `Config` (`DualOptimizer.lean`) carries per-group LRs (`matrixLr`,
 `embeddingLr`, `lmHeadLr`, `scalarLr`), Muon hyperparameters, scheduled momentum/weight
 decay (`getScheduledMomentum`, `getScheduledWeightDecay`), a `modelDim`/`refDim` LR scale
 (`dimLrScale = (modelDim/refDim)^(-0.5)`), and backend selection:
 
 ```lean
-inductive MatrixOptimizerKind where | norMuon | manifoldMuon        -- DualOptimizer.lean:27
+inductive MatrixOptimizerKind where | norMuon | manifoldMuon        -- DualOptimizer.lean
 inductive MatrixManifoldFamily where | stiefel | orthogonal | grassmann  -- :33
 ```
 
-Matrix state is tagged by backend (`DualOptimizer.lean:294`):
+Matrix state is tagged by backend (`DualOptimizer.lean`):
 
 ```lean
 inductive MatrixParamState (m n : UInt64) where
@@ -203,11 +203,11 @@ inductive MatrixParamState (m n : UInt64) where
 ```
 
 `initMatrixParamState cfg param` builds the right constructor; `stepMatrixSingle`
-(`DualOptimizer.lean:402`) dispatches: `.norMuon` → `NorMuon.stepSingle`;
+(`DualOptimizer.lean`) dispatches: `.norMuon` → `NorMuon.stepSingle`;
 `.manifoldMuon` + `.stiefel` (and not `preferGenericManifoldPath`) → the specialized
 `ManifoldMuon.stepSingle`; otherwise the generic path `stepGenericManifoldSingle`, which
 does Nesterov blending and then a `DualMapGeometry.dualMapStep` on the configured manifold
-family (`DualOptimizer.lean:344-399`). A state/config constructor mismatch throws
+family (`DualOptimizer.lean`). A state/config constructor mismatch throws
 `IO.userError` (it used to silently re-initialize the state, dropping momentum). Group variants `stepMatrixGroupLocal`/`stepMatrixGroupDistributed`
 and the closure bundle `MatrixBackendOps m n` (`matrixBackendOps`,
 `matrixBackendOpsForLabel`) cover batched and per-label use.
@@ -215,8 +215,8 @@ and the closure bundle `MatrixBackendOps m n` (`matrixBackendOps`,
 ### ManifoldMuon: Stiefel-constrained Muon
 
 `ManifoldMuon` (`Tyr/Optim/ManifoldMuon.lean`, marked experimental in its header) keeps
-matrix parameters on the Stiefel manifold. `stepSingle` (`ManifoldMuon.lean:286`, with
-`stepSingleWithDiagnostics` at `:228`): Nesterov blend, then solve for a
+matrix parameters on the Stiefel manifold. `stepSingle` (`ManifoldMuon.lean`, with
+`stepSingleWithDiagnostics` at ): Nesterov blend, then solve for a
 tangent-constrained matrix-sign direction — dual ascent on `Λ` or a damped fixed point,
 chosen by `SolverKind := dualAscent | fixedPoint`, with `msign` via Polar Express — then
 `tangentProject`, Frobenius-normalize, aspect-scale the LR, and QR-retract via
@@ -242,7 +242,7 @@ Entry points:
 def stepCrossEntropy [TensorStruct Params]
     (params : Params) (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := .CPU }))
     (targets : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) (lr : Float) (gradClip : Float := 0.0)
-    : IO (StepResult Params #[batch, seq, vocab])                -- RiemannianTreeSGD.lean:290
+    : IO (StepResult Params #[batch, seq, vocab])                -- RiemannianTreeSGD.lean
 
 def stepCrossEntropySampledFisher [TensorStruct Params]
     (params : Params) (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := .CPU }))
@@ -251,7 +251,7 @@ def stepCrossEntropySampledFisher [TensorStruct Params]
 ```
 
 `stepCrossEntropy` builds an identity output factor of rank `batch*seq*vocab` — one VJP
-per output element (`RiemannianTreeSGD.lean:301-306`), practical only for tiny shapes. The
+per output element (`RiemannianTreeSGD.lean`), practical only for tiny shapes. The
 sampled-Fisher variant sketches the factor with `probeCount` multinomial-sampled rows
 (exact loss gradient, sketched metric) and is the usable one. `StepDiagnostics` reports
 gradient/update/residual norms and an inner condition estimate.
@@ -316,7 +316,7 @@ suitable for matrix optimization.
 
 ### AdamW over a parameter tree
 
-Reconstructed example (from `Examples/GPT/Train.lean:138-145`):
+Reconstructed example (from `Examples/GPT/Train.lean`):
 
 ```lean
 -- params : GPTParams modelCfg, optState : Optim.AdamWState (GPTParams modelCfg)
@@ -334,7 +334,7 @@ from the optimizer's internal step counter instead.
 
 ### Dual split: DistAdam for embeddings, NorMuon for matrices
 
-Reconstructed example (from `Examples/NanoChat/ModdedTrain.lean:864-911`):
+Reconstructed example (from `Examples/NanoChat/ModdedTrain.lean`):
 
 ```lean
 let adamCfgBase : DistAdam.Config := {
@@ -352,7 +352,7 @@ let (wQs', wQSts') ← NorMuon.stepDistributedGroup
 
 ### Manifold matrix backend via DualOptimizer
 
-Reconstructed example (from `Tests/TestDualOptimizerDispatch.lean:106-112`):
+Reconstructed example (from `Tests/TestDualOptimizerDispatch.lean`):
 
 ```lean
 let cfg : DualOptimizer.Config := {
@@ -364,7 +364,7 @@ let (W1, st1) ← DualOptimizer.stepMatrixSingle W gW st0 cfg 0 1.0 1.0
 
 ### Direct manifold steps
 
-Reconstructed example (from `Tests/TestManifoldMuon.lean:21-47`):
+Reconstructed example (from `Tests/TestManifoldMuon.lean`):
 
 ```lean
 open Tyr.Manifolds
@@ -377,7 +377,7 @@ for _ in [:numSteps] do
 
 ### Whole-model Riemannian step
 
-Reconstructed example (from `Examples/GPT/RiemannianNanoGPT.lean:124-141`):
+Reconstructed example (from `Examples/GPT/RiemannianNanoGPT.lean`):
 
 ```lean
 let step ← torch.Optim.RiemannianTreeSGD.stepCrossEntropy
@@ -397,7 +397,7 @@ pure (step.params, step.loss, step.diagnostics)
 - `RiemannianTreeSGD.stepCrossEntropy` is exact but scales with `batch*seq*vocab` VJPs;
   use `stepCrossEntropySampledFisher` outside tiny test shapes.
 - `PoincareBall`'s instance uses identity `sharp`/`flat` and a Euclidean-add retraction
-  (`Tyr/Manifolds/PoincareBall.lean:48-59`) — the ball constraint, not Poincaré geometry.
+  (`Tyr/Manifolds/PoincareBall.lean`) — the ball constraint, not Poincaré geometry.
 - `DualOptimizer.stepMatrixSingle` throws `IO.userError` when the `MatrixParamState`
   constructor does not match the configured backend (e.g. a config change mid-run) instead
   of silently re-initializing; rebuild state explicitly with `initMatrixParamState cfg`.

@@ -59,30 +59,30 @@ not kernel proofs about LibTorch's implementation.
 
 At runtime, `RawTensor` is a Lean external object whose payload is a raw
 `c10::TensorImpl*`. The external class is registered with a finalizer that
-decrements the intrusive pointer (`cc/src/tyr.cpp:149-161`). Three functions
+decrements the intrusive pointer (`cc/src/tyr.cpp`). Three functions
 govern ownership across the boundary — declared in the 15-line header
-`cc/include/tyr_tensor.h`, defined in `cc/src/tyr.cpp:165-202`:
+`cc/include/tyr_tensor.h`, defined in `cc/src/tyr.cpp`:
 
 ```cpp
 // Borrow a tensor from Lean: incref + reclaim → scoped owning torch::Tensor.
-torch::Tensor borrowTensor(b_lean_obj_arg o);       // tyr.cpp:165
+torch::Tensor borrowTensor(b_lean_obj_arg o);       // tyr.cpp
 
 // Transfer a new tensor to Lean: incref, wrap in external, count it live.
-lean_object* giveTensor(torch::Tensor t);           // tyr.cpp:190
+lean_object* giveTensor(torch::Tensor t);           // tyr.cpp
 
 // Alias of giveTensor, kept for backward compatibility.
-lean_object* fromTorchTensor(torch::Tensor t);      // tyr.cpp:200
+lean_object* fromTorchTensor(torch::Tensor t);      // tyr.cpp
 ```
 
 The lifecycle is: C++ creates a tensor → `giveTensor` hands Lean one owning
 intrusive ref; Lean passes it back → `borrowTensor` increfs and reclaims a
 `torch::Tensor` that decrefs on scope exit; Lean's GC finalizes the external
 object → `deleteTorchTensorFinalize` releases Lean's ref. A global
-`std::atomic<int64_t> g_live_lean_tensors` (`cc/src/tyr.cpp:145`) counts
+`std::atomic<int64_t> g_live_lean_tensors` (`cc/src/tyr.cpp`) counts
 tensors currently handed to Lean. This counter does not include leaked Lean
 shape arrays, options, or other arguments; their ownership needs separate checks.
 
-Lean-side ownership conventions, documented in the `cc/src/tyr.cpp:1-54` header
+Lean-side ownership conventions, documented in the `cc/src/tyr.cpp` header
 comment: `lean_obj_arg` parameters are owned — the callee must `lean_dec` them
 (typical for shape arrays); `b_lean_obj_arg` parameters are borrowed — never
 `lean_dec`, use `borrowTensor`. Release unused owned arguments before any
@@ -101,7 +101,7 @@ lean_object* lean_torch_tensor_##F(b_lean_obj_arg a, b_lean_obj_arg b) { \
 BINOP_FUN(add) BINOP_FUN(sub) BINOP_FUN(mul)
 ```
 
-`getDevice` (`cc/src/tyr.cpp:212`) maps the `Device` constructors by tag —
+`getDevice` (`cc/src/tyr.cpp`) maps the `Device` constructors by tag —
 0 = `CUDA idx`, 1 = `CPU`, 2 = `MPS` (with a `std::call_once` MPS warmup on
 Apple). Unsupported MPS requests and CUDA indices outside the native range
 are rejected.
@@ -222,8 +222,6 @@ Lean aliases, native aliases, storage views, weak observers, and saved autograd
 inputs. It also verifies unique CPU reuse and gradient snapshot stability.
 The Lean regressions cover returned-value use, metadata checks, and effect order.
 
-GPU benchmark kernels still require separate hardware qualification.
-
 ### Error strategy
 
 Native result carriers must match the Lean declaration on every path.
@@ -268,9 +266,7 @@ The resampler computes its output length with checked integer arithmetic before
 narrowing it or allocating output storage, and its native body returns C++ failures through
 `IO.Error`. The runtime-service exports in `Tyr.Torch` use the same exception
 guard. `scripts/test_native_torch_recovery.sh` exercises the
-resampler size failures, borrowed arrays, and runtime error carriers. This
-exception guard does not establish CUDA stream correctness; that GPU-specific
-contract still requires repair and qualification.
+resampler size failures, borrowed arrays, and runtime error carriers.
 
 All distributed and polar IO exports enter the common guard. Process-group initialization checks port, rank, world size,
 and backend availability before rendezvous, then publishes state only after
@@ -313,7 +309,7 @@ describes these contracts and their tests.
 
 Many pure ops are unguarded. Type indices do not validate native execution;
 typed adapters check metadata at selected boundaries. A global
-`std::terminate` handler (`cc/src/tyr.cpp:267-301`)
+`std::terminate` handler (`cc/src/tyr.cpp`)
 prints the pending `c10::Error`'s user-facing text and aborts, instead of
 dumping libtorch's backtrace. Set `TYR_VERBOSE_ERRORS=1` for the full report.
 IO entry points such as safetensors, parquet, and process groups catch and
@@ -323,7 +319,7 @@ cleanup does not run during C++ stack unwinding. Two sites carry workarounds
 for a libc++abi/libstdc++ exception-ABI mismatch (Lean's toolchain vs.
 libtorch's): `lean_torch_manual_seed` seeds only the CPU generator, and CUDA
 synchronization calls `cudaDeviceSynchronize` via cudart directly
-(`cc/src/tyr.cpp:311-352`). `Tests/FfiCrashProbe.lean` probes this failure mode and the abort of
+(`cc/src/tyr.cpp`). `Tests/FfiCrashProbe.lean` probes this failure mode and the abort of
 `Tensor.ofRaw!` on a handle that contradicts its spec (own `ffi_crash_probe`
 exe, not part of the test suite).
 
@@ -348,20 +344,17 @@ setup/result errors without leaks, and fatal callback errors in separate process
 
 | File | Exports | Bound from |
 |---|---|---|
-| `tyr.cpp` (5378 lines) | 291 `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.RawTensor` and its adapter submodules |
-| `tyr_distributed.cpp` | 15 `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/RawTensor/Distributed.lean` |
+| `tyr.cpp` | `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.RawTensor` and its adapter submodules |
+| `tyr_distributed.cpp` | `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/RawTensor/Distributed.lean` |
 | `tyr_polar.cpp` | `lean_torch_xxt`, `ba_plus_cAA`, `newton_schulz_step`, `polar_express`, `muon_orthogonalize`, `cautious_update` | manifold/optimizer modules |
-| `tyr_parquet.cpp` | 6 `lean_parquet_*` Arrow/Parquet readers | `Tyr/RawTensor/Parquet.lean` |
-| `tyr_qwen35.cpp` | `lean_torch_qwen35_{chunk,recurrent}_gated_delta_rule` linear attention | `Tyr/Model/Qwen35/Model.lean:50,60` |
+| `tyr_parquet.cpp` | `lean_parquet_*` Arrow/Parquet readers | `Tyr/RawTensor/Parquet.lean` |
+| `tyr_qwen35.cpp` | `lean_torch_qwen35_{chunk,recurrent}_gated_delta_rule` linear attention | `Tyr/Model/Qwen35/Model.lean` |
 | `float_buffer.cpp` | `lean_float_buffer_*` streaming-audio ring buffer | `Tyr/Audio/FloatBuffer.lean` |
 | `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/Audio/Apple*.lean` |
 | `tyr_media_stub.cpp` | non-Apple error stubs for the media entry points | same |
 
-In total the tree exports ~280 `extern "C"` entry points; the Lean side has
-310 `@[extern]` declarations under `Tyr/`. Only `tyr_qwen35.cpp` includes
-`cc/include/tyr_tensor.h`; the other units forward-declare the three helpers
-themselves. `cc/lxla.cpp` (0 bytes) and `cc/plugin_init.cpp` are dead files,
-referenced by neither the Makefile nor the lakefile.
+Only `tyr_qwen35.cpp` includes `cc/include/tyr_tensor.h`; the other units
+forward-declare the three helpers themselves.
 
 ### Build orchestration in `lakefile.lean`
 

@@ -66,7 +66,6 @@ def encodeMasked {batch seq : Nat} (cfg : QwenConfig) (max_seq : Nat)
     : Tensor { device := device, shape := #[batch, seq, embedder.outputLayers.size * cfg.hidden_size], dtype := .Float32 } :=
   let cos := embedder.ropeCache.cos.slice 0 0 seq
   let sin := embedder.ropeCache.sin.slice 0 0 seq
-  -- The embedding, then each layer's output.
   let states := List.scanl
     (fun h layer => layer.forwardMasked cfg.headsValid.2.2 h cos sin attn_mask true)
     (Tensor.embedding input_ids embedder.model.embed_tokens) embedder.model.layers.toList

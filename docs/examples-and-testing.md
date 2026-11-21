@@ -5,8 +5,7 @@
 `Examples/` is the collection of runnable end-to-end demonstrations: training
 scripts (char-GPT, NanoChat, discrete diffusion) and
 pretrained-model demos (Flux, Whisper, Qwen, Gemma, KittenTTS). `Tests/` is the
-LeanTest-based test suite — unit tests and parity tests against reference
-implementations. Read this chapter when you want to run something rather than
+LeanTest-based test suite. Read this chapter when you want to run something rather than
 build it, or when you are adding a test or example of your own.
 
 ## Architecture & main abstractions
@@ -16,10 +15,10 @@ build it, or when you are adding a test or example of your own.
 Everything is declared in `lakefile.lean`:
 
 - `lean_lib Tests` (roots `Tests`, no precompile),
-  `lean_lib Examples` (`:170`).
+  `lean_lib Examples`.
 - Test-side `lean_exe` targets root under `Tests/`, example
   executables root under `Examples/`.
-- `@[test_driver] lean_exe test_runner` (`:178`) is Lake's test driver, so
+- `@[test_driver] lean_exe test_runner` is Lake's test driver, so
   `lake test` builds and runs it.
 - The test framework is an external dependency
   (`lakefile.lean`): `require LeanTest from git "https://github.com/cpehle/lean_test.git"`.
@@ -49,7 +48,7 @@ Assertions live in `LeanTest/Assert.lean` and throw on failure:
 Discovery is environment-based. A runner imports modules with
 `Lean.importModules` and hands the resulting `Environment` to the runner,
 which scans it for tagged declarations
-(`.lake/packages/LeanTest/LeanTest/Runner.lean:145`):
+(`.lake/packages/LeanTest/LeanTest/Runner.lean`):
 
 ```lean
 unsafe def LeanTest.runTestsAndExit

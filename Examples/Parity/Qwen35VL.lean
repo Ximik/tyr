@@ -25,7 +25,6 @@ structure Images where
   tensors : String
   deriving FromJson
 
--- The derived cast for the nested model tree needs a larger instance dictionary.
 set_option synthInstance.maxSize 1024 in
 def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let inputs ← LM.Inputs.parse json device

@@ -93,22 +93,15 @@ Python implementation: the same input must give the same output. Each test
 writes its raw files to `output/parity/<sha>/{cpu,gpu}/`; the exit code is
 nonzero if any case is FAIL or ERROR.
 
-Locally:
+Locally (venvs, weights and results go under `output/parity/`):
 ```bash
 python parity/run.py                 # all tests; CPU, plus CUDA if built for and available
 python parity/run.py --tests qwen3 --device cpu
 ```
-It creates its venvs under `output/parity/envs` on first use: one for itself
-(`parity/requirements.txt`) and one per environment the selected tests name
-(`parity/envs/<name>.txt`; a reference whose pins conflict with the others
-gets its own), the latter on Python 3.12, which uv fetches into that directory
-if the system has none. It then downloads and checks the weights listed in
-`parity/manifest.json` (into `output/parity/weights`), builds the probes with
-the current Lake configuration, and runs the tests.
 
-On Modal, for the current commit, which must be on a remote branch and have
-a clean tree apart from Markdown files. `start` builds the image and fetches the weights, then starts the
-CPU and H100 runs and prints their sandbox ids without waiting for them:
+On Modal, for the current commit, which must be on a remote branch with no
+changes besides Markdown files. `start` returns once the CPU and H100 runs
+have started:
 ```bash
 python parity/modal/run_modal.py start [--tests qwen3]
 python parity/modal/run_modal.py status <id>                # running or exit code, verdicts so far

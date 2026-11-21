@@ -28,7 +28,6 @@ structure AutoEncoder (dtypes : AutoEncoderDTypes := float32AutoEncoderDTypes) w
   bn_running_mean : Tensor { dtype := dtypes.mean, device := device, shape := #[128] }
   /-- BatchNorm running variance for latent normalization [128] -/
   bn_running_var : Tensor { dtype := dtypes.variance.val, device := device, shape := #[128] }
-  /-- BatchNorm epsilon -/
   bn_eps : Static Float
   deriving TensorStruct
 
