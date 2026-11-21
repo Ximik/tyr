@@ -6,6 +6,8 @@
 -/
 import Tyr.Tokenizer.Types
 import Tyr.Tokenizer.ByteLevel
+import Tyr.Tokenizer.WordSplit
+import Tyr.Tokenizer.Nfc
 import Lean.Data.Json
 import Lean.Data.Json.FromToJson.Basic
 
@@ -60,6 +62,8 @@ structure QwenTokenizer where
   specialList : Array String
   unkToken : Option TokenId
   padToken : TokenId
+  /-- Whether text is put in Unicode Normalization Form C before splitting. -/
+  nfc : Bool
   deriving Inhabited
 
 /-- Build a length-descending list of special tokens (for greedy matching). -/
@@ -243,6 +247,15 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
     | _, _ =>
       throw (IO.userError s!"Missing merge pair tokens: {leftStr} {rightStr}")
 
+  -- Without tokenizer.json, transformers' Qwen2 tokenizer normalizes to NFC.
+  let nfc ← match tokJson? with
+    | none => pure true
+    | some tokJson =>
+      match getObjVal? tokJson "normalizer" with
+      | none | some .null => pure false
+      | some normalizer =>
+        if getObjVal? normalizer "type" == some (.str "NFC") then pure true
+        else throw (IO.userError s!"unsupported tokenizer.json normalizer {normalizer.compress}; tyr implements NFC")
   pure {
     vocabSize
     idToToken
@@ -256,6 +269,7 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
     specialList
     unkToken
     padToken
+    nfc
   }
 
 /-- Chat template for Qwen3 (single user message, add_generation_prompt=true, enable_thinking=false). -/
@@ -309,139 +323,6 @@ private def splitWithSpecials (text : String) (specials : Array String)
       i := i + 1
   if !buf.isEmpty then
     out := out.push (false, String.ofList buf.toList)
-  out
-
-private def lowerAscii (c : Char) : Char :=
-  if c >= 'A' && c <= 'Z' then
-    Char.ofNat (c.toNat + 32)
-  else
-    c
-
-private def isLetter (c : Char) : Bool := c.isAlpha
-private def isDigit (c : Char) : Bool := c.isDigit
-private def isAlnum (c : Char) : Bool := isLetter c || isDigit c
-private def isWhitespace (c : Char) : Bool := c.isWhitespace
-private def isCRLF (c : Char) : Bool := c == '\r' || c == '\n'
-
-/-- Match contraction at position i. -/
-private def matchContraction (chars : Array Char) (i : Nat) : Option Nat := Id.run do
-  if i >= chars.size then return none
-  if chars[i]! != '\'' then return none
-  let opts := #["'s", "'t", "'re", "'ve", "'m", "'ll", "'d"]
-  for opt in opts do
-    let pat := opt.toList
-    let len := pat.length
-    if i + len <= chars.size then
-      let mut ok := true
-      for j in [:len] do
-        let a := lowerAscii chars[i + j]!
-        let b := lowerAscii pat[j]!
-        if a != b then ok := false
-      if ok then
-        return some len
-  none
-
-/-- Match optional prefix + letters pattern. -/
-private def matchWord (chars : Array Char) (i : Nat) : Option Nat := Id.run do
-  if i >= chars.size then return none
-  let c := chars[i]!
-  if isLetter c then
-    let mut j := i
-    while j < chars.size && isLetter chars[j]! do
-      j := j + 1
-    return some (j - i)
-  else if !isCRLF c && !isAlnum c then
-    if i + 1 < chars.size && isLetter chars[i + 1]! then
-      let mut j := i + 1
-      while j < chars.size && isLetter chars[j]! do
-        j := j + 1
-      return some (j - i)
-    else
-      return none
-  else
-    return none
-
-/-- Match punctuation pattern: ` ?[^\s\p{L}\p{N}]+[\r\n]*` -/
-private def matchPunct (chars : Array Char) (i : Nat) : Option Nat := Id.run do
-  if i >= chars.size then return none
-  let mut j := i
-  if chars[j]! == ' ' then
-    j := j + 1
-  if j >= chars.size then
-    return none
-  else if isWhitespace chars[j]! || isAlnum chars[j]! then
-    return none
-  else
-    while j < chars.size && !isWhitespace chars[j]! && !isAlnum chars[j]! do
-      j := j + 1
-    while j < chars.size && isCRLF chars[j]! do
-      j := j + 1
-    return some (j - i)
-
-/-- Match whitespace* + newline+ pattern. -/
-private def matchWhitespaceNewline (chars : Array Char) (i : Nat) : Option Nat := Id.run do
-  if i >= chars.size then return none
-  let mut j := i
-  let mut lastNewline : Option Nat := none
-  while j < chars.size && isWhitespace chars[j]! do
-    if isCRLF chars[j]! then
-      lastNewline := some j
-    j := j + 1
-  match lastNewline with
-  | some idx => return some (idx + 1 - i)
-  | none => return none
-
-/-- Match trailing whitespace (\s+(?!\S)). -/
-private def matchWhitespaceEnd (chars : Array Char) (i : Nat) : Option Nat := Id.run do
-  if i >= chars.size then return none
-  if !isWhitespace chars[i]! then
-    return none
-  let mut j := i
-  while j < chars.size do
-    if !isWhitespace chars[j]! then
-      return none
-    j := j + 1
-  return some (chars.size - i)
-
-/-- Match general whitespace run (\s+). -/
-private def matchWhitespace (chars : Array Char) (i : Nat) : Option Nat := Id.run do
-  if i >= chars.size then return none
-  if !isWhitespace chars[i]! then
-    return none
-  let mut j := i
-  while j < chars.size && isWhitespace chars[j]! do
-    j := j + 1
-  return some (j - i)
-
-/-- Regex-like pretokenization for Qwen3. -/
-private def pretokenize (text : String) : Array String := Id.run do
-  let chars := text.toList.toArray
-  let mut out : Array String := #[]
-  let mut i : Nat := 0
-  while i < chars.size do
-    let len :=
-      match matchContraction chars i with
-      | some n => n
-      | none =>
-        match matchWord chars i with
-        | some n => n
-        | none =>
-          if i < chars.size && isDigit chars[i]! then 1 else
-          match matchPunct chars i with
-          | some n => n
-          | none =>
-            match matchWhitespaceNewline chars i with
-            | some n => n
-            | none =>
-              match matchWhitespaceEnd chars i with
-              | some n => n
-              | none =>
-                match matchWhitespace chars i with
-                | some n => n
-                | none => 1
-    let segment := String.ofList ((chars.extract i (i + len)).toList)
-    out := out.push segment
-    i := i + len
   out
 
 /-- Find the best merge (lowest priority). -/
@@ -522,7 +403,8 @@ private def encodeTextCore (tok : QwenTokenizer) (text : String) : Array TokenId
         | none, some unk => out := out.push unk
         | none, none => pure ()
     else
-      let pieces := pretokenize seg
+      let seg := if tok.nfc then nfc.normalize seg else seg
+      let pieces := wordSplit.splitWords seg.toList.toArray
       for piece in pieces do
           let ids := encodePiece tok piece
           out := out ++ ids

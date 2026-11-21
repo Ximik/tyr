@@ -238,7 +238,7 @@ def chatTemplate (prompt : String) : String :=
   "<bos><|turn>user\n" ++ prompt ++ "<turn|>\n<|turn>model\n"
 
 def chatTemplateThinking (prompt : String) : String :=
-  "<bos><|turn>system\n<|think|><turn|>\n<|turn>user\n" ++ prompt ++ "<turn|>\n<|turn>model\n"
+  "<bos><|turn>system\n<|think|>\n<turn|>\n<|turn>user\n" ++ prompt ++ "<turn|>\n<|turn>model\n"
 
 private def matchSpecial (chars : Array Char) (i : Nat) (specials : Array String)
     : Option (String × Nat) := Id.run do
