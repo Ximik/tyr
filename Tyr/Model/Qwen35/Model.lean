@@ -1080,13 +1080,19 @@ def embedTokens {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   Tensor.embedding inputIds m.model.embed_tokens
 
+abbrev RotaryTables (cfg : Config) (rows : Nat) :=
+  Tensor { device := device, shape := #[rows, Config.rotaryHalfDim cfg], dtype := .Float32 } ×
+    Tensor { device := device, shape := #[rows, Config.rotaryHalfDim cfg], dtype := .Float32 }
+
+/-- `rotary` replaces the tables of positions `0 .. seq - 1`. -/
 def forwardEmbeds {batch seq : Nat}
     (cfg : Config)
     (m : Qwen35ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
+    (rotary : Option (RotaryTables (device := device) cfg seq) := none)
     : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := dtype } :=
-  let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device
+  let (cos, sin) := rotary.getD (Tensor.rotaryFreqs seq (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device)
   let hidden := m.model.layers.foldl (fun h _ layer => layer.forward cfg h cos sin attnMask) inputsEmbeds
   let hidden := m.model.norm.forward3d hidden
   Tensor.linear3d hidden m.lmHead
@@ -1323,6 +1329,7 @@ private def generateFromEmbedsCore {batch seq : Nat}
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array tokenizer.TokenId := #[])
     (onStep : Option (StreamCallback (device := device) batch) := none)
+    (rotary : Option (RotaryTables (device := device) cfg (seq + maxNewTokens)) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
@@ -1332,7 +1339,8 @@ private def generateFromEmbedsCore {batch seq : Nat}
     return ⟨seq, inputIds⟩
 
   let maxLen := seq + maxNewTokens
-  let (cosAll, sinAll) := Tensor.rotaryFreqs maxLen (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device
+  let (cosAll, sinAll) := rotary.getD
+    (Tensor.rotaryFreqs maxLen (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device)
   let cache := Qwen35Model.initCache cfg m.model maxLen inputsEmbeds.device (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
 
   -- 1) Prefill caches and get last prompt logits
@@ -1358,8 +1366,9 @@ def generateFromEmbeds {batch seq : Nat}
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array tokenizer.TokenId := #[])
+    (rotary : Option (RotaryTables (device := device) cfg (seq + maxNewTokens)) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
-  generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none
+  generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none rotary
 
 /-- Exact generation from explicit input embeddings with per-step token callback. -/
 def generateFromEmbedsStream {batch seq : Nat}
@@ -1371,8 +1380,9 @@ def generateFromEmbedsStream {batch seq : Nat}
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array tokenizer.TokenId := #[])
+    (rotary : Option (RotaryTables (device := device) cfg (seq + maxNewTokens)) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
-  generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep)
+  generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep) rotary
 
 /-- Exact generation entry point for token IDs. -/
 def generate {batch seq : Nat}
@@ -1440,6 +1450,7 @@ def forcedLogitsFromEmbeds {batch seq steps : Nat}
     (m : Qwen35ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    (rotary : Option (RotaryTables (device := device) cfg (seq + steps)) := none)
     : IO (Tensor { device := device, shape := #[batch, steps, cfg.vocab_size], dtype := dtype }) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
@@ -1448,7 +1459,8 @@ def forcedLogitsFromEmbeds {batch seq steps : Nat}
   if steps == 0 then
     throw <| IO.userError "forcedLogits requires at least one forced token"
   let maxLen := seq + steps
-  let (cosAll, sinAll) := Tensor.rotaryFreqs maxLen (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device
+  let (cosAll, sinAll) := rotary.getD
+    (Tensor.rotaryFreqs maxLen (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device)
   let cache := Qwen35Model.initCache cfg m.model maxLen inputsEmbeds.device (h := by omega)
   let (logits, cache') ← prefillCachesFromEmbeds cfg m cosAll sinAll inputsEmbeds cache (by omega) hSeq
   let steps' ← forcedLoopCached cfg m cosAll sinAll forced 0 cache' logits #[] (by omega)

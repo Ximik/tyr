@@ -36,8 +36,6 @@ structure Args where
   promptFile : Option String := none
   imagePath : Option String := none
   videoPath : Option String := none
-  videoMaxFrames : Nat := 64
-  videoFrameStride : Nat := 1
   batchSize : Nat := 1
   maxNewTokens : Nat := 32
   stream : Bool := false
@@ -58,8 +56,6 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--prompt-file" :: v :: rest => parseArgsLoop rest { acc with promptFile := some v }
   | "--image" :: v :: rest => parseArgsLoop rest { acc with imagePath := some v }
   | "--video" :: v :: rest => parseArgsLoop rest { acc with videoPath := some v }
-  | "--video-max-frames" :: v :: rest => parseArgsLoop rest { acc with videoMaxFrames := (← parseNatArg "--video-max-frames" v) }
-  | "--video-frame-stride" :: v :: rest => parseArgsLoop rest { acc with videoFrameStride := (← parseNatArg "--video-frame-stride" v) }
   | "--batch-size" :: v :: rest => parseArgsLoop rest { acc with batchSize := (← parseNatArg "--batch-size" v) }
   | "--max-new-tokens" :: v :: rest => parseArgsLoop rest { acc with maxNewTokens := (← parseNatArg "--max-new-tokens" v) }
   | "--stream" :: rest => parseArgsLoop rest { acc with stream := true }
@@ -80,10 +76,8 @@ private def printHelp : IO Unit := do
   IO.println "  --device <auto|cpu|mps|cuda[:n]>  Execution device (default: auto)"
   IO.println "  --prompt <text>              Prompt text"
   IO.println "  --prompt-file <path>         One prompt per non-empty line"
-  IO.println "  --image <path>               Image file for multimodal generation (Apple-only)"
-  IO.println "  --video <path>               Video file for multimodal generation (Apple-only)"
-  IO.println "  --video-max-frames <n>       Max decoded video frames (default: 64)"
-  IO.println "  --video-frame-stride <n>     Keep every Nth decoded frame (default: 1)"
+  IO.println "  --image <path>               Rejected: the Apple media loader gives no image grid"
+  IO.println "  --video <path>               Rejected: the Apple media loader gives no video grid"
   IO.println "  --batch-size <n>             Prompts per decode batch (default: 1)"
   IO.println "  --max-new-tokens <n>         Number of tokens to generate"
   IO.println "  --stream                     Stream generated tokens per decode step"
@@ -93,7 +87,6 @@ private def printHelp : IO Unit := do
   IO.println "Examples:"
   IO.println "  lake exe Qwen35RunHF --source tiny-random/qwen3.5 --stream"
   IO.println "  lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B --prompt \"Write one sentence about Lean.\""
-  IO.println "  lake exe Qwen35RunHF --source Qwen/Qwen3.6-35B-A3B --multimodal --prompt \"Describe the image.\" --image cat.png"
   IO.println "  lake exe Qwen35RunHF --source tiny-random/qwen3.5 --prompt-file prompts.txt --batch-size 4"
 
 private def encodePromptToIds
@@ -169,8 +162,7 @@ private def runMultimodalBatches [DType.RealFloating dtype]
     (prompts : Array String)
     (imageTokenCount : Nat)
     (videoTokenCount : Nat)
-    (imageFeatures : Option (Sigma (fun n => Tensor { shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType, device := device })))
-    (videoFeatures : Option (Sigma (fun n => Tensor { shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType, device := device })))
+    (imageFeatures videoFeatures : Option (Qwen35ForConditionalGeneration.VisualFeatures (device := device) cfg visionDType))
     : IO Unit := do
   let eos := eosFromCfg cfg.text_config
   let buildBatch chunk := do
@@ -217,44 +209,12 @@ def runMain (argv : List String) : IO UInt32 := do
     let cfg ← VLConfig.loadFromPretrainedDir modelDir {}
     let ⟨_textDType, visionDType, model⟩ ←
       Qwen35ForConditionalGeneration.load modelDir cfg device
-    let imagePatches? ←
-      match args.imagePath with
-      | some p =>
-        IO.println s!"Loading image patches from {p}..."
-        pure (some (moveSigmaTensorTo device (← media.loadImagePatches cfg p)))
-      | none => pure none
-    let videoPatches? ←
-      match args.videoPath with
-      | some p =>
-        IO.println s!"Loading video patches from {p} (maxFrames={args.videoMaxFrames}, frameStride={args.videoFrameStride})..."
-        pure (some (moveSigmaTensorTo device (← media.loadVideoPatches cfg p args.videoMaxFrames args.videoFrameStride)))
-      | none => pure none
+    if hasMedia then
+      throw <| IO.userError
+        "--image/--video: the Apple media loader returns patches without their grids, which Qwen3.5's multimodal positions need"
+    IO.println "Warning: --multimodal enabled but no --image/--video provided; running text-only path."
 
-    let imageFeatures? ←
-      match imagePatches? with
-      | some ⟨nPatches, patches⟩ =>
-        let feats ← model.getImageFeatures cfg (patches.castDType visionDType.val)
-        let nTok := VisionConfig.mergedTokenCount cfg.vision_config nPatches
-        pure (some ⟨nTok, feats⟩)
-      | none => pure none
-    let videoFeatures? ←
-      match videoPatches? with
-      | some ⟨nPatches, patches⟩ =>
-        let feats ← model.getVideoFeatures cfg (patches.castDType visionDType.val)
-        let nTok := VisionConfig.mergedTokenCount cfg.vision_config nPatches
-        pure (some ⟨nTok, feats⟩)
-      | none => pure none
-
-    let imageTokenCount := match imageFeatures? with | some ⟨n, _⟩ => n | none => 0
-    let videoTokenCount := match videoFeatures? with | some ⟨n, _⟩ => n | none => 0
-
-    if imageTokenCount == 0 && videoTokenCount == 0 then
-      IO.println "Warning: --multimodal enabled but no --image/--video provided; running text-only path."
-
-    runMultimodalBatches
-      tok cfg model args prompts
-      imageTokenCount videoTokenCount
-      imageFeatures? videoFeatures?
+    runMultimodalBatches tok cfg model args prompts 0 0 none none
   else
     let cfg ← Config.loadFromPretrainedDir modelDir Config.qwen35_9B
     let ⟨_dtype, model⟩ ← Qwen35ForCausalLM.load modelDir cfg device

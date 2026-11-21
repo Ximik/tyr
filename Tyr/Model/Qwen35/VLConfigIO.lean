@@ -18,6 +18,23 @@ private def parseVisionConfig (j : Json) (d : VisionConfig := {}) : Except Strin
     throw s!"Invalid Qwen3.5 vision config: num_heads ({num_heads}) must be positive and divide hidden_size ({hidden_size})"
   let ⟨hEven⟩ ← if h : 2 ∣ hidden_size / num_heads then pure (PLift.up h) else
     throw s!"Invalid Qwen3.5 vision config: head dim {hidden_size / num_heads} must be even for rotary embeddings"
+  unless (hidden_size / num_heads) % 4 == 0 do
+    throw s!"Invalid Qwen3.5 vision config: head dim {hidden_size / num_heads} must split into height and width rotary halves"
+  let rope ← objectField? j "rope_parameters"
+  let ropeType : String ← match rope with
+    | some params => fieldD? params "rope_type" "axial"
+    | none => pure "axial"
+  unless ropeType == "axial" do
+    throw s!"unsupported vision 'rope_type' = \"{ropeType}\"; this model implements axial RoPE"
+  let ropeTheta : Float ← match rope with
+    | some params => fieldD? params "rope_theta" d.rope_theta
+    | none => pure d.rope_theta
+  unless 0 < ropeTheta do
+    throw s!"Invalid Qwen3.5 vision config: rope_theta={ropeTheta} must be positive"
+  let numPositions ← fieldD? j "num_position_embeddings" d.num_position_embeddings
+  let side := numPositions.toFloat.sqrt.round.toUInt64.toNat
+  let ⟨hSquare⟩ ← if h : side * side = numPositions ∧ 0 < side then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 vision config: num_position_embeddings={numPositions} must be a positive square"
   let spatial_merge_size ← fieldD? j "spatial_merge_size" d.spatial_merge_size
   let ⟨hMerge⟩ ← if h : 0 < spatial_merge_size then pure (PLift.up h) else
     throw "Invalid Qwen3.5 vision config: spatial_merge_size must be positive"
@@ -31,11 +48,14 @@ private def parseVisionConfig (j : Json) (d : VisionConfig := {}) : Except Strin
     spatial_merge_size
     temporal_patch_size := ← fieldD? j "temporal_patch_size" d.temporal_patch_size
     out_hidden_size := ← fieldD? j "out_hidden_size" d.out_hidden_size
-    num_position_embeddings := ← fieldD? j "num_position_embeddings" d.num_position_embeddings
+    num_position_embeddings := numPositions
+    position_grid_side := side
+    rope_theta := ropeTheta
     half_head_dim := hidden_size / num_heads / 2
     headsSplit := by rw [Nat.mul_div_cancel' hEven, Nat.mul_div_cancel' hHeads.2]
     headsPos := hHeads.1
     mergePos := hMerge
+    positionGridSquare := hSquare.1
   }
 
 private def parseVLConfig (root : Json) (d : VLConfig := {}) : Except String VLConfig := do

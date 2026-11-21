@@ -36,13 +36,48 @@ private def linear2d {tokens in_dim out_dim : Nat}
     : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } :=
   addBias2d (Tensor.linear x w) b
 
-private def allInSet (xs : Array UInt64) (allow : Array tokenizer.TokenId) : Bool :=
-  xs.all (fun x => allow.any (·.toUInt64 == x))
-
 private def countMask2d {batch seq : Nat} (mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) : IO Nat := do
   let row : Tensor { device := device, shape := #[batch], dtype := .Int64 } := Tensor.reshape (Tensor.sumDim (mask.toInt64) 1 false) #[batch]
   let counts ← Tensor.toUInt64Array row
   pure (counts.foldl (· + ·.toNat) 0)
+
+/-- Row and column of each patch of an `h × w` grid, in `merge × merge` block order. -/
+private def blockOrderRowsCols (h w merge : Nat) : Array (Nat × Nat) := Id.run do
+  let blocksW := w / merge
+  let mut out := Array.mkEmpty (h * w)
+  for i in [:h * w] do
+    let blockRow := i / (merge * merge * blocksW)
+    let blockCol := (i / (merge * merge)) % blocksW
+    out := out.push (blockRow * merge + (i / merge) % merge, blockCol * merge + i % merge)
+  out
+
+/-- `rows × cols` Float32 values on `device`. -/
+private def floatTable (values : Array Float32) (rows cols : Nat) (device : Device) :
+    IO (Tensor { device := device, shape := #[rows, cols], dtype := .Float32 }) := do
+  pure ((← IO.ofExcept (Tensor.fromFloatArrayAs? (values.map (·.toFloat)) #[rows, cols])).to device)
+
+/-- Axial rotary cos and sin for patches at `rowsCols`: the first half of each row
+    rotates by the patch's row, the second by its column. -/
+private def visionRotary (cfg : VisionConfig) (rowsCols : Array (Nat × Nat)) (device : Device) :
+    IO (Tensor { device := device, shape := #[rowsCols.size, cfg.half_head_dim], dtype := .Float32 } ×
+      Tensor { device := device, shape := #[rowsCols.size, cfg.half_head_dim], dtype := .Float32 }) := do
+  let quarter := cfg.half_head_dim / 2
+  let theta := cfg.rope_theta.toFloat32
+  let invFreq := (Array.range quarter).map fun k =>
+    1.0 / Float32.pow theta ((2 * k).toFloat32 / cfg.half_head_dim.toFloat32)
+  let args := rowsCols.flatMap fun (row, col) =>
+    invFreq.map (row.toFloat32 * ·) ++ invFreq.map (col.toFloat32 * ·)
+  pure (← floatTable (args.map Float32.cos) rowsCols.size cfg.half_head_dim device,
+    ← floatTable (args.map Float32.sin) rowsCols.size cfg.half_head_dim device)
+
+/-- Bilinear taps (`align_corners`) of target `index` on an axis of `size` into a
+    `side`-long source axis, with their weights. -/
+private def axisTaps (index size side : Nat) : (Nat × Nat) × (Float32 × Float32) :=
+  let src := index.toFloat32 * (side - 1).toFloat32 / (max (size - 1) 1).toFloat32
+  let lower := src.floor
+  let frac := src - lower
+  let tap := fun (offset : Nat) => min (lower.toUInt64.toNat + offset) (side - 1)
+  ((tap 0, tap 1), (max 0 (1 - frac), max 0 (1 - (1 - frac))))
 
 /-- LayerNorm for vision stack. -/
 structure Qwen35VisionLayerNorm (dim : Nat) where
@@ -157,6 +192,7 @@ def forward {tokens : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionAttention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
+    (cos sin : Tensor { device := device, shape := #[tokens, cfg.half_head_dim], dtype := .Float32 })
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
   let qkv : Tensor { device := device, shape := #[tokens, cfg.hidden_size * 3], dtype := dtype } := linear2d x m.qkv_weight m.qkv_bias
   let q : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.slice qkv 1 0 cfg.hidden_size
@@ -173,8 +209,6 @@ def forward {tokens : Nat}
     Tensor.reshape v #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
       (by simp [Nat.mul_assoc, VisionConfig.heads_mul_headDim cfg])
 
-  -- Qwen3.5-VL uses 2D rotary; this keeps a deterministic 1D rotary signal for now.
-  let (cos, sin) := Tensor.rotaryFreqs tokens cfg.half_head_dim 10000.0 x.device
   let q : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } := Tensor.applyRotary q cos sin
   let k : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } := Tensor.applyRotary k cos sin
 
@@ -214,8 +248,9 @@ def forward {tokens : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionBlock (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
+    (cos sin : Tensor { device := device, shape := #[tokens, cfg.half_head_dim], dtype := .Float32 })
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
-  let h1 := Tensor.add x (m.attn.forward cfg (m.norm1.forward2d x))
+  let h1 := Tensor.add x (m.attn.forward cfg (m.norm1.forward2d x) cos sin)
   Tensor.add h1 (m.mlp.forward cfg (m.norm2.forward2d h1))
 
 end Qwen35VisionBlock
@@ -294,28 +329,59 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
     merger := merger
   }
 
+/-- The learned position table resampled bilinearly to an `h × w` grid, in block order. -/
+private def interpolatedPositions (cfg : VisionConfig)
+    (table : Tensor { device := device, shape := #[cfg.num_position_embeddings, cfg.hidden_size], dtype := dtype })
+    (h w : Nat) : IO (Tensor { device := device, shape := #[h * w, cfg.hidden_size], dtype := dtype }) := do
+  let side := cfg.position_grid_side
+  let taps := (blockOrderRowsCols h w cfg.spatial_merge_size).map fun (row, col) =>
+    let ((r0, r1), (wr0, wr1)) := axisTaps row h side
+    let ((c0, c1), (wc0, wc1)) := axisTaps col w side
+    #[(r0 * side + c0, wr0 * wc0), (r0 * side + c1, wr0 * wc1), (r1 * side + c0, wr1 * wc0), (r1 * side + c1, wr1 * wc1)]
+  let term (k : Nat) : IO (Tensor { device := device, shape := #[h * w, cfg.hidden_size], dtype := dtype }) := do
+    let index : Tensor { device := device, shape := #[h * w], dtype := .Int64 } :=
+      (← IO.ofExcept (Tensor.fromInt64ArrayAs? (taps.map fun t => (t[k]!.1 : Nat).toInt64) #[h * w])).to device
+    let weight ← floatTable (taps.map fun t => t[k]!.2) (h * w) 1 device
+    let weight : Tensor { device := device, shape := #[h * w, cfg.hidden_size], dtype := dtype } :=
+      (Tensor.broadcastTo weight #[h * w, cfg.hidden_size]).castDType dtype
+    pure (Tensor.mul (Tensor.embedding1d index table) weight)
+  let mut out ← term 0
+  for k in [1:4] do
+    out := Tensor.add out (← term k)
+  pure out
+
+/-- Features of the patches of each frame in `frames` (`(h, w)` patch grids, in
+    order, `frames` covering all `nPatches`); frames attend only within themselves. -/
 def forward {nPatches : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionModel (dtype := dtype) (device := device) cfg)
     (patchifiedPixels : Tensor { device := device, shape := #[nPatches, VisionConfig.patchDim cfg], dtype := dtype })
+    (frames : Array (Nat × Nat))
     : IO (Tensor { device := device, shape := #[VisionConfig.mergedTokenCount cfg nPatches, cfg.out_hidden_size], dtype := dtype }) := do
-  if nPatches > cfg.num_position_embeddings then
-    throw <| IO.userError
-      s!"vision patch count ({nPatches}) exceeds num_position_embeddings ({cfg.num_position_embeddings})"
-
-  let x0 : Tensor { device := device, shape := #[nPatches, cfg.hidden_size], dtype := dtype } := m.patch_embed.forward cfg patchifiedPixels
-  let posIds : Tensor { device := device, shape := #[nPatches], dtype := .Int64 } := (Tensor.arange nPatches).to patchifiedPixels.device
-  let pos : Tensor { device := device, shape := #[nPatches, cfg.hidden_size], dtype := dtype } := Tensor.embedding1d posIds m.pos_embed
-  let mut x : Tensor { device := device, shape := #[nPatches, cfg.hidden_size], dtype := dtype } := Tensor.add x0 pos
-
-  for i in [:m.blocks.size] do
-    match m.blocks[i]? with
-    | some blk =>
-      x := blk.forward cfg x
-    | none =>
-      throw <| IO.userError s!"missing Qwen35 vision block at index {i}"
-
-  m.merger.forward cfg x
+  let merge := cfg.spatial_merge_size
+  unless frames.foldl (fun n (h, w) => n + h * w) 0 == nPatches do
+    throw <| IO.userError s!"frames {frames} do not cover the {nPatches} patches"
+  let mut outs : Array (ShapePackedTensor dtype device) := #[]
+  let mut offset := 0
+  for (h, w) in frames do
+    unless h % merge == 0 && w % merge == 0 do
+      throw <| IO.userError s!"frame {h}x{w} is not a whole number of {merge}x{merge} merge blocks"
+    let start := offset
+    let ⟨hFits⟩ ← if hFits : start + h * w ≤ nPatches then pure (PLift.up hFits) else
+      throw <| IO.userError s!"frames {frames} do not cover the {nPatches} patches"
+    let pixels : Tensor { device := device, shape := #[h * w, VisionConfig.patchDim cfg], dtype := dtype } :=
+      Tensor.slice patchifiedPixels 0 start (h * w) (_bounds := by simpa using hFits)
+    let (cos, sin) ← visionRotary cfg (blockOrderRowsCols h w merge) device
+    let ⟨hRows⟩ ← if hRows : (blockOrderRowsCols h w merge).size = h * w then pure (PLift.up hRows) else
+      throw <| IO.userError "vision rotary table size"
+    let cos : Tensor { device := device, shape := #[h * w, cfg.half_head_dim], dtype := .Float32 } := hRows ▸ cos
+    let sin : Tensor { device := device, shape := #[h * w, cfg.half_head_dim], dtype := .Float32 } := hRows ▸ sin
+    let mut x := Tensor.add (m.patch_embed.forward cfg pixels) (← interpolatedPositions cfg m.pos_embed h w)
+    for blk in m.blocks do
+      x := blk.forward cfg x cos sin
+    outs := outs.push (← m.merger.forward cfg x).packShape
+    offset := offset + h * w
+  IO.ofExcept (Tensor.catMany? outs 0 #[VisionConfig.mergedTokenCount cfg nPatches, cfg.out_hidden_size])
 
 end Qwen35VisionModel
 
@@ -333,20 +399,32 @@ def init (cfg : VLConfig) (device : Device := .CPU) (dtype : DType := .Float32) 
   let lm ← Qwen35ForCausalLM.init (dtype := dtype) (device := device) cfg.text_config cfg.tie_word_embeddings
   pure { visual := visual, language_model := lm }
 
+/-- Image or video-frame features, with the patch grid `(h, w)` of each image or
+    video frame in prompt order. -/
+structure VisualFeatures (cfg : VLConfig) (dtype : DType) where
+  frames : Array (Nat × Nat)
+  tokens : Nat
+  features : Tensor { device := device, shape := #[tokens, cfg.vision_config.out_hidden_size], dtype := dtype }
+
+/-- Features of images whose patches are `pixelValues`, with each image's patch grid in `grids`. -/
 def getImageFeatures {nPatches : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (pixelValues : Tensor { device := device, shape := #[nPatches, VisionConfig.patchDim cfg.vision_config], dtype := visionDType })
-    : IO (Tensor { device := device, shape := #[VisionConfig.mergedTokenCount cfg.vision_config nPatches, cfg.vision_config.out_hidden_size], dtype := visionDType }) :=
-  m.visual.forward cfg.vision_config pixelValues
+    (grids : Array (Nat × Nat))
+    : IO (VisualFeatures (device := device) cfg visionDType) := do
+  pure ⟨grids, _, ← m.visual.forward cfg.vision_config pixelValues grids⟩
 
+/-- Features of videos whose patches are `pixelValuesVideos`, with each video's
+    `(temporal patches, h, w)` grid in `grids`; each temporal patch is its own frame. -/
 def getVideoFeatures {nPatches : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (pixelValuesVideos : Tensor { device := device, shape := #[nPatches, VisionConfig.patchDim cfg.vision_config], dtype := visionDType })
-    : IO (Tensor { device := device, shape := #[VisionConfig.mergedTokenCount cfg.vision_config nPatches, cfg.vision_config.out_hidden_size], dtype := visionDType }) :=
-  -- Qwen3.5 reference uses the same path for video/image features.
-  getImageFeatures cfg m pixelValuesVideos
+    (grids : Array (Nat × Nat × Nat))
+    : IO (VisualFeatures (device := device) cfg visionDType) := do
+  let frames := grids.flatMap fun (t, h, w) => Array.replicate t (h, w)
+  pure ⟨frames, _, ← m.visual.forward cfg.vision_config pixelValuesVideos frames⟩
 
 private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat} {featureDType : DType}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -378,100 +456,131 @@ def forwardText {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, cfg.text_config.vocab_size], dtype := dtype } :=
   m.language_model.forward cfg.text_config inputIds attnMask
 
-def forwardWithImageFeatures {batch seq featTokens : Nat}
-    (cfg : VLConfig)
-    (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
-    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (imageFeatures : Tensor { device := device, shape := #[featTokens, cfg.vision_config.out_hidden_size], dtype := visionDType })
-    (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
-    : IO (Tensor { device := device, shape := #[batch, seq, cfg.text_config.vocab_size], dtype := dtype }) := do
-  let support ← dtype.acquireConstantSupport device
-  let _ := support.down
-  let embeds0 : Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype } := m.language_model.embedTokens inputIds
-  let embeds ← scatterFeaturesIntoToken
-    (inputIds := inputIds)
-    (inputsEmbeds := embeds0)
-    cfg.image_token_id
-    imageFeatures
-    cfg.visionMatchesText
-  pure (m.language_model.forwardEmbeds cfg.text_config embeds attnMask)
+/-- The reference's `get_rope_index` for one prompt: the `(t, h, w)` position of
+    each token and the offset of later positions from the token count. Runs of
+    image and video tokens take the next frame of `images` and `videos`. -/
+private def ropeIndex (cfg : VLConfig) (ids : Array Nat) (images videos : Array (Nat × Nat)) :
+    Except String (Array (Nat × Nat × Nat) × Int) := do
+  let merge := cfg.vision_config.spatial_merge_size
+  let kind (id : Nat) : Nat :=
+    if id == cfg.image_token_id.toNat then 1 else if id == cfg.video_token_id.toNat then 2 else 0
+  let mut positions : Array (Nat × Nat × Nat) := Array.mkEmpty ids.size
+  let mut current := 0
+  let mut nextImage := 0
+  let mut nextVideo := 0
+  let mut i := 0
+  while h : i < ids.size do
+    let k := kind ids[i]
+    let mut j := i + 1
+    while hj : j < ids.size do
+      if kind ids[j] != k then break
+      j := j + 1
+    if k == 0 then
+      for n in [:j - i] do
+        positions := positions.push (current + n, current + n, current + n)
+      current := current + (j - i)
+    else
+      let some (fh, fw) := (if k == 1 then images[nextImage]? else videos[nextVideo]?)
+        | throw s!"more runs of {if k == 1 then "image" else "video"} tokens than frames"
+      if k == 1 then nextImage := nextImage + 1 else nextVideo := nextVideo + 1
+      let gh := fh / merge
+      let gw := fw / merge
+      unless j - i == gh * gw do
+        throw s!"a run of {j - i} {if k == 1 then "image" else "video"} tokens for a {fh}x{fw} frame of {gh * gw}"
+      for a in [:gh] do
+        for b in [:gw] do
+          positions := positions.push (current, current + a, current + b)
+      current := current + max gh gw
+    i := j
+  unless nextImage == images.size && nextVideo == videos.size do
+    throw s!"{images.size} image and {videos.size} video frames for {nextImage} and {nextVideo} runs of tokens"
+  let largest := positions.foldl (fun m (t, h, w) => max m (max t (max h w))) 0
+  pure (positions, (largest + 1 : Int) - ids.size)
 
-def forwardWithImageAndVideoFeatures {batch seq imageTokens videoTokens : Nat}
+/-- Multimodal RoPE tables for `rows` positions: the prompt's from `positions`, later
+    ones at `row + delta` on all three axes; axes per `Config.mrope_section`. -/
+private def mropeTables (cfg : Config) (positions : Array (Nat × Nat × Nat)) (delta : Int) (rows : Nat)
+    (device : Device) : IO (Qwen35ForCausalLM.RotaryTables (device := device) cfg rows) := do
+  let half := Config.rotaryHalfDim cfg
+  let theta := cfg.rope_theta.toFloat32
+  let sections := cfg.mrope_section
+  let invFreq := (Array.range half).map fun j =>
+    1.0 / Float32.pow theta ((2 * j).toFloat32 / (2 * half).toFloat32)
+  let mut args : Array Float32 := Array.mkEmpty (rows * half)
+  for r in [:rows] do
+    let (t, h, w) ← match positions[r]? with
+      | some p => pure p
+      | none =>
+        let p := (r : Int) + delta
+        if p < 0 then throw <| IO.userError s!"negative multimodal position {p}"
+        pure (p.toNat, p.toNat, p.toNat)
+    for j in [:half] do
+      let position :=
+        if j % 3 == 1 && j < 3 * sections.getD 1 0 then h
+        else if j % 3 == 2 && j < 3 * sections.getD 2 0 then w
+        else t
+      args := args.push (position.toFloat32 * invFreq[j]!)
+  let cos ← IO.ofExcept (Tensor.fromFloatArrayAs? (args.map (·.cos.toFloat)) #[rows, half])
+  let sin ← IO.ofExcept (Tensor.fromFloatArrayAs? (args.map (·.sin.toFloat)) #[rows, half])
+  pure (cos.to device, sin.to device)
+
+/-- Rotary tables for `rows` positions of a prompt holding `images` and `videos`;
+    `none` (plain RoPE) without them. A prompt with them must be a single row. -/
+private def rotaryFor {batch seq : Nat}
+    (cfg : VLConfig)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (images videos : Option (VisualFeatures (device := device) cfg visionDType)) (rows : Nat)
+    : IO (Option (Qwen35ForCausalLM.RotaryTables (device := device) cfg.text_config rows)) := do
+  if images.isNone && videos.isNone then return none
+  unless batch == 1 do
+    throw <| IO.userError s!"multimodal positions need a single prompt, got a batch of {batch}"
+  let ids := (← Tensor.toUInt64Array inputIds).map (·.toNat)
+  let (positions, delta) ← IO.ofExcept <|
+    ropeIndex cfg ids ((images.map (·.frames)).getD #[]) ((videos.map (·.frames)).getD #[])
+  some <$> mropeTables cfg.text_config positions delta rows inputIds.device
+
+private def buildInputEmbedsWithFeatures {batch seq : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (imageFeatures : Tensor { device := device, shape := #[imageTokens, cfg.vision_config.out_hidden_size], dtype := visionDType })
-    (videoFeatures : Tensor { device := device, shape := #[videoTokens, cfg.vision_config.out_hidden_size], dtype := visionDType })
+    (images videos : Option (VisualFeatures (device := device) cfg visionDType))
+    : IO (Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype }) := do
+  let embeds0 : Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype } :=
+    m.language_model.embedTokens inputIds
+  let embeds1 ← match images with
+    | some v =>
+      let feats := v.features
+      scatterFeaturesIntoToken (inputIds := inputIds) (inputsEmbeds := embeds0) cfg.image_token_id feats
+        cfg.visionMatchesText
+    | none => pure embeds0
+  match videos with
+  | some v =>
+    let feats := v.features
+    scatterFeaturesIntoToken (inputIds := inputIds) (inputsEmbeds := embeds1) cfg.video_token_id feats
+      cfg.visionMatchesText
+  | none => pure embeds1
+
+def forwardWithFeatures {batch seq : Nat}
+    (cfg : VLConfig)
+    (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (images videos : Option (VisualFeatures (device := device) cfg visionDType) := none)
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
     : IO (Tensor { device := device, shape := #[batch, seq, cfg.text_config.vocab_size], dtype := dtype }) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
-  let embeds0 : Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype } := m.language_model.embedTokens inputIds
-  let embeds1 ← scatterFeaturesIntoToken
-    (inputIds := inputIds)
-    (inputsEmbeds := embeds0)
-    cfg.image_token_id
-    imageFeatures
-    cfg.visionMatchesText
-  let embeds2 ← scatterFeaturesIntoToken
-    (inputIds := inputIds)
-    (inputsEmbeds := embeds1)
-    cfg.video_token_id
-    videoFeatures
-    cfg.visionMatchesText
-  pure (m.language_model.forwardEmbeds cfg.text_config embeds2 attnMask)
+  let embeds ← buildInputEmbedsWithFeatures cfg m inputIds images videos
+  pure (m.language_model.forwardEmbeds cfg.text_config embeds attnMask (← rotaryFor cfg inputIds images videos seq))
 
 def forwardWithImagePatches {batch seq nPatches : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (pixelValues : Tensor { device := device, shape := #[nPatches, VisionConfig.patchDim cfg.vision_config], dtype := visionDType })
+    (grids : Array (Nat × Nat))
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
     : IO (Tensor { device := device, shape := #[batch, seq, cfg.text_config.vocab_size], dtype := dtype }) := do
-  let imageFeatures ← m.getImageFeatures cfg pixelValues
-  m.forwardWithImageFeatures cfg inputIds imageFeatures attnMask
-
-def forwardWithImageAndVideoPatches {batch seq nImagePatches nVideoPatches : Nat}
-    (cfg : VLConfig)
-    (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
-    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (pixelValues : Tensor { device := device, shape := #[nImagePatches, VisionConfig.patchDim cfg.vision_config], dtype := visionDType })
-    (pixelValuesVideos : Tensor { device := device, shape := #[nVideoPatches, VisionConfig.patchDim cfg.vision_config], dtype := visionDType })
-    (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
-    : IO (Tensor { device := device, shape := #[batch, seq, cfg.text_config.vocab_size], dtype := dtype }) := do
-  let imageFeatures ← m.getImageFeatures cfg pixelValues
-  let videoFeatures ← m.getVideoFeatures cfg pixelValuesVideos
-  m.forwardWithImageAndVideoFeatures cfg inputIds imageFeatures videoFeatures attnMask
-
-private def buildInputEmbedsWithFeatures {batch seq : Nat}
-    (cfg : VLConfig)
-    (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
-    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
-    (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
-    : IO (Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype }) := do
-  let embeds0 : Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype } := m.language_model.embedTokens inputIds
-  let embeds1 ←
-    match imageFeatures with
-    | some ⟨_ni, ifeat⟩ =>
-      scatterFeaturesIntoToken
-        (inputIds := inputIds)
-        (inputsEmbeds := embeds0)
-        cfg.image_token_id
-        ifeat
-        cfg.visionMatchesText
-    | none => pure embeds0
-  let embeds2 ←
-    match videoFeatures with
-    | some ⟨_nv, vfeat⟩ =>
-      scatterFeaturesIntoToken
-        (inputIds := inputIds)
-        (inputsEmbeds := embeds1)
-        cfg.video_token_id
-        vfeat
-        cfg.visionMatchesText
-    | none => pure embeds1
-  pure embeds2
+  m.forwardWithFeatures cfg inputIds (some (← m.getImageFeatures cfg pixelValues grids)) none attnMask
 
 /-- Cached multimodal generation by embedding-feature injection at prefill time. -/
 def generate {batch seq : Nat}
@@ -481,17 +590,11 @@ def generate {batch seq : Nat}
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array tokenizer.TokenId := #[])
-    (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
-    (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
+    (images videos : Option (VisualFeatures (device := device) cfg visionDType) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
-  let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures videoFeatures
-  m.language_model.generateFromEmbeds
-    cfg.text_config
-    inputIds
-    inputsEmbeds
-    maxNewTokens
-    strategy
-    eosTokenIds
+  let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds images videos
+  m.language_model.generateFromEmbeds cfg.text_config inputIds inputsEmbeds maxNewTokens strategy eosTokenIds
+    (← rotaryFor cfg inputIds images videos (seq + maxNewTokens))
 
 /-- Logits of feeding `forced` through the KV cache after the prompt, with
     image and video features injected at their placeholder tokens. -/
@@ -500,11 +603,11 @@ def forcedLogits {batch seq steps : Nat}
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
-    (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
-    (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
+    (images videos : Option (VisualFeatures (device := device) cfg visionDType) := none)
     : IO (Tensor { device := device, shape := #[batch, steps, cfg.text_config.vocab_size], dtype := dtype }) := do
-  let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures videoFeatures
+  let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds images videos
   m.language_model.forcedLogitsFromEmbeds cfg.text_config inputsEmbeds forced
+    (← rotaryFor cfg inputIds images videos (seq + steps))
 
 /-- Cached multimodal generation with per-step token callback (streaming). -/
 def generateStream {batch seq : Nat}
@@ -515,79 +618,11 @@ def generateStream {batch seq : Nat}
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array tokenizer.TokenId := #[])
-    (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
-    (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
+    (images videos : Option (VisualFeatures (device := device) cfg visionDType) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
-  let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures videoFeatures
-  m.language_model.generateFromEmbedsStream
-    cfg.text_config
-    inputIds
-    inputsEmbeds
-    onStep
-    maxNewTokens
-    strategy
-    eosTokenIds
-
-/-- Uncached multimodal generation (greedy/multinomial) by repeated full forward.
-    This keeps multimodal context support without introducing multimodal KV-cache plumbing. -/
-partial def generateUncached {batch seq : Nat}
-    (cfg : VLConfig)
-    (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
-    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (maxNewTokens : Nat := 256)
-    (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
-    (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
-    (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
-    : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
-  let support ← dtype.acquireConstantSupport device
-  let _ := support.down
-  let rec loop
-      (remaining : Nat)
-      {curSeq : Nat}
-      (cur : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
-      : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
-    if remaining == 0 then
-      return ⟨curSeq, cur⟩
-
-    let logits ←
-      match imageFeatures, videoFeatures with
-      | some ⟨_ni, ifeat⟩, some ⟨_nv, vfeat⟩ =>
-        m.forwardWithImageAndVideoFeatures cfg cur ifeat vfeat none
-      | some ⟨_ni, ifeat⟩, none =>
-        m.forwardWithImageFeatures cfg cur ifeat none
-      | none, some ⟨_nv, vfeat⟩ =>
-        -- Reuse image path helper for single-modality scatter by token id.
-        let embeds0 : Tensor { device := device, shape := #[batch, curSeq, cfg.text_config.hidden_size], dtype := dtype } := m.language_model.embedTokens cur
-        let embeds ← scatterFeaturesIntoToken
-          (inputIds := cur)
-          (inputsEmbeds := embeds0)
-          cfg.video_token_id
-          vfeat
-          cfg.visionMatchesText
-        pure (m.language_model.forwardEmbeds cfg.text_config embeds none)
-      | none, none =>
-        pure (m.language_model.forward cfg.text_config cur none)
-
-    let ⟨hSeq⟩ ← if h : 0 < curSeq then pure (PLift.up h) else
-      throw <| IO.userError "generateUncached requires non-empty prompt sequence"
-
-    let lastPos := curSeq - 1
-    let last3 : Tensor { device := device, shape := #[batch, 1, cfg.text_config.vocab_size], dtype := dtype } :=
-      Tensor.slice logits 1 lastPos 1
-    let last2 : Tensor { device := device, shape := #[batch, cfg.text_config.vocab_size], dtype := dtype } := Tensor.reshape last3 #[batch, cfg.text_config.vocab_size]
-    let nextTok ← sampleFromLogits last2.toFloat32 strategy
-
-    let nextVals ← Tensor.toUInt64Array nextTok
-    let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
-    let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat cur nextCol 1
-    let stop := eosTokenIds.size > 0 && allInSet nextVals eosTokenIds
-    if stop then
-      pure ⟨curSeq + 1, appended⟩
-    else
-      loop (remaining - 1) appended
-
-  loop maxNewTokens inputIds
+  let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds images videos
+  m.language_model.generateFromEmbedsStream cfg.text_config inputIds inputsEmbeds onStep maxNewTokens strategy
+    eosTokenIds (← rotaryFor cfg inputIds images videos (seq + maxNewTokens))
 
 end Qwen35ForConditionalGeneration
 
