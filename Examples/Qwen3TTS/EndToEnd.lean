@@ -9,6 +9,7 @@
 -/
 import Tyr.Torch
 import Tyr.Model.Qwen3TTS
+import Examples.Qwen3TTS.SpeechTokenizerBridge
 import Tyr.Tokenizer
 import Tyr.Model.Qwen35.TypedOps
 
@@ -50,8 +51,6 @@ structure Args where
   skipDecode : Bool := false
   pythonExe : String := "uv"
   decodeScript : String := "scripts/qwen3tts_decode_codes.py"
-  encodeScript : String := "scripts/qwen3tts_encode_audio.py"
-  speakerMelScript : String := "scripts/qwen3tts_prepare_speaker_mel.py"
   deviceMap : Option String := none
   speakerEmbeddingPath : Option String := none
   refAudioPath : Option String := none
@@ -151,8 +150,6 @@ private partial def parseArgsLoop : List String → Args → Args
   | "--wav-path" :: v :: rest, acc => parseArgsLoop rest { acc with wavPath := v }
   | "--python" :: v :: rest, acc => parseArgsLoop rest { acc with pythonExe := v }
   | "--decode-script" :: v :: rest, acc => parseArgsLoop rest { acc with decodeScript := v }
-  | "--encode-script" :: v :: rest, acc => parseArgsLoop rest { acc with encodeScript := v }
-  | "--speaker-mel-script" :: v :: rest, acc => parseArgsLoop rest { acc with speakerMelScript := v }
   | "--device-map" :: v :: rest, acc => parseArgsLoop rest { acc with deviceMap := some v }
   | "--speaker-embedding-path" :: v :: rest, acc =>
       parseArgsLoop rest { acc with speakerEmbeddingPath := some v }
@@ -192,7 +189,7 @@ private def takesValueFlag (flag : String) : Bool :=
     "--subtalker-top-k", "--subtalker-top-p", "--subtalker-temp-by-group",
     "--subtalker-top-k-by-group", "--subtalker-top-p-by-group", "--encode-audio-path",
     "--encode-out-codes-path", "--codes-path", "--wav-path", "--python",
-    "--decode-script", "--encode-script", "--speaker-mel-script", "--device-map",
+    "--decode-script", "--device-map",
     "--speaker-embedding-path", "--ref-audio-path", "--speaker-mel-path",
     "--speaker-mel-frames-path", "--qwen-repo", "--speech-tokenizer-dir",
     "--stream-chunk-frames", "--decode-chunk-size", "--decode-left-context",
@@ -275,8 +272,6 @@ private def printUsage : IO Unit := do
   IO.println "  --skip-decode                 Skip waveform decode (codes only)"
   IO.println "  --python <exe>                Python launcher (default: uv; uses `uv run python`)"
   IO.println "  --decode-script <path>        Codec decode bridge script path"
-  IO.println "  --encode-script <path>        Codec encode bridge script path"
-  IO.println "  --speaker-mel-script <path>   Speaker mel extraction script path"
   IO.println "  --device-map <v>              Optional HF device_map for speech tokenizer bridge"
   IO.println "  --speaker-embedding-path <p>  Optional speaker embedding tensor path ([enc_dim])"
   IO.println "  --ref-audio-path <path>       Optional reference audio to derive speaker embedding"
@@ -492,8 +487,6 @@ private def buildBridgeConfig (args : Args) : SpeechTokenizerBridgeConfig := {
   qwenRepo := args.qwenRepo
   speechTokenizerDir := args.speechTokenizerDir
   decodeScript := args.decodeScript
-  encodeScript := args.encodeScript
-  speakerMelScript := args.speakerMelScript
   deviceMap := args.deviceMap
 }
 

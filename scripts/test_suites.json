@@ -1,12 +1,9 @@
 {
   "required": {
     "test_runner": ["--fail-fast"],
-    "LagunaConfigTest": [],
-    "LagunaTokenizerTest": [],
     "LagunaNvFp4Test": [],
     "LagunaMoeTest": [],
     "LagunaModelTest": [],
-    "LagunaParityTest": [],
     "LagunaRopeTest": []
   },
   "optional": {

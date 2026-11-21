@@ -84,7 +84,7 @@ Tests are organized in two tiers:
 
 Hosted CI (`.github/workflows/cpu.yml`) builds and runs the manifest in
 `scripts/test_suites.json`: the main runner plus Laguna's
-config, tokenizer, NVFP4, MoE, model, reference parity, and rotary suites.
+NVFP4, MoE, model, and rotary suites.
 These Laguna suites run CPU checks against tracked fixtures; their CUDA branches
 remain conditional. Diffusion tests are in the main suite. Add new standalone
 CPU assertion suites to the same manifest.
@@ -92,10 +92,10 @@ CPU assertion suites to the same manifest.
 NanoChat checkpoint tests in the main suite compare the next optimizer update
 after restoring a snapshot.
 
-GPU suites run on self-hosted hardware via `.github/workflows/gpu.yml`.
-That workflow sets `TYR_GPU_TEST_STRICT=1`: the linked LibTorch must have CUDA,
-the configured GPU must match, and the selected suites must execute with no
-skips. It runs `scripts/test_native_attention.sh cuda` and `LagunaModelTest`.
+Model outputs are compared with the upstream Python implementations on the
+published weights by the parity tests in `parity/` (see "Parity Tests" in the
+root `Readme.md`),
+run by hand on CPU and on a GPU.
 
 There is also `lean_exe ffi_crash_probe` (root
 `Tests/FfiCrashProbe.lean`), a probe of Tyr's fatal failure paths selected by

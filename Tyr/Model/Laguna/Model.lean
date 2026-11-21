@@ -6,7 +6,7 @@
   FFN, interleaved full + sliding-window attention layers, static KV cache,
   and cached greedy/sampled generation.
 
-  Mirrors the HuggingFace reference in `dev/laguna_reference/modeling_laguna.py`
+  Mirrors the HuggingFace reference in `modeling_laguna.py` of `poolside/Laguna-XS-2.1` (revision c5f36269)
   (`LagunaAttention`, `LagunaMLP`, `LagunaDecoderLayer`, `LagunaModel`,
   `LagunaForCausalLM`) and follows the structural idioms of
   `Tyr/Model/Qwen35/Model.lean` (KV cache, `forwardWithCache`/`forwardStep`,

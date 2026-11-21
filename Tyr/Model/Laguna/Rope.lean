@@ -17,7 +17,7 @@
 
   `torch.Tensor.applyRotary` implements the GLM-style NON-interleaved
   "rotate-half" convention used by HF `apply_rotary_pos_emb` in
-  `dev/laguna_reference/modeling_laguna.py`: for an input slice of width
+  `modeling_laguna.py` of `poolside/Laguna-XS-2.1` (revision c5f36269): for an input slice of width
   `rotaryDim` it rotates channel pairs `(j, j + rotaryDim/2)` as
   `y1 = x1*cos - x2*sin`, `y2 = x1*sin + x2*cos`.  Feeding it
   `cos[p, j] = cos(p * inv_freq[j])` is therefore equivalent to HF's
