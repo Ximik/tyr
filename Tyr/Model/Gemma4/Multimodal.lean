@@ -459,13 +459,11 @@ private def buildVisionBidirectionalPrefillMasks {batch seq : Nat}
       for k in [:ids.size] do
         let kTok := ids[k]!
         let kValid := kTok != padId.toUInt64
-        let baseFull := qValid && kValid && k <= q
-        let baseSliding :=
-          baseFull &&
-          (q - k) < slidingWindow
         let sameVisionGroup := qGroup >= 0 && qGroup == groupIds[k]!
-        fullFlat := fullFlat.push (if baseFull || sameVisionGroup then 1 else 0)
-        slidingFlat := slidingFlat.push (if baseSliding || sameVisionGroup then 1 else 0)
+        let causal := qValid && kValid && k <= q
+        fullFlat := fullFlat.push (if causal then 1 else 0)
+        let sliding := qValid && kValid && q < k + slidingWindow && (k <= q || sameVisionGroup)
+        slidingFlat := slidingFlat.push (if sliding then 1 else 0)
 
   let slidingMask ← IO.ofExcept (Tensor.fromInt64ArrayAs? slidingFlat #[batch, seq, seq])
   let fullMask ← IO.ofExcept (Tensor.fromInt64ArrayAs? fullFlat #[batch, seq, seq])
