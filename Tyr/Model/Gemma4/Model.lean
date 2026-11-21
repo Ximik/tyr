@@ -149,12 +149,12 @@ def forward {tokens : Nat}
       × Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Int64 } :=
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := rmsNormNoScale2d hidden cfg.rms_norm_eps
   let scaleRoot := 1.0 / Float.sqrt cfg.hidden_size.toFloat
-  let scale : Tensor ⟨#[tokens, cfg.hidden_size], .Float32, device⟩ :=
-    Tensor.broadcastTo (Tensor.reshape m.scale #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
-  let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } :=
-    Tensor.mulScalar (Tensor.mul (floatDynamic normed) scale) scaleRoot
+  let scale : Tensor ⟨#[tokens, cfg.hidden_size], dtype, device⟩ :=
+    (Tensor.broadcastTo (Tensor.reshape m.scale #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]).castDType dtype
+  let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
+    Tensor.mulScalar (Tensor.mul normed scale) scaleRoot
   let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } :=
-    Tensor.softmax (Tensor.linear normed m.proj)
+    Tensor.softmax ((Tensor.linear normed (m.proj.castDType dtype)).castDType .Float32)
   let (topValsRaw, topIdx) := Tensor.topKLast2d probs cfg.top_k_experts cfg.topKValid
   let denom : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := Tensor.sumDim topValsRaw 1 true
   let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.broadcastTo denom #[tokens, cfg.top_k_experts]
