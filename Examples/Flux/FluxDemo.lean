@@ -23,12 +23,10 @@ open torch.flux
 
 /-- Configuration for the demo -/
 structure DemoConfig where
-  /-- Directory containing sharded Qwen text encoder weights -/
-  qwenDir : String := "weights/flux-klein-4b/text_encoder"
-  /-- Path to Flux Klein 4B SafeTensors weights (single file) -/
-  fluxPath : String := "weights/flux.safetensors"
-  /-- Path to VAE SafeTensors weights (single file) -/
-  vaePath : String := "weights/ae.safetensors"
+  /-- A FLUX.2-klein-4B checkout: the diffusers layout (`model_index.json`,
+      `scheduler/`, `text_encoder/`, `transformer/config.json`, `vae/`) and the
+      single-file transformer `flux-2-klein-4b.safetensors` -/
+  modelDir : String := "weights/flux-klein-4b"
   /-- Output image path -/
   outputPath : String := "output.ppm"
   /-- Whether to load tokens from files instead of generating them -/
@@ -39,9 +37,9 @@ structure DemoConfig where
   attnMaskPath : String := "weights/flux-klein-4b/tokenizer/attention_mask.txt"
   /-- Number of diffusion steps -/
   numSteps : Nat := 4
-  /-- Packed latent height (16 for 256x256 output with 2×2 patchification and 8× VAE upscaling) -/
+  /-- Packed latent height; the image is 16 times as high -/
   latentH : Nat := 16
-  /-- Packed latent width (16 for 256x256 output with 2×2 patchification and 8× VAE upscaling) -/
+  /-- Packed latent width; the image is 16 times as wide -/
   latentW : Nat := 16
   deriving Repr, Inhabited
 
@@ -127,7 +125,7 @@ private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { sha
     let attnMask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? mask #[1, maxSeqLen]))
     pure (tokens, attnMask, tokenCount)
   else
-    let tok ← tokenizer.qwen3.loadTokenizer cfg.qwenDir
+    let tok ← tokenizer.qwen3.loadTokenizer s!"{cfg.modelDir}/tokenizer"
     let (tokIds, maskIds) := tokenizer.qwen3.encodePrompt tok prompt maxSeqLen
     let tokenCount := maskIds.foldl (fun acc v => if v != 0 then acc + 1 else acc) (0 : Nat)
     let tokens := (← IO.ofExcept (Tensor.fromInt64ArrayAs? (tokenizer.qwen3.toInt64Array tokIds) #[1, maxSeqLen]))
@@ -139,8 +137,8 @@ set_option synthInstance.maxSize 512 in
 /-- Main demo: generate an image from a text prompt -/
 def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "=== Flux Klein 4B Demo ==="
-  let ⟨hLatent⟩ ← if h : cfg.latentH = 16 ∧ cfg.latentW = 16 then pure (PLift.up h) else
-    throw <| IO.userError s!"the VAE decode path expects 16x16 latents, got {cfg.latentH}x{cfg.latentW}"
+  let ⟨hLatent⟩ ← if h : 0 < cfg.latentH ∧ 0 < cfg.latentW then pure (PLift.up h) else
+    throw <| IO.userError s!"latent size {cfg.latentH}x{cfg.latentW} must be positive"
 
   IO.println s!"Prompt: {prompt}"
   IO.println ""
@@ -149,13 +147,17 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "Loading models..."
 
   -- Load Qwen text encoder (sharded, with Flux Klein config)
-  let qwenCfg ← qwen3.Config.loadFromPretrainedDir cfg.qwenDir
-  let qwen ← loadQwenFluxEmbedder cfg.qwenDir qwenCfg maxSeqLen #[8, 17, 26]
+  let qwenDir := s!"{cfg.modelDir}/text_encoder"
+  let qwenCfg ← qwen3.Config.loadFromPretrainedDir qwenDir
+  let qwen ← loadQwenFluxEmbedder qwenDir qwenCfg maxSeqLen #[8, 17, 26]
   IO.println "  ✓ Qwen text encoder loaded (Flux Klein variant)"
 
   -- Load Flux model
-  let fluxCfg := FluxConfig.klein4B
-  let ⟨_, flux⟩ ← loadFluxModel cfg.fluxPath fluxCfg
+  let fluxCfg ← FluxConfig.loadFromPretrainedDir cfg.modelDir
+  FluxConfig.checkPipelineDir cfg.modelDir
+  let ⟨hChannels⟩ ← if h : fluxCfg.in_channels = 128 then pure (PLift.up h) else
+    throw <| IO.userError s!"the VAE decodes 128 packed latent channels, the transformer has {fluxCfg.in_channels}"
+  let ⟨_, flux⟩ ← loadFluxModel s!"{cfg.modelDir}/flux-2-klein-4b.safetensors" fluxCfg
   let flux ← TensorStruct.castTo (FluxModel (device := .CPU) fluxCfg .Float32) flux
   let ⟨hContext⟩ ← if h : qwen.outputLayers.size * qwenCfg.hidden_size = fluxCfg.context_in_dim then pure (PLift.up h) else
     throw <| IO.userError
@@ -163,7 +165,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "  ✓ Flux model loaded"
 
   -- Load VAE AutoEncoder (includes BN stats for proper normalization)
-  let ⟨_, vae⟩ ← loadAutoEncoder cfg.vaePath
+  let ⟨_, vae⟩ ← loadAutoEncoder s!"{cfg.modelDir}/vae"
   let vae ← TensorStruct.castTo (AutoEncoder (device := .CPU) float32AutoEncoderDTypes) vae
   IO.println "  ✓ VAE AutoEncoder loaded"
 
@@ -185,7 +187,8 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let imgSeq := cfg.latentH * cfg.latentW
   let noiseSpatial ← randomWeight #[1, 128, cfg.latentH, cfg.latentW]
   let noiseSeq := Tensor.permute noiseSpatial #[0, 2, 3, 1]
-  let noise : Tensor { shape := #[1, imgSeq, 128], dtype := .Float32, device := .CPU } := Tensor.reshape noiseSeq #[1, imgSeq, 128]
+  let noise : Tensor { shape := #[1, imgSeq, fluxCfg.in_channels], dtype := .Float32, device := .CPU } :=
+    Tensor.reshape noiseSeq #[1, imgSeq, fluxCfg.in_channels] (by simp [imgSeq, hChannels, Nat.mul_assoc])
 
   -- Compute position IDs for RoPE
   let imgIds ← computeImagePositionIds cfg.latentH cfg.latentW
@@ -198,17 +201,14 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   -- Transform latents for VAE (inverse of flattening)
   let latentsHW : Tensor { shape := #[1, cfg.latentH, cfg.latentW, 128], dtype := .Float32, device := .CPU } :=
     Tensor.reshape latents #[1, cfg.latentH, cfg.latentW, 128]
-      (by simp [imgSeq, fluxCfg, FluxConfig.klein4B, Nat.mul_assoc])
+      (by simp [imgSeq, hChannels, Nat.mul_assoc])
   let packedLatents : Tensor { shape := #[1, 128, cfg.latentH, cfg.latentW], dtype := .Float32, device := .CPU } :=
     (Tensor.permute latentsHW #[0, 3, 1, 2]).reshape #[1, 128, cfg.latentH, cfg.latentW]
 
   -- Step 4: Decode with VAE and save
   IO.println "  [4/4] Decoding with VAE..."
 
-  -- Run VAE decode pipeline
-  let z := vae.invNormalize (packedLatents.reshape #[1, 128, 16, 16] (by simp [hLatent.1, hLatent.2]))
-  let z := torch.vae.AutoEncoder.unpackLatents16x16 z
-  let image := vae.decoder.forward1 z
+  let image := vae.decode packedLatents hLatent.1 hLatent.2
   saveImagePPM image cfg.outputPath
   IO.println s!"  ✓ Image saved to {cfg.outputPath}"
 
@@ -223,9 +223,7 @@ def _root_.main (args : List String) : IO UInt32 := do
     | [] => "a cat sitting on a windowsill, photorealistic"
 
   let cfg : DemoConfig := {
-    qwenDir := "weights/flux-klein-4b/text_encoder"
-    fluxPath := "weights/flux.safetensors"
-    vaePath := "weights/ae.safetensors"
+    modelDir := "weights/flux-klein-4b"
     outputPath := "output.ppm"
     useTokenFiles := false
     tokensPath := "weights/flux-klein-4b/tokenizer/tokens.txt"

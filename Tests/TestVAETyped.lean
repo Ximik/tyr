@@ -81,17 +81,18 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let ae : AutoEncoder (device := .CPU) mixedStatistics := {
     decoder := dec
     bn_running_mean := (Tensor.ones #[128]).toBFloat16
-    bn_running_var := Tensor.ones #[128] }
-  let normalized := ae.invNormalize (Tensor.ones #[1, 128, 16, 16])
+    bn_running_var := Tensor.ones #[128]
+    bn_eps := ⟨1e-4⟩ }
+  let normalized := ae.invNormalize (Tensor.ones #[1, 128, 16, 16] : Tensor { shape := #[1, 128, 16, 16], dtype := .Float32, device := .CPU })
   LeanTest.assertEqual normalized.raw.dtype .Float32
   LeanTest.assertEqual ae.bn_running_mean.raw.dtype .BFloat16
   LeanTest.assertEqual ae.bn_running_var.raw.dtype .Float32
-  close normalized (Tensor.full #[1, 128, 16, 16] (Float.sqrt (1 + AutoEncoder.bn_eps) + 1))
+  close normalized (Tensor.full #[1, 128, 16, 16] (Float.sqrt (1 + ae.bn_eps.val) + 1))
 
 @[test] def testVAELatentUnpack : IO Unit := do
   let xs := Array.ofFn (n := 128 * 16 * 16) fun i => i.val.toFloat
   let input := (Tensor.fromFloatArray xs).reshape #[1, 128, 16, 16] (by simp [xs])
-  let result ← (AutoEncoder.unpackLatents16x16 input).toFloatArray
+  let result ← (AutoEncoder.unpackLatents input).toFloatArray
   for c in [:32] do
     for h in [:32] do
       for w in [:32] do

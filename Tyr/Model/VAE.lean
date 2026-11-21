@@ -12,6 +12,7 @@ import Tyr.Model.VAE.Decoder
 import Tyr.Model.VAE.Weights
 import Tyr.Log
 import Tyr.Model.VAE.DTypes
+import Tyr.Model.VAE.ConfigIO
 
 namespace torch.vae
 
@@ -27,61 +28,58 @@ structure AutoEncoder (dtypes : AutoEncoderDTypes := float32AutoEncoderDTypes) w
   bn_running_mean : Tensor { dtype := dtypes.mean, device := device, shape := #[128] }
   /-- BatchNorm running variance for latent normalization [128] -/
   bn_running_var : Tensor { dtype := dtypes.variance.val, device := device, shape := #[128] }
+  /-- BatchNorm epsilon -/
+  bn_eps : Static Float
   deriving TensorStruct
 
 
 namespace AutoEncoder
 
-/-- BatchNorm epsilon for numerical stability -/
-def bn_eps : Float := 1e-4
-
 /-- Inverse normalize packed latents using BN statistics.
     z: [batch, 128, h, w] → [batch, 128, h, w]
     Formula: z * sqrt(running_var + eps) + running_mean -/
-def invNormalize (ae : (AutoEncoder (device := device) dtypes)) (z : Tensor { dtype := dtypes.compute.val, device := device, shape := #[1, 128, 16, 16] }) : Tensor { dtype := dtypes.compute.val, device := device, shape := #[1, 128, 16, 16] } :=
-  -- Compute scale: sqrt(running_var + eps)
-  let var_plus_eps := Tensor.addScalar ae.bn_running_var bn_eps
-  let scale := Tensor.sqrt var_plus_eps
-  -- Reshape and expand for element-wise ops: [128] → [1, 128, 1, 1] → [1, 128, 16, 16]
-  let scale := Tensor.reshape scale #[1, 128, 1, 1]
-  let mean := Tensor.reshape ae.bn_running_mean #[1, 128, 1, 1]
-  -- Expand channel statistics over the spatial dimensions.
-  let scale := Tensor.broadcastTo scale #[1, 128, 16, 16]
-  let mean := Tensor.broadcastTo mean #[1, 128, 16, 16]
+def invNormalize {batch height width : Nat} (ae : (AutoEncoder (device := device) dtypes))
+    (z : Tensor { dtype := dtypes.compute.val, device := device, shape := #[batch, 128, height, width] }) :
+    Tensor { dtype := dtypes.compute.val, device := device, shape := #[batch, 128, height, width] } :=
+  let scale := Tensor.sqrt (Tensor.addScalar ae.bn_running_var ae.bn_eps.val)
+  let scale := Tensor.broadcastTo (Tensor.reshape scale #[1, 128, 1, 1]) #[batch, 128, height, width]
+  let mean := Tensor.broadcastTo (Tensor.reshape ae.bn_running_mean #[1, 128, 1, 1]) #[batch, 128, height, width]
   letI := dtypes.scalePromotion
   letI := dtypes.offsetPromotion
   Tensor.add (Tensor.mul z scale) mean
 
-/-- Unpack latents from packed format to VAE decoder format (16x16 packed → 32x32 unpacked).
-    Packed: [1, 128, 16, 16]
-    Unpacked: [1, 32, 32, 32]
-    The reshape and permutation preserve the indexed spatial layout. -/
-def unpackLatents16x16 {dtype : DType} (z : Tensor { dtype := dtype, device := device, shape := #[1, 128, 16, 16] }) : Tensor { dtype := dtype, device := device, shape := #[1, 32, 32, 32] } :=
-  -- Reshape: [1, 128, 16, 16] → [1, 32, 2, 2, 16, 16]
-  let z := Tensor.reshape z #[1, 32, 2, 2, 16, 16] (by simp)
-  -- Permute: [1, 32, 2, 2, 16, 16] → [1, 32, 16, 2, 16, 2]
+/-- Unpack latents from the packed format to the decoder's: each of the 128
+    packed channels is a channel `c` of 32 and a 2x2 patch position.
+    Packed: [batch, 128, h, w]
+    Unpacked: [batch, 32, 2h, 2w] -/
+def unpackLatents {batch height width : Nat} {dtype : DType}
+    (z : Tensor { dtype := dtype, device := device, shape := #[batch, 128, height, width] }) :
+    Tensor { dtype := dtype, device := device, shape := #[batch, 32, height * 2, width * 2] } :=
+  let z := Tensor.reshape z #[batch, 32, 2, 2, height, width] (by simp [Nat.mul_comm, Nat.mul_left_comm])
   let z := Tensor.permute z #[0, 1, 4, 2, 5, 3]
-  -- Reshape to final: [1, 32, 32, 32]
-  Tensor.reshape z #[1, 32, 32, 32] (by simp)
+  Tensor.reshape z #[batch, 32, height * 2, width * 2] (by simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm])
 
 /-- Full decode pipeline: inv_normalize → unpack → decoder.
-    Input: packed latents [1, 128, 16, 16]
-    Output: RGB image [1, 3, 256, 256]
-    The reshape and permutation preserve the indexed spatial layout. -/
-def decode (ae : (AutoEncoder (device := device) dtypes)) (z : Tensor { dtype := dtypes.compute.val, device := device, shape := #[1, 128, 16, 16] }) : Tensor { dtype := dtypes.compute.val, device := device, shape := #[1, 3, 256, 256] } :=
-  -- Step 1: Inverse normalize using BN stats (uses broadcasting)
-  let z := ae.invNormalize z
-  -- Step 2: Unpack latents [1, 128, 16, 16] → [1, 32, 32, 32]
-  let z := unpackLatents16x16 z
-  -- Step 3: Decode through VAE decoder (batch=1 specialized version)
-  ae.decoder.forward1 z
+    Input: packed latents [batch, 128, h, w]
+    Output: RGB image [batch, 3, 16h, 16w] -/
+def decode {batch height width : Nat} (ae : (AutoEncoder (device := device) dtypes))
+    (z : Tensor { dtype := dtypes.compute.val, device := device, shape := #[batch, 128, height, width] })
+    (hh : 0 < height) (hw : 0 < width) :
+    Tensor { dtype := dtypes.compute.val, device := device, shape := #[batch, 3, height * 2 * 2 * 2 * 2, width * 2 * 2 * 2 * 2] } :=
+  ae.decoder.forward (unpackLatents (ae.invNormalize z)) (by omega) (by omega)
 
 end AutoEncoder
 
-/-- Load full AutoEncoder, retaining the checkpoint's decoder and statistic roles. -/
-def loadAutoEncoder (path : String) (log : Handlers := {}) (device : Device := .CPU) :
+/-- Load the full AutoEncoder from a diffusers `vae/` directory: `config.json`,
+    which must describe the decoder this module implements, and
+    `diffusion_pytorch_model.safetensors`, retaining the checkpoint's decoder
+    and statistic dtypes. -/
+def loadAutoEncoder (dir : String) (log : Handlers := {}) (device : Device := .CPU) :
     IO (Σ dtypes : AutoEncoderDTypes, AutoEncoder (device := device) dtypes) := do
   log.onInfo "Loading AutoEncoder..."
+  let configPath := s!"{dir}/config.json"
+  let eps ← IO.ofExcept ((batchNormEps (← ConfigJson.parseFile configPath)).mapError (s!"{configPath}: " ++ ·))
+  let path := s!"{dir}/diffusion_pytorch_model.safetensors"
   let compute ← (← safetensors.Source.open path).load "post_quant_conv.weight" #[32, 32, 1, 1] device
   let mean ← (← safetensors.Source.open path).load "bn.running_mean" #[128] device
   let variance ← (← safetensors.Source.open path).load "bn.running_var" #[128] device
@@ -93,6 +91,7 @@ def loadAutoEncoder (path : String) (log : Handlers := {}) (device : Device := .
   pure ⟨dtypes, {
     decoder
     bn_running_mean := bn_running_mean.detach
-    bn_running_var := bn_running_var.detach }⟩
+    bn_running_var := bn_running_var.detach
+    bn_eps := ⟨eps⟩ }⟩
 
 end torch.vae
