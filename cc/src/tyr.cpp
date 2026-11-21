@@ -391,8 +391,7 @@ lean_object* lean_torch_get_live_tensors() {
 //   - `torch::manual_seed` iterates every CUDA generator and calls
 //     `set_current_seed` → `assertNotCapturing` → `c10_cuda_check` →
 //     throw. Replaced with a CPU-only seed via the default CPU
-//     generator (caller cares about fixture determinism, which the CPU
-//     seed alone covers).
+//     generator.
 //   - `c10::cuda::device_synchronize()` wraps `cudaDeviceSynchronize`
 //     and translates errors via `c10_cuda_check` → throw. Replaced
 //     with a direct `cudaDeviceSynchronize` call that returns
@@ -408,8 +407,7 @@ lean_object* lean_torch_manual_seed(uint64_t seed) {
     }
     // Deliberately skip CUDA generator seeding: the libtorch path
     // throws across the libc++abi/libstdc++ ABI boundary on this
-    // toolchain. Fixture-regeneration callers (`Examples/GPU/Parity.lean`
-    // `seedFixtures`) only need the CPU seed.
+    // toolchain.
     return lean_io_result_mk_ok(lean_box(0));
   } catch (const std::exception& e) {
     return lean_io_result_mk_error(lean_mk_io_user_error(
