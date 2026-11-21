@@ -409,3 +409,11 @@ lean_exe ParityFluxSample where
 lean_exe ParityTokenizer where
   root := `Examples.Parity.Tokenizer
   supportInterpreter := true
+
+lean_exe ParityQwen35VL where
+  root := `Examples.Parity.Qwen35VL
+  supportInterpreter := true
+
+lean_exe ParityGemma4VL where
+  root := `Examples.Parity.Gemma4VL
+  supportInterpreter := true
