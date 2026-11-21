@@ -1538,7 +1538,7 @@ lean_object* lean_torch_gemma4_text_experts_forward(
         1,
         static_cast<int64_t>(inter_dim),
         static_cast<int64_t>(2 * inter_dim));
-    auto intermediate = at::gelu(gate) * up;
+    auto intermediate = at::gelu(gate, "tanh") * up;
 
     auto down = down_proj_.select(0, expert_id).contiguous();
     auto out = torch::matmul(intermediate, down.transpose(0, 1));
