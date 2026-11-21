@@ -6,6 +6,7 @@
 -/
 
 import Tyr.Model.Flux.Config
+import Tyr.Model.Flux.ConfigIO
 import Tyr.Model.Flux.RoPE
 import Tyr.Model.Flux.Modulation
 import Tyr.Model.Flux.QKNorm

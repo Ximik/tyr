@@ -31,6 +31,8 @@ structure FluxConfig where
   mlp_hidden_dim : Nat := 9216
   /-- RoPE theta base -/
   theta : Nat := 2000
+  /-- Epsilon of the layer norms and the query/key RMS norms -/
+  eps : Float := 1e-6
   /-- Halves of the four RoPE axis dimensions -/
   half_axes_dims : Array Nat := #[16, 16, 16, 16]
   /-- Four RoPE axes whose halves sum to `half_head_dim`; checked when the config is built. -/
@@ -44,9 +46,6 @@ namespace FluxConfig
 
 /-- Channels per attention head. -/
 def head_dim (cfg : FluxConfig) : Nat := 2 * cfg.half_head_dim
-
-/-- Klein 4B configuration (Flux2 Klein uses mlp_ratio=3.0) -/
-def klein4B : FluxConfig := {}
 
 /-- MLP hidden dimension -/
 def mlpHiddenDim (cfg : FluxConfig) : Nat :=

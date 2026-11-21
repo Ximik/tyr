@@ -21,16 +21,16 @@ private def loadWeight (path : String) (names : Array String) (shape : Shape)
   (← safetensors.Source.open path).loadAs name { shape, dtype } device
 
 /-- Load RMSNorm weights from Flux2 format (uses .scale suffix) -/
-def loadRMSNormFlux2 (path : String) (name : String) (dim : Nat)
+def loadRMSNormFlux2 (path : String) (name : String) (dim : Nat) (eps : Float)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim dtype) := do
   let weight ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.scale"] #[dim]
-  pure { weight := Tensor.detach weight, eps := ⟨1e-6⟩ }
+  pure { weight := Tensor.detach weight, eps := ⟨eps⟩ }
 
 /-- Load QKNorm weights from Flux2 format -/
-def loadQKNormFlux2 (path : String) (name : String) (head_dim : Nat)
+def loadQKNormFlux2 (path : String) (name : String) (head_dim : Nat) (eps : Float)
     (device : Device := .CPU) : IO (QKNorm (device := device) (dtype := dtype) head_dim) := do
-  let query_norm ← loadRMSNormFlux2 (dtype := dtype) (device := device) path s!"{name}.query_norm" head_dim
-  let key_norm ← loadRMSNormFlux2 (dtype := dtype) (device := device) path s!"{name}.key_norm" head_dim
+  let query_norm ← loadRMSNormFlux2 (dtype := dtype) (device := device) path s!"{name}.query_norm" head_dim eps
+  let key_norm ← loadRMSNormFlux2 (dtype := dtype) (device := device) path s!"{name}.key_norm" head_dim eps
   pure { query_norm, key_norm }
 
 /-- Load Modulation weights from Flux2 format -/
@@ -42,10 +42,10 @@ def loadModulationFlux2 (path : String) (name : String) (hidden_size : Nat) (isD
 
 /-- Load SelfAttention weights from Flux2 format -/
 def loadSelfAttentionFlux2 (path : String) (name : String)
-    (hidden_size num_heads head_dim : Nat)
+    (hidden_size num_heads head_dim : Nat) (eps : Float)
     (device : Device := .CPU) : IO (SelfAttention (device := device) (dtype := dtype) hidden_size num_heads head_dim) := do
   let qkv ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.qkv.weight"] #[num_heads * head_dim * 3, hidden_size]
-  let norm ← loadQKNormFlux2 (dtype := dtype) (device := device) path s!"{name}.norm" head_dim
+  let norm ← loadQKNormFlux2 (dtype := dtype) (device := device) path s!"{name}.norm" head_dim eps
   let proj ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.proj.weight"] #[hidden_size, num_heads * head_dim]
   pure {
     qkv := Tensor.detach qkv
@@ -73,18 +73,18 @@ def loadDoubleStreamBlockFlux2 (path : String) (name : String) (cfg : FluxConfig
   let mlp_hidden := FluxConfig.mlpHiddenDim cfg
 
   -- Load attention (img_attn and txt_attn)
-  let img_attn ← loadSelfAttentionFlux2 (dtype := dtype) (device := device) path s!"{name}.img_attn" cfg.hidden_size cfg.num_heads cfg.head_dim
-  let txt_attn ← loadSelfAttentionFlux2 (dtype := dtype) (device := device) path s!"{name}.txt_attn" cfg.hidden_size cfg.num_heads cfg.head_dim
+  let img_attn ← loadSelfAttentionFlux2 (dtype := dtype) (device := device) path s!"{name}.img_attn" cfg.hidden_size cfg.num_heads cfg.head_dim cfg.eps
+  let txt_attn ← loadSelfAttentionFlux2 (dtype := dtype) (device := device) path s!"{name}.txt_attn" cfg.hidden_size cfg.num_heads cfg.head_dim cfg.eps
 
   -- Load MLP (indexed format)
   let img_mlp ← loadSwiGLUMLPFlux2 (dtype := dtype) (device := device) path s!"{name}.img_mlp" cfg.hidden_size mlp_hidden
   let txt_mlp ← loadSwiGLUMLPFlux2 (dtype := dtype) (device := device) path s!"{name}.txt_mlp" cfg.hidden_size mlp_hidden
 
   -- Flux2 uses elementwise_affine=False LayerNorms, create with ones
-  let img_norm1 ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size 1e-6 false
-  let img_norm2 ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size 1e-6 false
-  let txt_norm1 ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size 1e-6 false
-  let txt_norm2 ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size 1e-6 false
+  let img_norm1 ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size cfg.eps false
+  let img_norm2 ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size cfg.eps false
+  let txt_norm1 ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size cfg.eps false
+  let txt_norm2 ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size cfg.eps false
 
   pure {
     img_norm1, img_attn, img_norm2, img_mlp
@@ -100,10 +100,10 @@ def loadSingleStreamBlockFlux2 (path : String) (name : String) (cfg : FluxConfig
 
   let linear1 ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.linear1.weight"] #[qkv_dim + mlp_in, cfg.hidden_size]
   let linear2 ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.linear2.weight"] #[cfg.hidden_size, cfg.num_heads * cfg.head_dim + mlp_hidden]
-  let norm ← loadQKNormFlux2 (dtype := dtype) (device := device) path s!"{name}.norm" cfg.head_dim
+  let norm ← loadQKNormFlux2 (dtype := dtype) (device := device) path s!"{name}.norm" cfg.head_dim cfg.eps
 
   -- Flux2 uses elementwise_affine=False pre_norm
-  let pre_norm ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size 1e-6 false
+  let pre_norm ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size cfg.eps false
 
   pure {
     pre_norm
@@ -123,7 +123,7 @@ def loadMLPEmbedder (path : String) (name : String) (in_dim hidden_dim : Nat)
   }
 
 /-- Load full Flux model from SafeTensors -/
-def loadFluxModel (path : String) (cfg : FluxConfig := FluxConfig.klein4B)
+def loadFluxModel (path : String) (cfg : FluxConfig)
     (log : Handlers := {})
     (device : Device := .CPU) : IO (Σ dtype : RealFloatingDType, FluxModel (device := device) cfg dtype.val) := do
   log.onInfo s!"Loading Flux model from {path}..."
@@ -161,7 +161,7 @@ def loadFluxModel (path : String) (cfg : FluxConfig := FluxConfig.klein4B)
   log.onInfo s!"  Loaded {cfg.num_single_layers} single blocks"
 
   -- Final layer (Flux2 uses elementwise_affine=False for norm)
-  let final_norm ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size 1e-6 false
+  let final_norm ← initLayerNorm (dtype := dtype) (device := device) cfg.hidden_size cfg.eps false
   let final_linear ← loadWeight (dtype := dtype) (device := device) path #["final_layer.linear.weight"] #[cfg.in_channels, cfg.hidden_size]
   let final_mod ← loadWeight (dtype := dtype) (device := device) path #["final_layer.adaLN_modulation.1.weight"] #[cfg.hidden_size * 2, cfg.hidden_size]
   log.onInfo "  Loaded final layer"

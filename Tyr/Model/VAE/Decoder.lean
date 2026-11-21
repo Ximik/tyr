@@ -175,12 +175,6 @@ def forward {batch height width : Nat}
   Tensor.reshape h #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2]
     (by simp [Tensor.convExtent_same hh3 (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw3 (by decide : 2 * 1 + 1 = 3)])
 
-/-- Decode latents to image (batch=1 specialized version).
-    Input: [1, 32, 32, 32] latent
-    Output: [1, 3, 256, 256] RGB image -/
-def forward1 (dec : (Decoder (device := device) (dtype := dtype))) (z : Tensor { dtype := dtype, device := device, shape := #[1, 32, 32, 32] }) : Tensor { dtype := dtype, device := device, shape := #[1, 3, 256, 256] } :=
-  dec.forward z (by decide) (by decide)
-
 end Decoder
 
 end torch.vae
