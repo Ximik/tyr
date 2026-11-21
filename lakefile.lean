@@ -408,3 +408,15 @@ lean_exe ParityKittenTTS where
 lean_exe test_typed_models where
   root := `Tests.RunTypedModels
   supportInterpreter := true
+
+lean_exe ParityFluxText where
+  root := `Examples.Parity.FluxText
+  supportInterpreter := true
+
+lean_exe ParityFluxStep where
+  root := `Examples.Parity.FluxStep
+  supportInterpreter := true
+
+lean_exe ParityFluxSample where
+  root := `Examples.Parity.FluxSample
+  supportInterpreter := true
