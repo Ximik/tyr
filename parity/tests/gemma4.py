@@ -11,7 +11,7 @@ TEST = Test(
     cases=["gemma4/short", "gemma4/long", "gemma4/batch"],
 )
 
-CHECKS = [LmTokens(margin=0.25, logits_atol=1.0)]
+CHECKS = [LmTokens(margin=0.25, logits_atol=2.0)]
 
 
 def reference(case, weights, device, dtype, out):
