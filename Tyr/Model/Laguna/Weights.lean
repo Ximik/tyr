@@ -4,7 +4,7 @@
   Pretrained weight loading for poolside Laguna text causal-LM
   (Laguna-S-2.1) from HuggingFace SafeTensors (single-file and sharded).
 
-  Two checkpoint serializations are supported (detected per MoE layer):
+  Three checkpoint serializations are supported (detected per MoE layer):
 
   A. BF16 exports (e.g. `Tests/fixtures/laguna/tiny/model.safetensors`):
      everything is BF16 with standard `modeling_laguna.py` state_dict names,
@@ -24,6 +24,11 @@
      (layer-by-layer, so peak memory stays ~1 per-layer bank set instead of a
      full-model CPU copy). Experts stay packed — dequantization happens
      per-forward in the MoE block.
+
+  C. BF16 with per-expert tensors (`poolside/Laguna-XS-2.1`):
+     `mlp.experts.{i}.{gate,up,down}_proj.weight` (`[moeInt, hidden]`,
+     `[moeInt, hidden]`, `[hidden, moeInt]`), stacked on CPU into the dense
+     banks of layout A and moved to the target device once per layer.
 
   Ignored checkpoint tensors: `self_attn.{k,v}_scale` (BF16 scalars used by
   vLLM KV quantization) and `*.input_global_scale` (activation quantization
@@ -70,12 +75,15 @@ private def nameCandidates (name : String) : Array String :=
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
     SomeDTypeTensor shape device := ⟨tensor.1, tensor.2.detach⟩
 
-private def stackBank (dtype : DType) (tensors : Array (ShapePackedTensor dtype .CPU))
-    (shape : Shape) (device : Device) : IO (SomeDTypeTensor shape device) := do
+private def stackBankAs (dtype : DType) (tensors : Array (ShapePackedTensor dtype .CPU))
+    (shape : Shape) (device : Device) : IO (Tensor ⟨shape, dtype, device⟩) := do
   let tensor ← IO.ofExcept (Tensor.catMany? tensors 0 shape)
   let raw ← RawTensor.convertIO shape tensor.raw device none
-  let moved := Tensor.ofRaw! (σ := ⟨shape, dtype, device⟩) raw
-  pure ⟨dtype, moved.detach⟩
+  pure (Tensor.ofRaw! (σ := ⟨shape, dtype, device⟩) raw).detach
+
+private def stackBank (dtype : DType) (tensors : Array (ShapePackedTensor dtype .CPU))
+    (shape : Shape) (device : Device) : IO (SomeDTypeTensor shape device) := do
+  pure ⟨dtype, ← stackBankAs dtype tensors shape device⟩
 
 /-- Load one attention block (`numHeads` is the per-layer query head count).
     `self_attn.{k,v}_scale` scalars are intentionally not loaded. -/
@@ -192,9 +200,34 @@ private def loadPackedExpertBanks (src : Source) (p : String) (cfg : Config)
     downGlobal := (← stackBank .Float32 downG #[e] device)
   }
 
+/-- Load and stack the per-expert unquantized weights of one MoE layer
+    (layout C) into dense banks, on CPU, then move them to `device`. -/
+private def loadPerExpertDenseBanks (src : Source) (p : String) (cfg : Config)
+    (device : Device) (dtype : DType) : IO (LagunaDenseExperts (device := device) cfg dtype) := do
+  let e := cfg.num_experts
+  let mi := cfg.moe_intermediate_size
+  let h := cfg.hidden_size
+  let mut gates : Array (ShapePackedTensor dtype .CPU) := Array.mkEmpty e
+  let mut ups : Array (ShapePackedTensor dtype .CPU) := Array.mkEmpty e
+  let mut downs : Array (ShapePackedTensor dtype .CPU) := Array.mkEmpty e
+  for i in [:e] do
+    let ep := s!"{p}.experts.{i}"
+    let g ← src.loadAs s!"{ep}.gate_proj.weight" ⟨#[mi, h], dtype⟩
+    let u ← src.loadAs s!"{ep}.up_proj.weight" ⟨#[mi, h], dtype⟩
+    let d ← src.loadAs s!"{ep}.down_proj.weight" ⟨#[h, mi], dtype⟩
+    gates := gates.push (Tensor.reshape g #[1, mi, h]).packShape
+    ups := ups.push (Tensor.reshape u #[1, mi, h]).packShape
+    downs := downs.push (Tensor.reshape d #[1, h, mi]).packShape
+  pure {
+    gateProj := reqGradFalse (← stackBankAs dtype gates #[e, mi, h] device)
+    upProj := reqGradFalse (← stackBankAs dtype ups #[e, mi, h] device)
+    downProj := reqGradFalse (← stackBankAs dtype downs #[e, h, mi] device)
+  }
+
 /-- Load one sparse MoE block, auto-detecting the expert serialization:
-    fused dense BF16 banks (layout A) when `mlp.experts.gate_up_proj`
-    resolves, otherwise per-expert NVFP4-packed tensors (layout B). -/
+    fused dense banks (layout A) when `mlp.experts.gate_up_proj` resolves,
+    per-expert unquantized weights (layout C) when `mlp.experts.0.gate_proj.weight`
+    does, otherwise per-expert NVFP4-packed tensors (layout B). -/
 private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
     (device : Device) (dtype : DType) : IO (LagunaSparseMoeBlock (device := device) cfg dtype) := do
   let p := s!"model.layers.{layerIdx}.mlp"
@@ -231,10 +264,14 @@ private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
         downProj := reqGradFalse down
       }
       pure (placeholderPackedExperts cfg device, some dense)
-    | none => do
-      -- Layout B: per-expert NVFP4-packed tensors, stacked into banks.
-      let packed ← loadPackedExpertBanks src p cfg device
-      pure (packed, none)
+    | none =>
+      if src.contains s!"{p}.experts.0.gate_proj.weight" then do
+        let dense ← loadPerExpertDenseBanks src p cfg device dtype
+        pure (placeholderPackedExperts cfg device, some dense)
+      else do
+        -- Layout B: per-expert NVFP4-packed tensors, stacked into banks.
+        let packed ← loadPackedExpertBanks src p cfg device
+        pure (packed, none)
 
   pure {
     router := { weight := freezeStored routerW, eScoreCorrectionBias := biasOpt.map freezeStored }
