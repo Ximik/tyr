@@ -162,6 +162,7 @@ private def mkAsciiStreamingTokenizer : tokenizer.qwen3.QwenTokenizer := Id.run 
     specialList := #[asrTag]
     unkToken := none
     padToken := 0
+    nfc := false
   }
 
 private def runStreamingAudioSizesForMode
