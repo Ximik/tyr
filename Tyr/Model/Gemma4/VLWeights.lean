@@ -167,13 +167,14 @@ namespace Gemma4ForConditionalGeneration
 /-- Load Gemma 4 multimodal model from a SafeTensors file or a directory of shards. -/
 def load (path : String) (cfg : VLConfig := {})
     (log : Handlers := {}) (device : Device := .CPU)
+    (textDType? : Option RealFloatingDType := none)
     : IO (Σ textDType : RealFloatingDType, Σ visionDType : RealFloatingDType, Σ projectorDType : RealFloatingDType,
       Gemma4ForConditionalGeneration (device := device) cfg textDType.val visionDType.val projectorDType.val) := do
   log.onInfo s!"Loading Gemma4ForConditionalGeneration (device := device) from {path}..."
   let src ← Source.open path
   let visionTower ← loadVisionModel src cfg
   let visionProjector ← loadVisionProjector src cfg
-  let languageModel ← Gemma4ForCausalLM.load (device := device) path cfg.text_config log
+  let languageModel ← Gemma4ForCausalLM.load (device := device) path cfg.text_config log textDType?
   log.onInfo "Loaded Gemma4ForConditionalGeneration (device := device) weights."
   pure ⟨languageModel.1, visionTower.1, visionProjector.1, {
     vision_tower := visionTower.2

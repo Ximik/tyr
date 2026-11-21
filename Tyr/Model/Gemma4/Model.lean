@@ -1939,6 +1939,38 @@ def forcedLogits {batch seq steps : Nat}
   let steps' ← forcedLoopCached cfg m slidingCosAll slidingSinAll fullCosAll fullSinAll forced 0 cache' logits #[] (by omega)
   IO.ofExcept <| Tensor.catMany? (steps'.map Tensor.packShape) 1 #[batch, steps, cfg.vocab_size]
 
+/-- `forcedLogits` from explicit input embeddings and per-layer inputs, the
+prompt prefilled with `prefillMasks` when given. -/
+def forcedLogitsFromEmbedsWithPerLayerInputs {batch seq steps : Nat}
+    (cfg : Config)
+    (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
+    (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    (prefillMasks : Option (Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 }) := none)
+    : IO (Tensor { device := device, shape := #[batch, steps, cfg.vocab_size], dtype := dtype }) := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
+    throw <| IO.userError "forcedLogits requires non-empty prompt sequence"
+  if steps == 0 then
+    throw <| IO.userError "forcedLogits requires at least one forced token"
+  let maxLen := seq + steps
+  let (slidingCosAll, slidingSinAll, fullCosAll, fullSinAll) :=
+    precomputeDecodeRotary (maxLen := maxLen) cfg inputsEmbeds.device
+  let cache := Gemma4Model.initCache cfg m.model maxLen inputsEmbeds.device (h := by omega)
+  let (logits, cache') ←
+    match prefillMasks with
+    | some (slidingAttnMask, fullAttnMask) =>
+      prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision (maxLen := maxLen) cfg m inputIds inputsEmbeds
+        perLayerInputs cache (by omega) hSeq slidingCosAll slidingSinAll fullCosAll fullSinAll slidingAttnMask fullAttnMask
+    | none =>
+      prefillCachesFromEmbedsWithPerLayerInputs (maxLen := maxLen) cfg m inputIds inputsEmbeds perLayerInputs cache
+        (by omega) hSeq slidingCosAll slidingSinAll fullCosAll fullSinAll
+  let steps' ← forcedLoopCached cfg m slidingCosAll slidingSinAll fullCosAll fullSinAll forced 0 cache' logits #[] (by omega)
+  IO.ofExcept <| Tensor.catMany? (steps'.map Tensor.packShape) 1 #[batch, steps, cfg.vocab_size]
+
 def generate {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)

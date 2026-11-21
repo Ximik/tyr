@@ -493,6 +493,19 @@ def generate {batch seq : Nat}
     strategy
     eosTokenIds
 
+/-- Logits of feeding `forced` through the KV cache after the prompt, with
+    image and video features injected at their placeholder tokens. -/
+def forcedLogits {batch seq steps : Nat}
+    (cfg : VLConfig)
+    (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (forced : Tensor { device := device, shape := #[batch, steps], dtype := .Int64 })
+    (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
+    (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
+    : IO (Tensor { device := device, shape := #[batch, steps, cfg.text_config.vocab_size], dtype := dtype }) := do
+  let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures videoFeatures
+  m.language_model.forcedLogitsFromEmbeds cfg.text_config inputsEmbeds forced
+
 /-- Cached multimodal generation with per-step token callback (streaming). -/
 def generateStream {batch seq : Nat}
     (cfg : VLConfig)
