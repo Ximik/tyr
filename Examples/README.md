@@ -105,8 +105,6 @@ Useful flags:
 - `--encode-audio-path <wav>` + `--encode-only` for audio -> codec IDs bridge
 - `--ref-audio-path <wav>` to derive speaker embedding from reference audio
 - `--speaker-mel-path <path>` intermediate speaker mel safetensors file
-- `--encode-script scripts/qwen3tts_encode_audio.py` speech-tokenizer encoder bridge
-- `--speaker-mel-script scripts/qwen3tts_prepare_speaker_mel.py` mel extraction bridge
 - `--qwen-repo ../Qwen3-TTS` local repo fallback for importing `qwen_tts` if not installed as a package
 
 Bridge scripts are launched with `uv run python` by default (`--python uv`).

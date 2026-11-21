@@ -115,8 +115,8 @@ index; the speaker encoder may retain a different checkpoint dtype. Pieces:
   frame-by-frame generation with per-frame and per-audio-chunk callbacks, optionally
   decoding in-process through a `SpeechTokenizer12HzDecoder.DecodeStreamState`. In-process
   streaming decode requires `cfg.talkerConfig.numCodeGroups == 16` (the upstream 12 Hz
-  tokenizer); otherwise decoding falls back to the legacy Python bridge in
-  `SpeechTokenizerBridge.lean`.
+  tokenizer); `Examples/Qwen3TTS/EndToEnd.lean` then decodes through a Python
+  script.
 
 ### Qwen3ASR (`torch.qwen3asr`)
 

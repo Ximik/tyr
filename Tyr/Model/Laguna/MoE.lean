@@ -6,7 +6,7 @@
   banks dequantized on the fly, and a dense shared expert.
 
   Mirrors the HuggingFace reference math in
-  `dev/laguna_reference/modeling_laguna.py`
+  `modeling_laguna.py` of `poolside/Laguna-XS-2.1` (revision c5f36269)
   (`LagunaTopKRouter`, `LagunaExperts`, `LagunaSparseMoeBlock`, `LagunaMLP`):
 
     logits           = x @ routerWeightᵀ                (FP32; see note below)

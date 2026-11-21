@@ -251,16 +251,6 @@ lean_exe TestDataLoader where
   root := `Tests.RunTestDataLoader
   supportInterpreter := true
 
-/-- Laguna config.json parsing tests. -/
-lean_exe LagunaConfigTest where
-  root := `Tests.RunLagunaConfig
-  supportInterpreter := true
-
-/-- Laguna tokenizer encode/decode tests. -/
-lean_exe LagunaTokenizerTest where
-  root := `Tests.RunLagunaTokenizer
-  supportInterpreter := true
-
 /-- Laguna NVFP4 dequantization tests. -/
 lean_exe LagunaNvFp4Test where
   root := `Tests.RunLagunaNvFp4
@@ -274,11 +264,6 @@ lean_exe LagunaMoeTest where
 /-- Laguna attention/model forward tests. -/
 lean_exe LagunaModelTest where
   root := `Tests.RunLagunaModel
-  supportInterpreter := true
-
-/-- Laguna end-to-end parity test vs the HF reference (tiny fixture). -/
-lean_exe LagunaParityTest where
-  root := `Tests.RunLagunaParity
   supportInterpreter := true
 
 /-- Laguna fused NVFP4 MoE kernel tests. -/

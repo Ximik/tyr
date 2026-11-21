@@ -14,9 +14,7 @@ from pathlib import Path
 TORCH_VERSION = "2.10.0"
 TORCH_CUDA = "cu130"
 PYARROW_VERSION = "25.0.1"
-# Python tag of the torch and pyarrow wheels. Their Python packages only load in
-# this CPython version, so the venv that imports external/wheels
-# (scripts/qualification/setup_python.sh) must use it too.
+# Python tag of the torch and pyarrow wheels.
 WHEEL_PYTHON = "cp312"
 
 # lock platform -> wheel platform tags it accepts (any glibc / macOS version)

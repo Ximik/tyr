@@ -5,8 +5,9 @@ Builds a small MoE (hidden=64, 8 experts, top-2, moeInt=32, sharedInt=32,
 scaling=2.5, norm_topk_prob=True) with random NVFP4-packed expert banks, a
 random sigmoid router (with e_score_correction_bias), random shared-expert
 weights and a fixed input x [5, 64], then computes the expected output with a
-PyTorch reference implementing the HF math (dev/laguna_reference/
-modeling_laguna.py: LagunaTopKRouter/LagunaExperts/LagunaSparseMoeBlock).
+PyTorch reference implementing the HF math (`modeling_laguna.py` of
+`poolside/Laguna-XS-2.1` (revision c5f36269): LagunaTopKRouter/LagunaExperts/
+LagunaSparseMoeBlock).
 
 The one deliberate spec-vs-HF difference: router logits use an FP32 matmul
 (cast first, then matmul), matching the Lean implementation's task spec;

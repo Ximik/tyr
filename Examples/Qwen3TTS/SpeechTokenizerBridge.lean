@@ -1,5 +1,5 @@
 /-
-  Tyr/Model/Qwen3TTS/SpeechTokenizerBridge.lean
+  Examples/Qwen3TTS/SpeechTokenizerBridge.lean
 
   Qwen3-TTS speech-tokenizer integration helpers:
   - decode codec IDs -> waveform (legacy Python bridge path)
@@ -15,7 +15,9 @@ import Tyr.Model.Qwen3TTS.SpeechTokenizer25HzEncoder
 import Tyr.Model.Qwen3ASR.Frontend
 import Tyr.Log
 
-namespace torch.qwen3tts
+namespace Examples.Qwen3TTS
+
+open torch torch.qwen3tts
 
 variable {device : Device}
 
@@ -26,10 +28,6 @@ structure SpeechTokenizerBridgeConfig where
   qwenRepo : String := "../Qwen3-TTS"
   speechTokenizerDir : Option String := none
   decodeScript : String := "scripts/qwen3tts_decode_codes.py"
-  /-- Legacy fallback field; encode is now Lean-native. -/
-  encodeScript : String := "scripts/qwen3tts_encode_audio.py"
-  /-- Legacy fallback field; speaker mel prepare is now Lean-native. -/
-  speakerMelScript : String := "scripts/qwen3tts_prepare_speaker_mel.py"
   deviceMap : Option String := none
   deriving Repr, Inhabited
 
@@ -391,4 +389,4 @@ def extractSpeakerEmbeddingFromAudio {dtypes : DTypeLayout}
   let spk : Tensor { shape := #[1, cfg.speakerEncoderConfig.encDim], dtype := dtypes.speaker.val, device := device } ← model.extractSpeakerEmbedding (mel.to device)
   pure (Tensor.reshape spk #[1, 1, cfg.talkerConfig.hiddenSize] (by simp [hDim]))
 
-end torch.qwen3tts
+end Examples.Qwen3TTS

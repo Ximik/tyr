@@ -482,9 +482,8 @@ Environment variables for a single build:
 - `scripts/nanochat/` — `torchrun` launchers for distributed NanoChat training
   (`run_train_torchrun.sh`, `bench_distributed.sh`) and `ENV_INVENTORY.md`.
 - Conventional-commit hooks and their checker live in `.githooks/`.
-- Python converters — `kokoro_to_safetensors.py`, `qwen3tts_*.py`,
-  `kittentts_reference_synthesize.py` (dataset prep and parity references;
-  run them in the repo's `.venv`, not a global Python).
+- Python converters — `kokoro_to_safetensors.py`, `qwen3tts_*.py` (run them in
+  the repo's `.venv`, not a global Python).
 
 ## Key APIs
 

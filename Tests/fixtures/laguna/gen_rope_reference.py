@@ -3,7 +3,7 @@
 
 Computes both rotary tables (plain rope for sliding-window layers, YaRN for
 full-attention layers) in torch float64 on CPU following
-`dev/laguna_reference/modeling_laguna.py` + HF `_compute_yarn_parameters`,
+`modeling_laguna.py` of `poolside/Laguna-XS-2.1` (revision c5f36269) + HF `_compute_yarn_parameters`,
 plus end-to-end apply fixtures (HF `apply_rotary_pos_emb`, GLM-style
 non-interleaved rotate_half). Saves everything as fp32 safetensors.
 
@@ -19,7 +19,7 @@ import torch
 
 MAXLEN = 1024
 
-# Laguna-S-2.1 (NVFP4) rope parameters (dev/laguna_reference/config.json).
+# Rope parameters under test.
 THETA_SLIDING = 10000.0
 DIM_SLIDING = 128  # partial_rotary_sliding 1.0 * head_dim 128
 THETA_FULL = 500000.0

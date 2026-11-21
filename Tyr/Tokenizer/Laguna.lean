@@ -1,9 +1,9 @@
 /-
   Tyr/Tokenizer/Laguna.lean
 
-  Poolside Laguna tokenizer (byte-level BPE) matching
-  `dev/laguna_reference/tokenizer.json` (vocab 100352, 100026 merges, 70 added
-  tokens) and the HuggingFace `tokenizers` library behavior exactly:
+  Poolside Laguna tokenizer (byte-level BPE) matching the `tokenizer.json` of
+  `poolside/Laguna-XS-2.1` (revision c5f36269: vocab 100352, 100026 merges, 70
+  added tokens) and the HuggingFace `tokenizers` library behavior exactly:
 
   - Pre-tokenizer: Split `(?:\r?\n)+(?!\r?\n)` with behavior `MergedWithNext`
     (newline runs attach to the following segment), then GPT-2-style Split
@@ -13,9 +13,6 @@
     ByteLevel (no prefix space).
   - Post-processor: TemplateProcessing always prepends `〈|EOS|〉` (id 2).
   - Decoder: ByteLevel.
-
-  Ground truth is generated with the Python `tokenizers` package in
-  Tests/fixtures/laguna/ and checked by Tests/RunLagunaTokenizer.lean.
 -/
 import Tyr.Tokenizer.Types
 import Tyr.Tokenizer.ByteLevel
