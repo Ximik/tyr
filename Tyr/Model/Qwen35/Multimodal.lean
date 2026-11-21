@@ -51,7 +51,6 @@ private def blockOrderRowsCols (h w merge : Nat) : Array (Nat × Nat) := Id.run 
     out := out.push (blockRow * merge + (i / merge) % merge, blockCol * merge + i % merge)
   out
 
-/-- `rows × cols` Float32 values on `device`. -/
 private def floatTable (values : Array Float32) (rows cols : Nat) (device : Device) :
     IO (Tensor { device := device, shape := #[rows, cols], dtype := .Float32 }) := do
   pure ((← IO.ofExcept (Tensor.fromFloatArrayAs? (values.map (·.toFloat)) #[rows, cols])).to device)
@@ -101,7 +100,6 @@ def forward2d {tokens dim : Nat}
     (x : Tensor { device := device, shape := #[tokens, dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, dim], dtype := dtype } :=
   let x3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.reshape x #[1, tokens, dim]
-  -- The stored weight and bias keep their checkpoint dtype; the norm runs in the input's.
   let weight := Tensor.castDType m.weight.2 dtype
   let bias := Tensor.castDType m.bias.2 dtype
   let y3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.ofRaw! (RawTensor.layerNorm x3.raw weight.raw bias.raw m.eps)
@@ -406,7 +404,6 @@ structure VisualFeatures (cfg : VLConfig) (dtype : DType) where
   tokens : Nat
   features : Tensor { device := device, shape := #[tokens, cfg.vision_config.out_hidden_size], dtype := dtype }
 
-/-- Features of images whose patches are `pixelValues`, with each image's patch grid in `grids`. -/
 def getImageFeatures {nPatches : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)

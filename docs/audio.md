@@ -32,7 +32,7 @@ flags are needed on macOS.
 Capture is a **global singleton**: `AppleInput.start` opens an AudioQueue whose
 callback pushes interleaved Float32 frames onto a `std::deque` FIFO, and
 `read`/`readBuffer` drain it. The FIFO is capped at ~30 s of audio
-(`cc/src/apple_audio_input.mm:46`); under sustained backpressure the oldest
+(`cc/src/apple_audio_input.mm`); under sustained backpressure the oldest
 audio is silently dropped. `stop` tears down the queue and clears the FIFO.
 Only one capture session can be active at a time.
 
@@ -53,7 +53,7 @@ layer to the valid prefix, and runs attention through
 `Tensor.attentionGQAQKV` (libtorch scaled-dot-product attention).
 
 One namespace quirk: the module is named `Tyr.Inference.KVCache` but declares
-`namespace torch.Generator.KVCache` (`Tyr/Inference/KVCache.lean:24`), a
+`namespace torch.Generator.KVCache` (`Tyr/Inference/KVCache.lean`), a
 leftover from its NanoChat origin. Call sites write
 `torch.Generator.KVCache.Cache`, or `open torch.Generator` and use
 `KVCache.Cache`. The older `Examples/NanoChat/Generator/KVCache.lean` is a thin
@@ -66,7 +66,7 @@ that step has been processed. `Cache.currentLen` reads `seqLens[0]` and assumes
 uniform lengths across the batch.
 
 Both cache structures have `TensorStruct` instances
-(`Tyr/Inference/KVCache.lean:162`), so generic traversals (`map`, `mapM`,
+(`Tyr/Inference/KVCache.lean`), so generic traversals (`map`, `mapM`,
 `zipWith`, `fold`) preserve each leaf specification. Device conversion requires
 a destination type and `TensorTreeCast` instance; dtype conversion uses the
 checked cast APIs. See
@@ -144,7 +144,7 @@ off macOS they are silent no-ops, so UX cues simply vanish on Linux.
 `beepAsync` plays on a detached thread and holds the output mutex for the whole
 tone — do not mix it with synchronous `beep` in the same run unless you know
 the async tone has finished (hazard documented at
-`Tyr/Audio/AppleOutput.lean:8`).
+`Tyr/Audio/AppleOutput.lean`).
 
 ### `torch.Generator.KVCache` (`Tyr/Inference/KVCache.lean`)
 
@@ -180,7 +180,7 @@ not automatically replace them.
 
 ### Recording with voice-activity detection
 
-Reconstructed example (from `Examples/Whisper/VoiceMode.lean:163-231`, beeps
+Reconstructed example (from `Examples/Whisper/VoiceMode.lean`, beeps
 and `start`/`stop` at lines 255-256 and 368-393). The real demo records until
 trailing silence, keeping a 500 ms pre-roll so speech onset is not clipped;
 audio flows through unboxed `FloatBuffer`s and is boxed once at the model
@@ -222,7 +222,7 @@ def recordUntilSilence : IO (Array Float) := do
 For hop-wise streaming recognition, read fixed-size hops with the boxed
 `AppleInput.read` and push each hop into the model session, stopping capture in
 both the success and `catch` branches — see
-`Examples/Qwen3ASR/LiveMicTrueStream.lean:108-132`.
+`Examples/Qwen3ASR/LiveMicTrueStream.lean`.
 
 ### Cached decode step
 

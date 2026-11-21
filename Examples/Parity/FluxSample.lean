@@ -49,7 +49,6 @@ def encodeText (dir : String) (device : Device) (request : Request) (contextDim 
     (ids.to device) (mask.to device)
   pure (embeddings.reshape #[1, maxSeqLen, contextDim] (by simp [h]))
 
--- The derived cast for the nested VAE tree needs a 278-node instance dictionary.
 set_option synthInstance.maxSize 512 in
 def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let request : Request ← IO.ofExcept (fromJson? json)

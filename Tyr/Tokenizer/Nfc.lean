@@ -55,7 +55,6 @@ private def tCount : Nat := 28
 private def nCount : Nat := vCount * tCount
 private def sCount : Nat := lCount * nCount
 
-/-- The canonical combining class of `cp`. -/
 def combiningClass (cp : Nat) : Nat :=
   classTable.getD cp 0
 
@@ -110,7 +109,6 @@ private def compose (cps : Array Nat) : Array Nat := Id.run do
     out := out.push cp
   out
 
-/-- `text` in Normalization Form C. -/
 def normalize (text : String) : String :=
   -- No character below U+0300 decomposes into or composes with another.
   if text.all (fun c : Char => c.toNat < 0x300) then text else

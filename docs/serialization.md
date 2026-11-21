@@ -56,7 +56,7 @@ Lean builds the header. Training snapshots use the separate checkpoint APIs.
 ### Runtime schema introspection
 
 `Tyr/SafeTensors/Schema.lean` builds a metadata surface on top of the FFI. The two
-central types (`Tyr/SafeTensors/Schema.lean:29-61`):
+central types (`Tyr/SafeTensors/Schema.lean`):
 
 ```lean
 structure TensorSchema where
@@ -72,7 +72,7 @@ structure Schema where
   tensors : Array TensorSchema
 ```
 
-`introspect (source : String) : IO Schema` (`Tyr/SafeTensors/Schema.lean:111`) is
+`introspect (source : String) : IO Schema` (`Tyr/SafeTensors/Schema.lean`) is
 the central entry point. It accepts:
 
 - a single `.safetensors` file — parses the 8-byte little-endian header size and
@@ -115,7 +115,7 @@ Tensor names split on `.` form a hierarchy. Named segments become fields of
 generated `structure Weights<Segment>` records; a uniform run of numeric segments
 (`layers.0.*`, `layers.1.*`, ...) becomes an `Array` field; a non-uniform run
 falls back to `i0`, `i1`, ... fields; non-contiguous numeric indices are a
-compile-time error (`validateIndexedContiguous`, `Tyr/SafeTensors/TypeProvider.lean:265`).
+compile-time error (`validateIndexedContiguous`, `Tyr/SafeTensors/TypeProvider.lean`).
 The top level of the generated namespace contains:
 
 - `abbrev Weights (device : Device := .CPU)` — the full hierarchical record;
@@ -127,10 +127,10 @@ The top level of the generated namespace contains:
   `hasTensor`, `find?`, `fieldToTensorName`.
 
 Generated code is rendered as strings and re-elaborated via
-`Parser.runParserCategory` (`Tyr/SafeTensors/TypeProvider.lean:116-124`), with all
+`Parser.runParserCategory` (`Tyr/SafeTensors/TypeProvider.lean`), with all
 references `_root_.`-qualified. KittenTTS is the in-tree consumer: the provider
-runs against a checked-in schema snapshot (`Tyr/Model/KittenTTS/Checkpoint.lean:14`)
-and `Tyr/Model/KittenTTS/Weights.lean:784-792` loads subtrees from one open handle.
+runs against a checked-in schema snapshot (`Tyr/Model/KittenTTS/Checkpoint.lean`)
+and `Tyr/Model/KittenTTS/Weights.lean` loads subtrees from one open handle.
 
 ### HuggingFace Hub resolution
 
@@ -147,7 +147,7 @@ def resolvePretrainedDir (source : String) (opts : DownloadOptions := {})
     (tokenizerFiles : Array String := #[]) : IO String
 ```
 
-`resolvePretrainedDir` resolves in order (`Tyr/Hub.lean:230-244`):
+`resolvePretrainedDir` resolves in order (`Tyr/Hub.lean`):
 
 1. an existing local directory is returned as-is;
 2. the standard HF hub cache is searched (`findCachedSnapshot?` scans
@@ -159,7 +159,7 @@ def resolvePretrainedDir (source : String) (opts : DownloadOptions := {})
    falls back to a single `model.safetensors`), tokenizer files best-effort.
 
 Downloads shell out to `curl -fL --retry 3` with `.tmp`-file resume and an
-optional `HF_TOKEN` bearer header (`Tyr/Hub.lean:89-118`). The generic entry point
+optional `HF_TOKEN` bearer header (`Tyr/Hub.lean`). The generic entry point
 used by every `Tyr/Model/*/Pretrained.lean` is:
 
 ```lean
@@ -283,7 +283,7 @@ SafeTensors export.
 
 ## Usage examples
 
-Reconstructed example (from `Tests/TestSafeTensorsTypeProvider.lean:13-219`):
+Reconstructed example (from `Tests/TestSafeTensorsTypeProvider.lean`):
 
 ```lean
 import Tyr.SafeTensors
@@ -312,7 +312,7 @@ def demo : IO Unit := do
   IO.println s!"{ShardedSafe.proj_biasSpec.sourceFile}" -- "part2.safetensors"
 ```
 
-Reconstructed example (from `Tyr/Model/Qwen35/Pretrained.lean:54-69`):
+Reconstructed example (from `Tyr/Model/Qwen35/Pretrained.lean`):
 
 ```lean
 /-- Load a text Qwen3.5 checkpoint from local dir or HF repo id. -/
@@ -362,7 +362,7 @@ invalid state; legacy flat directories retain their compatibility loader.
 - The type provider introspects at elaboration time: the checkpoint (or a
   `.schema.json` snapshot) must exist on the build machine, and introspection
   failures surface as a generic `safetensors_type_provider failed while
-  introspecting source ...` error (`Tyr/SafeTensors/TypeProvider.lean:628-632`).
+  introspecting source ...` error (`Tyr/SafeTensors/TypeProvider.lean`).
   `introspect` reads only the eight-byte length prefix and JSON header of each
   shard. Headers are limited to 100 MiB and checked against the file size before
   allocation; tensor payloads are not read during schema discovery.

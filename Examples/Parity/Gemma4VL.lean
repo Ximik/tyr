@@ -40,7 +40,6 @@ def gridSize (positions : Array (Array Int)) : IO (Nat × Nat) := do
     throw <| IO.userError s!"{valid.size} valid patches for a {rows}x{cols} grid"
   pure (rows, cols)
 
--- The derived cast for the nested model tree needs a larger instance dictionary.
 set_option synthInstance.maxSize 4096 in
 def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let inputs ← LM.Inputs.parse json device

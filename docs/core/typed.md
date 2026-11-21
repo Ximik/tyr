@@ -298,8 +298,7 @@ already occupy the selected device. Tyr checks this rule before native execution
 matching the [pinned PyTorch implementation](https://github.com/pytorch/pytorch/blob/449b1768410104d3ed79d3bcfe4ba1d65c7f22c0/aten/src/ATen/native/TensorCompare.cpp#L541-L594).
 
 `Tests.TestDeviceCompatibility` covers static rejection, metadata rules for
-CPU/MPS/CUDA indices, and CPU numerical execution. The accelerator metadata cases
-do not allocate accelerator tensors or establish hardware qualification.
+CPU/MPS/CUDA indices, and CPU numerical execution.
 
 ## Operator checks and failures
 

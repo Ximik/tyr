@@ -51,18 +51,18 @@ structure Model (cfg : KittenTTSConfig) where
   deriving TensorStruct
 ```
 
-`Tyr/Model/KittenTTS/Model.lean:1693`. Pipeline: ALBERT phoneme encoder →
+`Tyr/Model/KittenTTS/Model.lean`. Pipeline: ALBERT phoneme encoder →
 duration/prosody predictor (durations, F0/N curves) → text encoder → AdaIN decoder with
 an hn-NSF + iSTFT generator. Configuration is layered: `KittenTTSConfig`
-(`Tyr/Model/KittenTTS/Config.lean:139`) embeds `AlbertConfig` and `GeneratorConfig`;
+(`Tyr/Model/KittenTTS/Config.lean`) embeds `AlbertConfig` and `GeneratorConfig`;
 `KittenTTSConfig.fullStyleDim cfg = 2 * cfg.styleDim` is the voice-style width.
 
-Checkpoint typing happens at elaboration: `Tyr/Model/KittenTTS/Checkpoint.lean:14` runs
+Checkpoint typing happens at elaboration: `Tyr/Model/KittenTTS/Checkpoint.lean` runs
 `safetensors_type_provider "Tyr/Model/KittenTTS/kokoro_v1.schema.json" as KokoroCheckpoint`,
 generating typed structures for the whole Kokoro checkpoint from a checked-in schema;
 `Weights.lean` maps those onto `Model cfg` (`Model.loadAutoConfig`).
 
-The user-facing entry point is `PretrainedBundle` (`Tyr/Model/KittenTTS/Pretrained.lean:170`),
+The user-facing entry point is `PretrainedBundle` (`Tyr/Model/KittenTTS/Pretrained.lean`),
 a record of `cfg`, `model`, phoneme `vocab`, and the source/revision/cache paths.
 Input is **phoneme IDs**, not raw text — grapheme-to-phoneme conversion is out of scope
 for this port; call sites pass IPA strings (e.g. `"həˈloʊ wɜːld"`). Voice styles are rows
@@ -94,13 +94,13 @@ index; the speaker encoder may retain a different checkpoint dtype. Pieces:
 - **Talker** (`Tyr/Model/Qwen3TTS/Talker.lean`): `TalkerModel` (codec + text embeddings,
   text projection, transformer stack) plus `TalkerCodePredictor`, which predicts
   codebooks 1..N from codebook-0 context. Both reuse the Qwen LLM layer — `TalkerLayer
-  cfg` is an abbrev for `qwen.QwenLayer` (Talker.lean:26).
+  cfg` is an abbrev for `qwen.QwenLayer` (Talker.lean).
 - **Speaker encoder** (`SpeakerEncoder.lean`): ECAPA-TDNN producing
   `Tensor ⟨#[batch, cfg.speakerEncoderConfig.encDim], dtypes.speaker.val, device⟩`
   embeddings from mel features; only
   present for `ttsModelType == "base"`. Used for voice cloning via
-  `VoiceClonePromptItem` (Model.lean:17).
-- **Speech tokenizer decoder** (`SpeechTokenizer.lean:263`): `SpeechTokenizer12HzDecoder`
+  `VoiceClonePromptItem` (Model.lean).
+- **Speech tokenizer decoder** (`SpeechTokenizer.lean`): `SpeechTokenizer12HzDecoder`
   is a flat parameter record (split RVQ, causal pre-conv + transformer, upsampling conv
   stack; `outputSampleRate = 24000`, `decodeUpsampleRate = 1920`) decoding
   `[batch, 16, frames]` codes to `[batch, 1, frames * 1920]` waveforms — one shot
@@ -141,7 +141,7 @@ structure Qwen3ASRForConditionalGeneration (cfg : Qwen3ASRConfig) (dtype : DType
 
 ```
 
-`Tyr/Model/Qwen3ASR/Model.lean:130` and `:893`. The audio encoder's output is projected
+`Tyr/Model/Qwen3ASR/Model.lean` and . The audio encoder's output is projected
 into the text hidden size and spliced into the token embedding stream; the text decoder
 is a standard Qwen3 model (see [LLM models](llms.md)). Generation is greedy:
 `generateGreedy`, `generateGreedyUncached`, and `generateGreedyWithPromptCache` over
@@ -211,7 +211,7 @@ def streamingTranscribe
 (`Tyr.Text.StreamingConsensus`), optionally gated by a Silero VAD provider.
 `Realtime.lean` is the lower-level coherent-transcript assembly.
 
-The **forced aligner** (`Transcribe.lean:29`, `ForcedAligner.lean`) is a separate
+The **forced aligner** (`Transcribe.lean`, `ForcedAligner.lean`) is a separate
 checkpoint wrapped as `Qwen3ForcedAligner`; `alignWaveform`/`align`/`alignBatch` map a
 transcript to word-level spans:
 
@@ -226,17 +226,17 @@ structure ForcedAlignResult where
 ```
 
 Official HF repos are `Qwen/Qwen3-ASR-0.6B` and `Qwen/Qwen3-ASR-1.7B`
-(`Tyr/Model/Qwen3ASR/Pretrained.lean:25`).
+(`Tyr/Model/Qwen3ASR/Pretrained.lean`).
 
 ### SileroVAD (`torch.silerovad`)
 
 The tiny Silero voice-activity detector. Import `Tyr.Model.SileroVAD`. 16 kHz mono only,
-512-sample chunks. `SileroVAD` (`Tyr/Model/SileroVAD/Model.lean:99`) is a flat parameter
+512-sample chunks. `SileroVAD` (`Tyr/Model/SileroVAD/Model.lean`) is a flat parameter
 record: STFT conv front-end, 4-layer conv encoder, hand-rolled LSTM cell (`VADLstmState`),
 sigmoid probability head. `SileroVAD.init` builds random weights for shape tests;
 `SileroVAD.load path` reads the pretrained checkpoint.
 
-`SileroVADRuntime` (Model.lean:251) is the stateful streaming wrapper: `step rt chunk`
+`SileroVADRuntime` (Model.lean) is the stateful streaming wrapper: `step rt chunk`
 runs one 512-sample chunk and returns `IO (Float × SileroVADRuntime)`; `audioForward rt
 audio` maps over a whole waveform (zero-padding the tail). On top, `Utils.lean` ports the
 Silero segmentation heuristics: `timestampsFromProbabilities` under a `TimestampConfig`
@@ -247,7 +247,7 @@ and `collectChunks`/`dropChunks` to cut audio by timestamps.
 ### Whisper (`torch.whisper`)
 
 A native Whisper encoder-decoder port with a whisper.cpp-style decode loop. Import
-`Tyr.Model.Whisper`. `WhisperConfig` (`Tyr/Model/Whisper/Config.lean:10`) holds the usual
+`Tyr.Model.Whisper`. `WhisperConfig` (`Tyr/Model/Whisper/Config.lean`) holds the usual
 HF Whisper fields (`numMelBins`, `dModel`, `encoderLayers`, `decoderLayers`,
 `maxTargetPositions`, suppress-token lists, ...). The model split:
 
@@ -296,7 +296,7 @@ def transcribeWav {cfg : WhisperConfig} {device : Device} {dtype : DType}
 ```
 
 Note the tokenizer is the shared Qwen3 BPE tokenizer (`Tyr/Tokenizer/Qwen3`), not a
-separate Whisper tokenizer. Decoding (`WhisperDecodeOptions`, Transcribe.lean:34) mirrors
+separate Whisper tokenizer. Decoding (`WhisperDecodeOptions`, Transcribe.lean) mirrors
 whisper-cli: beam-first at temperature 0, temperature fallback with best-of, no-speech
 and compression-ratio gating, rolling context across overlapping 30 s chunks.
 `transcribeWaveform16k` is the in-memory variant; `WhisperTranscription` carries

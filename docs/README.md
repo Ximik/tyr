@@ -78,6 +78,6 @@ Two kinds of documentation exist:
 - Code examples are reconstructed from real call sites and labeled with their
   source; signatures were verified against the Lean sources at the commit
   where each guide was written.
-- Source citations use `path:line` (e.g. `Tyr/Torch.lean:564`).
+- Source citations use `path:line` (e.g. `Tyr/Torch.lean`).
 - Guides describe intent and key APIs; the doc-gen4 reference remains the
   source of truth for exhaustive symbol documentation.
