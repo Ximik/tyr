@@ -413,19 +413,16 @@ private def buildInputEmbedsWithFeatures {batch seq : Nat}
   let llmInputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } := replaceTokenId inputIds cfg.image_token_id padId
   let llmInputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype } :=
     m.language_model.embedTokens cfg.text_config llmInputIds
-  let perLayerInputs :=
-    Gemma4Model.computePerLayerInputs cfg.text_config m.language_model.model llmInputIds llmInputsEmbeds
-  match imageFeatures with
-  | some ⟨_n, feats⟩ =>
-    let embeds ←
+  let embeds ←
+    match imageFeatures with
+    | some ⟨_n, feats⟩ =>
       scatterFeaturesIntoToken
         (inputIds := inputIds)
         (inputsEmbeds := llmInputsEmbeds)
         cfg.image_token_id
         feats
-    pure (embeds, perLayerInputs)
-  | none =>
-    pure (llmInputsEmbeds, perLayerInputs)
+    | none => pure llmInputsEmbeds
+  pure (embeds, Gemma4Model.computePerLayerInputs cfg.text_config m.language_model.model llmInputIds embeds)
 
 private def buildVisionBidirectionalPrefillMasks {batch seq : Nat}
     (cfg : VLConfig)
