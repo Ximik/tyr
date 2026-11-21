@@ -7,8 +7,7 @@
   Native operation results pass through checked construction before acquiring
   a static specification. Result specs
   follow PyTorch's semantics as encoded in the `StaticSpec`/`DType` algebra;
-  runtime metadata checks and the parity tests in `Tests/TestTyped.lean`
-  validate those claims.
+  runtime metadata checks validate those claims.
 
   Conventions:
   - Ops that preserve the whole spec are `Tensor σ → Tensor σ`.

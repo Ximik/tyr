@@ -21,10 +21,7 @@
   preserves its values; callers thread the returned cache forward to observe
   new tokens. Native copy-on-write can reuse storage when no aliases remain.
 
-  This module is the canonical home for the cache abstraction. NanoChat,
-  Qwen, and any other generation-loop code should import from here. (The
-  earlier copy at `Examples/NanoChat/Generator/KVCache.lean` is a thin
-  re-export shim.) -/
+  This module is the canonical home for the cache abstraction. -/
 import Tyr.Torch
 import Tyr.ConstantSupport
 import Tyr.Typed.Neural

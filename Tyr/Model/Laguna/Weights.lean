@@ -6,7 +6,7 @@
 
   Three checkpoint serializations are supported (detected per MoE layer):
 
-  A. BF16 exports (e.g. `Tests/fixtures/laguna/tiny/model.safetensors`):
+  A. BF16 exports:
      everything is BF16 with standard `modeling_laguna.py` state_dict names,
      and the routed experts are FUSED dense 3-D banks
      `mlp.experts.gate_up_proj` `[E, 2*moeInt, hidden]` (dim 1: first half
