@@ -400,6 +400,10 @@ lean_exe ParityQwen3TTSTalker where
   root := `Examples.Parity.Qwen3TTSTalker
   supportInterpreter := true
 
+lean_exe ParityKittenTTS where
+  root := `Examples.Parity.KittenTTS
+  supportInterpreter := true
+
 /-- Focused native acceptance path while model tensor migration is in progress. -/
 lean_exe test_typed_models where
   root := `Tests.RunTypedModels
