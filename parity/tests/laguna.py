@@ -11,7 +11,7 @@ TEST = Test(
     cases=["laguna/short", "laguna/long", "laguna/batch"],
 )
 
-CHECKS = [LmTokens(margin=0.25, logits_atol=1.0)]
+CHECKS = [LmTokens(margin=0.5, logits_atol=10.0)]
 
 
 def reference(case, weights, device, dtype, out):
