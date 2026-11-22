@@ -104,8 +104,6 @@ structure TalkerConfig where
   codecThinkEosId : tokenizer.TokenId := 2157
   codecPadId : tokenizer.TokenId := 2148
   codecBosId : tokenizer.TokenId := 2149
-  spkId : Array (String × tokenizer.TokenId) := #[]
-  spkIsDialect : Array (String × String) := #[]
   codecLanguageId : Array (String × tokenizer.TokenId) := #[]
   /-- Every codec frame has codebook 0 plus at least one residual codebook the code predictor
       generates; checked when the config is loaded. -/
@@ -117,12 +115,11 @@ structure TalkerConfig where
   /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
   ropeThetaPos : 0 < ropeTheta := by native_decide
   rmsNormEpsPos : 0 < rmsNormEps := by native_decide
-  /-- Codec special, speaker and language ids index the codec embedding; checked when the config is built. -/
+  /-- Codec special and language ids index the codec embedding; checked when the config is built. -/
   codecIdsInVocab :
     codecEosTokenId.toNat < vocabSize ∧ codecThinkId.toNat < vocabSize ∧ codecNoThinkId.toNat < vocabSize ∧
     codecThinkBosId.toNat < vocabSize ∧ codecThinkEosId.toNat < vocabSize ∧ codecPadId.toNat < vocabSize ∧
     codecBosId.toNat < vocabSize := by decide
-  speakerIdsInVocab : ∀ e ∈ spkId, e.2.toNat < vocabSize := by decide
   languageIdsInVocab : ∀ e ∈ codecLanguageId, e.2.toNat < vocabSize := by decide
   deriving Repr
 
@@ -161,10 +158,6 @@ def supportedLanguages (cfg : Qwen3TTSConfig) : Array String :=
       if !k.contains "dialect" then
         langs := langs.push k
     langs
-
-/-- Supported speaker names inferred from speaker-id map. -/
-def supportedSpeakers (cfg : Qwen3TTSConfig) : Array String :=
-  cfg.talkerConfig.spkId.map Prod.fst
 
 end Qwen3TTSConfig
 
