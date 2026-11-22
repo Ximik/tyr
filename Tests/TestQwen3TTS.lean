@@ -34,7 +34,6 @@ private def tinyCfg : Qwen3TTSConfig :=
       codecNoThinkId := 9
       codecThinkBosId := 10
       codecThinkEosId := 11
-      spkId := #[("speaker_a", 1), ("speaker_b", 2)]
       codecLanguageId := #[("en", 1), ("dialect_test", 2), ("fr", 3)]
     }
     speakerEncoderConfig := {
@@ -55,16 +54,11 @@ def testQwen3TTSInitAndCapabilities : IO Unit := do
   let cfg := tinyCfg
   let model ← Qwen3TTSForConditionalGeneration.init cfg
   let langs := model.getSupportedLanguages
-  let speakers := model.getSupportedSpeakers
 
   LeanTest.assertTrue (langs.contains "auto") "supported languages should include auto"
   LeanTest.assertTrue (langs.contains "en") "supported languages should include configured language tags"
   LeanTest.assertTrue (langs.contains "fr") "supported languages should include configured language tags"
   LeanTest.assertFalse (langs.contains "dialect_test") "dialect-tagged language entries should be filtered"
-
-  LeanTest.assertEqual speakers.size 2 "supported speakers should include configured speaker IDs"
-  LeanTest.assertTrue (speakers.contains "speaker_a") "supported speakers should include speaker_a"
-  LeanTest.assertTrue (speakers.contains "speaker_b") "supported speakers should include speaker_b"
 
 @[test]
 def testQwen3TTSRMSNormModelDType : IO Unit := do

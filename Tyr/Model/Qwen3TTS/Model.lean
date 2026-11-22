@@ -43,9 +43,6 @@ def init (cfg : Qwen3TTSConfig) (device : Device := .CPU) (dtypes : DTypeLayout 
 def getSupportedLanguages (_m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes) : Array String :=
   Qwen3TTSConfig.supportedLanguages cfg
 
-def getSupportedSpeakers (_m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes) : Array String :=
-  Qwen3TTSConfig.supportedSpeakers cfg
-
 /-- Extract speaker embedding from mel features `[batch, frames, melDim]`.
     Features are aligned to the speaker encoder's weight dtype and device.
     The caller is responsible for mel preprocessing and sample-rate alignment. -/

@@ -19,18 +19,6 @@ private def tokenIdMapD? (j : Json) (key : String) (default : Array (String × t
   entries.foldlM (init := #[]) fun out name _ => do
     pure (out.push (name, ← tokenIdFieldD? obj name 0))
 
-/-- A `{name: string | bool}` object at `key`, `default` when absent. -/
-private def stringMapD? (j : Json) (key : String) (default : Array (String × String)) :
-    Except String (Array (String × String)) := do
-  let some obj ← objectField? j key | pure default
-  let some (entries : Std.TreeMap.Raw String Json) := (match obj with | .obj kvs => some kvs | _ => none)
-    | pure default
-  entries.foldlM (init := #[]) fun out name value => do
-    match value with
-    | .str s => pure (out.push (name, s))
-    | .bool b => pure (out.push (name, if b then "true" else "false"))
-    | _ => throw s!"invalid '{key}.{name}' = {value.compress}: expected a string or boolean"
-
 /-- Behavior both decoders hard-code: SiLU MLP, no attention bias, no sliding window. -/
 private def requireQwenLayer (j : Json) : Except String Unit := do
   requireOneOf j "hidden_act" ["silu"]
@@ -116,9 +104,9 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : Except Strin
       pure (PLift.up h)
     else
       throw s!"Invalid Qwen3-TTS talker config: codec special ids must be below vocab_size={vocabSize}"
-  let spkId ← tokenIdMapD? j "spk_id" d.spkId
-  let ⟨hSpk⟩ ← if h : ∀ e ∈ spkId, e.2.toNat < vocabSize then pure (PLift.up h) else
-    throw s!"Invalid Qwen3-TTS talker config: spk_id values must be below vocab_size={vocabSize}"
+  if let some (.obj speakers) ← objectField? j "spk_id" then
+    unless speakers.isEmpty do
+      throw "Unsupported Qwen3-TTS talker config: named speakers (spk_id) are not implemented"
   let codecLanguageId ← tokenIdMapD? j "codec_language_id" d.codecLanguageId
   let ⟨hLang⟩ ← if h : ∀ e ∈ codecLanguageId, e.2.toNat < vocabSize then pure (PLift.up h) else
     throw s!"Invalid Qwen3-TTS talker config: codec_language_id values must be below vocab_size={vocabSize}"
@@ -137,8 +125,6 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : Except Strin
     textHiddenSize := ← fieldD? j "text_hidden_size" d.textHiddenSize
     textVocabSize := ← fieldD? j "text_vocab_size" d.textVocabSize
     codecEosTokenId, codecThinkId, codecNoThinkId, codecThinkBosId, codecThinkEosId, codecPadId, codecBosId
-    spkId
-    spkIsDialect := ← stringMapD? j "spk_is_dialect" d.spkIsDialect
     codecLanguageId
     residualCodeGroups := hGroups
     headsValid := hHeads
@@ -146,7 +132,6 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : Except Strin
     ropeThetaPos := hTheta
     rmsNormEpsPos := hEps
     codecIdsInVocab := hCodec
-    speakerIdsInVocab := hSpk
     languageIdsInVocab := hLang
   }
 
