@@ -21,7 +21,7 @@ structure Entry where
   shape : Shape
   dataStart : Nat
   dataEnd : Nat
-  deriving Inhabited, Repr
+  deriving Repr
 
 /-- A parsed SafeTensors file. -/
 structure SafeTensorsHandle where
@@ -29,7 +29,6 @@ structure SafeTensorsHandle where
   /-- File offset of the data section. -/
   dataOffset : Nat
   entries : Std.HashMap String Entry
-  deriving Inhabited
 
 private def getObjVal? (j : Json) (key : String) : Option Json :=
   match j with

@@ -29,7 +29,7 @@ structure SpeechTokenizerBridgeConfig where
   speechTokenizerDir : Option String := none
   decodeScript : String := "scripts/qwen3tts_decode_codes.py"
   deviceMap : Option String := none
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def expandHome (path : String) : IO String := do
   if path == "~" then

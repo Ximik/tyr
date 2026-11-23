@@ -16,11 +16,11 @@ structure ForcedAlignItem where
   text : String
   startTime : Float
   endTime : Float
-  deriving Repr, Inhabited
+  deriving Repr
 
 structure ForcedAlignResult where
   items : Array ForcedAlignItem
-  deriving Repr, Inhabited
+  deriving Repr
 
 namespace Qwen3ForceAlignProcessor
 

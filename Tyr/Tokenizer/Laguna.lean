@@ -54,7 +54,6 @@ structure LagunaTokenizer where
   /-- Added-token surface forms sorted longest-first for greedy matching. -/
   addedList : Array String
   padTokenId' : TokenId
-  deriving Inhabited
 
 /-- Helper: parse JSON file. -/
 private def parseJsonFile (path : String) : IO Json := do

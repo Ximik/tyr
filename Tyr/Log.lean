@@ -18,7 +18,6 @@ structure Handlers where
   onInfo : Sink := fun _ => pure ()
   onWarn : Sink := fun _ => pure ()
   onError : Sink := fun _ => pure ()
-  deriving Inhabited
 
 /-- Combine two handler sets by invoking both in order. -/
 def Handlers.combine (lhs rhs : Handlers) : Handlers := {

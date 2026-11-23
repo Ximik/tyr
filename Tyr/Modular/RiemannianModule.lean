@@ -25,7 +25,7 @@ structure LayerStepDiagnostics where
   innerConditionEstimate : Float := 0.0
   residualNorm : Float := 0.0
   updateNorm : Float := 0.0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /--
 Leaf module that can expose the local Jacobians needed for recursive

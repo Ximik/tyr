@@ -21,7 +21,7 @@ structure DownloadOptions where
   cacheDir : String := Hub.defaultCacheDir
   includeTokenizer : Bool := true
   includePreprocessor : Bool := true
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Official Qwen3-ASR model ids in HF collection `Qwen/Qwen3-ASR` as of 2026-02-28. -/
 def qwen3ASRCollectionRepoIds : Array String := #[

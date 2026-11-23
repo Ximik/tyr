@@ -22,7 +22,7 @@ open torch
 inductive SamplingStrategy where
   | greedy
   | multinomial (temperature : Float := 1.0) (topK : TopK := none) (topP : Float := 1.0)
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Callback invoked on every generated token during streaming decode.
     Tokens are Int64 vocabulary indices. -/

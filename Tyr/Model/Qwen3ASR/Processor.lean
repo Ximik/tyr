@@ -19,7 +19,7 @@ structure ProcessorKwargs where
   audioSamplingRate : Nat := 16000
   audioPadding : Bool := true
   audioReturnAttentionMask : Bool := true
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Lightweight Lean processor config/state. -/
 structure Qwen3ASRProcessor where
@@ -29,7 +29,7 @@ structure Qwen3ASRProcessor where
   imStartToken : String := "<|im_start|>"
   imEndToken : String := "<|im_end|>"
   kwargs : ProcessorKwargs := {}
-  deriving Repr, Inhabited
+  deriving Repr
 
 namespace Qwen3ASRProcessor
 

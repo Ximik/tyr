@@ -53,7 +53,7 @@ structure TrainConfig where
   specialTokens : Array String := defaultChatSpecialTokens
   /-- Random seed for shuffling -/
   seed : UInt64 := 42
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Training statistics collected during tokenizer training -/
 structure TrainStats where
@@ -67,7 +67,7 @@ structure TrainStats where
   finalVocabSize : Nat := 0
   /-- Compression ratio (chars per token) -/
   compressionRatio : Float := 0.0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Result of tokenizer training -/
 structure TrainResult where

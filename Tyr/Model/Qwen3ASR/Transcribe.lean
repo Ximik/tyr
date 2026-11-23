@@ -24,7 +24,7 @@ structure ASRTranscription where
   language : String
   text : String
   timeStamps : Option ForcedAlignResult := none
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Standalone forced-aligner wrapper:
     independent model/tokenizer checkpoint that can be attached to ASR transcription. -/
@@ -509,26 +509,17 @@ private structure BatchedDecodeRow where
   inputIdsRow : Tensor { device := device, shape := #[1, seq], dtype := .Int64 }
   inputFeaturesRow : Tensor { device := device, shape := #[1, melBins, frames], dtype := .Float32 }
   featureAttentionMaskRow : Tensor { device := device, shape := #[1, frames], dtype := .Int64 }
-  deriving Inhabited
 
 private structure BatchedDecodeBucket where
   frames : Nat
   seq : Nat
   rows : Array (BatchedDecodeRow (device := device)) := #[]
-  deriving Inhabited
 
 private def findBucketIdx
     (buckets : Array (BatchedDecodeBucket (device := device)))
     (frames seq : Nat)
     : Option Nat :=
-  Id.run do
-    let mut found : Option Nat := none
-    for i in [:buckets.size] do
-      if found.isNone then
-        let b := buckets[i]!
-        if b.frames == frames && b.seq == seq then
-          found := some i
-    found
+  buckets.findIdx? fun b => b.frames == frames && b.seq == seq
 
 private def addRowToBuckets
     (buckets : Array (BatchedDecodeBucket (device := device)))
@@ -536,9 +527,7 @@ private def addRowToBuckets
     (row : BatchedDecodeRow (device := device))
     : Array (BatchedDecodeBucket (device := device)) :=
   match findBucketIdx buckets frames seq with
-  | some i =>
-      let b := buckets[i]!
-      buckets.set! i { b with rows := b.rows.push row }
+  | some i => buckets.modify i fun b => { b with rows := b.rows.push row }
   | none =>
       buckets.push { frames := frames, seq := seq, rows := #[row] }
 
@@ -637,9 +626,7 @@ private def tryTranscribeWaveformsBatchedChunk
       if raws.size != bucket.rows.size then
         throw <| IO.userError
           s!"Internal batch decode mismatch: rows={bucket.rows.size}, decoded={raws.size}"
-      for i in [:bucket.rows.size] do
-        let row := bucket.rows[i]!
-        let raw := raws[i]!
+      for row in bucket.rows, raw in raws do
         let (lang, txt) := parseAsrOutput raw row.forceLanguage
         outByIdx := outByIdx.set! row.idx (some {
           language := lang
@@ -1022,8 +1009,9 @@ def alignAudioInputs
   let mut off : Nat := 0
   while off < n do
     let hi := Nat.min n (off + step)
-    for i in [off:hi] do
-      out := out.push (← alignAudioInput aligner (audios[i]!) (ts[i]!) (ls[i]!))
+    for h : i in [off:hi] do
+      have : i < audios.size := Nat.lt_of_lt_of_le h.upper (Nat.min_le_left _ _)
+      out := out.push (← alignAudioInput aligner audios[i] (ts[i]!) (ls[i]!))
     off := hi
   pure out
 

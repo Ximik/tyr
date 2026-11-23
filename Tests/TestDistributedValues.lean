@@ -86,14 +86,14 @@ def checkTwoRankValues (rank : Nat) : IO Unit := do
   let template ← (Tensor.zeros #[1]).setRequiresGrad true
   let gathered ← dist.allGatherList #[template, template] input
   LeanTest.assertEqual (← template.toFloatArray) #[0.0]
-  LeanTest.assertEqual (← gathered[0]!.toFloatArray) #[1.0]
-  LeanTest.assertEqual (← gathered[1]!.toFloatArray) #[2.0]
+  LeanTest.assertEqual (← (← Tests.get gathered 0).toFloatArray) #[1.0]
+  LeanTest.assertEqual (← (← Tests.get gathered 1).toFloatArray) #[2.0]
   LeanTest.assertTrue (gathered.all Tensor.requiresGrad)
   let next ← dist.allGatherList #[template, template] (Tensor.fromFloatArray #[rankValue + 10.0])
-  LeanTest.assertEqual (← next[0]!.toFloatArray) #[11.0]
-  LeanTest.assertEqual (← next[1]!.toFloatArray) #[12.0]
-  LeanTest.assertEqual (← gathered[0]!.toFloatArray) #[1.0]
-  LeanTest.assertEqual (← gathered[1]!.toFloatArray) #[2.0]
+  LeanTest.assertEqual (← (← Tests.get next 0).toFloatArray) #[11.0]
+  LeanTest.assertEqual (← (← Tests.get next 1).toFloatArray) #[12.0]
+  LeanTest.assertEqual (← (← Tests.get gathered 0).toFloatArray) #[1.0]
+  LeanTest.assertEqual (← (← Tests.get gathered 1).toFloatArray) #[2.0]
 
   let scattered ← dist.reduceScatterList template
     #[input, Tensor.fromFloatArray #[rankValue + 10.0]] .sum

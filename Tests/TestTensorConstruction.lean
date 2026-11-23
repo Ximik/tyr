@@ -68,8 +68,8 @@ def testAdmissionAndOpaqueAccessors : IO Unit := do
   LeanTest.assertEqual packaged.2.raw.getValues.toList [0, 0]
 
 @[test]
-def testOpaqueDefaultAllocation : IO Unit := do
-  let tensor : Tensor { shape := #[3], dtype := .Float64, device := .CPU } := default
+def testOpaqueZerosAllocation : IO Unit := do
+  let tensor : Tensor { shape := #[3], dtype := .Float64, device := .CPU } := Tensor.zerosFor _
   LeanTest.assertEqual tensor.raw.runtimeShape #[3]
   LeanTest.assertEqual tensor.raw.dtype .Float64
   LeanTest.assertEqual tensor.raw.getValues.toList [0, 0, 0]

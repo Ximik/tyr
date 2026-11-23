@@ -26,7 +26,7 @@ private structure ChatEnvState where
   modelDepth : Nat := 20
   vocabSize : Nat := 65536
   requestedDevice? : Option String := none
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def loadChatEnvState : IO ChatEnvState := do
   let baseDir := (← IO.getEnv "NANOCHAT_DIR").getD "~/.cache/nanochat"
@@ -57,7 +57,7 @@ structure Args where
   vocabSize : Nat := 65536
   showTokens : Bool := false
   help : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def parseFloatLit? (s : String) : Option Float :=
   match s.splitOn "." with

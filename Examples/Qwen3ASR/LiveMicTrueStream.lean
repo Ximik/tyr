@@ -16,7 +16,6 @@ structure Args where
   hopSec : Float := 0.5
   runSec : Float := 30.0
   sileroVADPath : Option String := none
-  deriving Inhabited
 
 private def parseNatArg (name : String) (v : String) : IO Nat :=
   match v.toNat? with

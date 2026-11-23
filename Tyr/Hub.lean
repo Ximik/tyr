@@ -19,7 +19,7 @@ structure DownloadOptions where
   revision : String := "main"
   cacheDir : String := defaultCacheDir
   includeTokenizer : Bool := true
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-! ## File system helpers -/
 

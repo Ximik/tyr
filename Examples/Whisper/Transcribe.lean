@@ -24,7 +24,6 @@ structure Args where
   noContext : Bool := false
   maxContextTokens : Option Nat := none
   chunkOverlapSec : Float := 2.0
-  deriving Inhabited
 
 private def parseNatArg (name : String) (v : String) : IO Nat := do
   match v.toNat? with

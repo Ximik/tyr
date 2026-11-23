@@ -30,7 +30,7 @@ inductive ASRAudioInput where
   | base64 (value : String)
   /-- In-memory mono waveform with explicit source sampling rate. -/
   | waveform (samples : Array Float) (sampleRate : Nat)
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def readU16LE (bytes : ByteArray) (offset : Nat) : Option UInt16 :=
   if offset + 2 > bytes.size then

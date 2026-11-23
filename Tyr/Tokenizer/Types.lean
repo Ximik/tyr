@@ -15,7 +15,7 @@ structure MergeRule where
   left : TokenId
   right : TokenId
   result : TokenId
-  deriving Repr, Inhabited, BEq
+  deriving Repr, BEq
 
 /-- BPE Tokenizer state -/
 structure BPETokenizer where
@@ -35,7 +35,6 @@ structure BPETokenizer where
   specialTokens : Std.HashMap String TokenId
   /-- Token ID → special token string (for decoding) -/
   idToSpecial : Std.HashMap TokenId String
-  deriving Inhabited
 
 /-- Check if a token is a special token -/
 def BPETokenizer.isSpecialToken (tok : BPETokenizer) (id : TokenId) : Bool :=

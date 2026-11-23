@@ -32,7 +32,7 @@ private def sampleRate16k : Float := 16000.0
 inductive StreamingDecodeMode where
   | rollingWindow
   | fullAccumulation
-  deriving Repr, Inhabited, BEq
+  deriving Repr, BEq
 
 /-- Streaming ASR state (single stream). -/
 structure ASRStreamingState where
@@ -56,7 +56,7 @@ structure ASRStreamingState where
   language : String := ""
   text : String := ""
   rawDecoded : String := ""
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Streaming decode callback: `(prompt, accumulated_audio_16k) -> raw decoded text`. -/
 abbrev StreamingDecodeFn := String → Array Float → IO String
@@ -74,7 +74,6 @@ structure StreamingPromptTokenCache where
   afterAudioIds : Array UInt32
   lastSuffix : String := ""
   lastSuffixIds : Array UInt32 := #[]
-  deriving Inhabited
 
 /-- Cached projected-audio embedding prefix for full-accumulation streaming mode. -/
 structure StreamingAudioEncoderCache (cfg : Qwen3ASRConfig) (dtype : DType := .Float32) where

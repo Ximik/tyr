@@ -38,7 +38,6 @@ structure Args where
   debugIds : Bool := false
   bench : Bool := false
   showHelp : Bool := false
-  deriving Inhabited
 
 private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := do
   match xs with

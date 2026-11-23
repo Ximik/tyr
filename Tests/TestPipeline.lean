@@ -3,6 +3,7 @@
 
   Tests for Pipeline orchestration (Tyr/Pipeline.lean).
 -/
+import Tests.Assertions
 import Tyr.Pipeline
 import LeanTest
 
@@ -87,7 +88,7 @@ def testPipelineCheckpointJsonRoundTrip : IO Unit := do
   | .ok checkpoint' =>
     LeanTest.assertEqual checkpoint.stages.size checkpoint'.stages.size
     LeanTest.assertEqual checkpoint.runId checkpoint'.runId
-    LeanTest.assertEqual checkpoint.stages[0]!.metrics checkpoint'.stages[0]!.metrics
+    LeanTest.assertEqual (← Tests.get checkpoint.stages 0).metrics (← Tests.get checkpoint'.stages 0).metrics
   | .error e => LeanTest.fail s!"Failed to parse PipelineCheckpoint: {e}"
 
 @[test]
@@ -107,10 +108,10 @@ def testStageFailFastFalseContinues : IO Unit := do
   ).run initial
 
   LeanTest.assertEqual finalState.stages.size 2
-  match finalState.stages[0]!.status with
+  match (← Tests.get finalState.stages 0).status with
   | .failed err => LeanTest.assertTrue (err.containsSubstr "boom") "first stage should fail"
   | _ => LeanTest.fail "first stage should be marked failed"
-  match finalState.stages[1]!.status with
+  match (← Tests.get finalState.stages 1).status with
   | .completed => pure ()
   | _ => LeanTest.fail "second stage should complete when failFast is false"
 

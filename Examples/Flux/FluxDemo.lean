@@ -41,7 +41,7 @@ structure DemoConfig where
   latentH : Nat := 16
   /-- Packed latent width; the image is 16 times as wide -/
   latentW : Nat := 16
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def qwenPadId : Int64 := 151643
 private def maxSeqLen : Nat := 512

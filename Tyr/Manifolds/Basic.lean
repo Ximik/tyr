@@ -73,8 +73,8 @@ namespace DifferentiableManifold
 /-- Simplified typeclass for Euclidean spaces where T = T* = M.
     These spaces have a flat metric where sharp/flat are identity. -/
 class EuclideanSpace (M : Type) where
-  /-- Zero element -/
-  zero : M
+  /-- Zero element with the structure of `x` -/
+  zeroAt (x : M) : M
   /-- Addition -/
   add : M → M → M
   /-- Scalar multiplication -/
@@ -86,8 +86,8 @@ class EuclideanSpace (M : Type) where
 instance euclideanManifold [E : EuclideanSpace M] : DifferentiableManifold M where
   Tangent _ := M
   Cotangent _ := M
-  zeroTangent _ := E.zero
-  zeroCotangent _ := E.zero
+  zeroTangent x := E.zeroAt x
+  zeroCotangent x := E.zeroAt x
   addTangent := E.add
   addCotangent := E.add
   scaleTangent s v := E.smul s v
@@ -99,7 +99,7 @@ instance euclideanManifold [E : EuclideanSpace M] : DifferentiableManifold M whe
 
 /-- Float is a Euclidean space (1-dimensional) -/
 instance floatEuclidean : EuclideanSpace Float where
-  zero := 0.0
+  zeroAt _ := 0.0
   add := (· + ·)
   smul s x := s * x
   inner a b := a * b
@@ -119,8 +119,8 @@ instance staticManifold {α : Type} : DifferentiableManifold (Static α) where
 
 /-- TensorStruct types form Euclidean spaces (product manifold).
     tangent = cotangent = primal type, using TensorStruct.zipWith for operations. -/
-instance tensorStructEuclidean [s : TensorStruct α] [torch.FloatingTensorStruct α] [Inhabited α] : EuclideanSpace α where
-  zero := default
+instance tensorStructEuclidean [s : TensorStruct α] [torch.FloatingTensorStruct α] : EuclideanSpace α where
+  zeroAt x := TensorStruct.map torch.Tensor.zerosLike x
   add := torch.FloatingTensorStruct.zipWith (fun a b => torch.Tensor.add a b)
   smul scalar m := torch.FloatingTensorStruct.map (fun t => torch.Tensor.mulScalar t scalar) m
   -- Inner product: sum of all element-wise products across tensors

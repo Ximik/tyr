@@ -149,7 +149,7 @@ private def buildAlignment {seq frames : Nat}
 structure LinearNorm (inDim outDim : Nat) where
   weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := device }
   bias : Tensor { shape := #[outDim], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace LinearNorm
 
@@ -180,7 +180,7 @@ structure Conv1dParams
     (dilation : Nat := 1) where
   weight : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device }
   bias : Tensor { shape := #[outC], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace Conv1dParams
 
@@ -241,7 +241,7 @@ structure WNConv1dParams
   weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device }
   weightG : Tensor { shape := #[outC], dtype := .Float32, device := device }
   bias : Tensor { shape := #[outC], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace WNConv1dParams
 
@@ -277,7 +277,7 @@ structure WNConvTranspose1dParams
   weightV : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device }
   weightG : Tensor { shape := #[inC], dtype := .Float32, device := device }
   bias : Tensor { shape := #[outC], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace WNConvTranspose1dParams
 
@@ -315,7 +315,7 @@ structure WNDepthwiseTransConv1dParams
   weightV : Tensor { shape := #[channels, 1, kernel], dtype := .Float32, device := device }
   weightG : Tensor { shape := #[channels], dtype := .Float32, device := device }
   bias : Tensor { shape := #[channels], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace WNDepthwiseTransConv1dParams
 
@@ -360,7 +360,7 @@ structure BiLSTM (inputSize hiddenSize : Nat) where
   whBackward : Tensor { shape := #[4 * hiddenSize, hiddenSize], dtype := .Float32, device := device }
   biasIHBackward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32, device := device }
   biasHHBackward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace BiLSTM
 
@@ -444,7 +444,7 @@ structure AlbertEmbeddings (nToken : Nat) (cfg : AlbertConfig) where
   tokenTypeEmbeddings : Tensor { shape := #[cfg.typeVocabSize, cfg.embeddingSize], dtype := .Float32, device := device }
   layerNormWeight : Tensor { shape := #[cfg.embeddingSize], dtype := .Float32, device := device }
   layerNormBias : Tensor { shape := #[cfg.embeddingSize], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace AlbertEmbeddings
 
@@ -478,7 +478,7 @@ structure KittenAlbertSelfAttention (cfg : AlbertConfig) where
   dense : LinearNorm (device := device) (AlbertConfig.allHeadSize cfg) cfg.hiddenSize
   layerNormWeight : Tensor { shape := #[cfg.hiddenSize], dtype := .Float32, device := device }
   layerNormBias : Tensor { shape := #[cfg.hiddenSize], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace KittenAlbertSelfAttention
 
@@ -525,7 +525,7 @@ structure KittenAlbertLayer (cfg : AlbertConfig) where
   fullLayerNormBias : Tensor { shape := #[cfg.hiddenSize], dtype := .Float32, device := device }
   ffn : LinearNorm (device := device) cfg.hiddenSize cfg.intermediateSize
   ffnOutput : LinearNorm (device := device) cfg.intermediateSize cfg.hiddenSize
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace KittenAlbertLayer
 
@@ -551,7 +551,7 @@ end KittenAlbertLayer
 
 structure KittenAlbertLayerGroup (cfg : AlbertConfig) where
   layers : Array (KittenAlbertLayer (device := device) cfg)
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace KittenAlbertLayerGroup
 
@@ -630,7 +630,7 @@ structure TextConvLayer (cfg : KittenTTSConfig) where
   conv : Conv1dParams (device := device) cfg.hiddenDim cfg.hiddenDim cfg.textEncoderKernelSize 1 ((cfg.textEncoderKernelSize - 1) / 2) 1
   lnWeight : Tensor { shape := #[cfg.hiddenDim], dtype := .Float32, device := device }
   lnBias : Tensor { shape := #[cfg.hiddenDim], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace TextConvLayer
 
@@ -658,7 +658,7 @@ structure TextEncoder (cfg : KittenTTSConfig) where
   embedding : Tensor { shape := #[cfg.nToken, cfg.hiddenDim], dtype := .Float32, device := device }
   convs : Array (TextConvLayer (device := device) cfg)
   lstm : BiLSTM (device := device) cfg.hiddenDim (cfg.hiddenDim / 2)
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace TextEncoder
 
@@ -688,7 +688,7 @@ end TextEncoder
 
 structure AdaLayerNorm (styleDim channels : Nat) where
   fc : LinearNorm (device := device) styleDim (2 * channels)
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace AdaLayerNorm
 
@@ -716,7 +716,7 @@ structure AdaIN1d (styleDim channels : Nat) where
   fc : LinearNorm (device := device) styleDim (2 * channels)
   normWeight : Tensor { shape := #[channels], dtype := .Float32, device := device }
   normBias : Tensor { shape := #[channels], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace AdaIN1d
 
@@ -812,16 +812,13 @@ def forward {frames inC outC : Nat}
 
 end Shortcut
 
-instance {inC outC : Nat} : Inhabited (Shortcut (device := device) inC outC) :=
-  ⟨.conv default⟩
-
 structure AdainResBlk1dSame (inC outC styleDim : Nat) where
   conv1 : WNConv1dParams (device := device) inC outC 3 1 1 1
   conv2 : WNConv1dParams (device := device) outC outC 3 1 1 1
   norm1 : AdaIN1d (device := device) styleDim inC
   norm2 : AdaIN1d (device := device) styleDim outC
   shortcut : Shortcut (device := device) inC outC
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace AdainResBlk1dSame
 
@@ -859,7 +856,7 @@ structure AdainResBlk1dUp (inC outC styleDim : Nat) where
   norm1 : AdaIN1d (device := device) styleDim inC
   norm2 : AdaIN1d (device := device) styleDim outC
   shortcut : Shortcut (device := device) inC outC
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace AdainResBlk1dUp
 
@@ -1093,7 +1090,7 @@ structure GenResUnit (styleDim channels kernel dilation : Nat) where
   norm2 : AdaIN1d (device := device) styleDim channels
   alpha1 : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device }
   alpha2 : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace GenResUnit
 
@@ -1133,7 +1130,7 @@ structure GeneratorAdaINResBlock (styleDim channels kernel d0 d1 d2 : Nat) where
   u0 : GenResUnit (device := device) styleDim channels kernel d0
   u1 : GenResUnit (device := device) styleDim channels kernel d1
   u2 : GenResUnit (device := device) styleDim channels kernel d2
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace GeneratorAdaINResBlock
 
@@ -1333,7 +1330,7 @@ structure GeneratorStageDebugOutput where
   xUp : ShapePackedTensor .Float32 device
   xMix : ShapePackedTensor .Float32 device
   xOut : ShapePackedTensor .Float32 device
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 structure GeneratorDebugOutput where
   harSource : ShapePackedTensor .Float32 device
@@ -1344,7 +1341,7 @@ structure GeneratorDebugOutput where
   phaseRaw : ShapePackedTensor .Float32 device
   spec : ShapePackedTensor .Float32 device
   audio : ShapePackedTensor .Float32 device
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace GeneratorStage
 
@@ -1663,7 +1660,7 @@ structure KittenTTSDurationPrediction where
   durVals : Array Float
   predDurations : Array Nat
   alignmentFrames : Nat
-  deriving Inhabited, Repr
+  deriving Repr
 
 structure Model (cfg : KittenTTSConfig) where
   bert : KittenAlbert (device := device) cfg.nToken cfg.plbert

@@ -50,7 +50,7 @@ structure RetryPolicy where
   backoffMultiplier : Float := 2.0
   /-- Maximum delay cap in milliseconds -/
   maxDelayMs : Nat := 60000
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 /-- Calculate delay for a given attempt using exponential backoff -/
 def RetryPolicy.delayForAttempt (policy : RetryPolicy) (attempt : Nat) : Nat :=
@@ -65,7 +65,7 @@ inductive StageStatus where
   | running
   | completed
   | failed (error : String)
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 instance : Lean.ToJson StageStatus where
   toJson
@@ -100,7 +100,7 @@ structure StageInfo where
   metrics : List (String × String) := []
   /-- Number of retry attempts made -/
   retryCount : Nat := 0
-  deriving Repr, Inhabited
+  deriving Repr
 
 instance : Lean.ToJson StageInfo where
   toJson info := .mkObj [
@@ -180,7 +180,6 @@ structure Report where
   sections : Array ReportSection := #[]
   /-- Start timestamp -/
   startTime : Nat
-  deriving Inhabited
 
 /-- Create a new report -/
 def Report.create (baseDir : String) : IO Report := do
@@ -238,7 +237,7 @@ structure PipelineCheckpoint where
   runId : String
   /-- `repr config` captured at save time to prevent cross-config stage skipping. -/
   configRepr : String := ""
-  deriving Repr, Inhabited
+  deriving Repr
 
 instance : Lean.ToJson PipelineCheckpoint where
   toJson cp := .mkObj [
@@ -363,7 +362,7 @@ structure PipelineConfig where
   failFast : Bool := true
   /-- Run identifier for this pipeline execution -/
   runId : String := ""
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 /-- Pipeline execution state -/
 structure PipelineState where
@@ -381,7 +380,6 @@ structure PipelineState where
   worldSize : Nat := 1
   /-- Logging handlers -/
   logHandlers : Log.Handlers := {}
-  deriving Inhabited
 
 /-- Check if this is the master rank -/
 def PipelineState.isMaster (state : PipelineState) : Bool :=
@@ -517,11 +515,11 @@ def await (task : BackgroundTask α) : PipelineM α := do
 /-- Record metrics for the current stage -/
 def recordMetrics (metrics : List (String × String)) : PipelineM Unit := do
   let state ← get
-  if state.stages.size > 0 then
+  if let some last := state.stages.back? then
     let lastIdx := state.stages.size - 1
     let stages := state.stages.modify lastIdx fun info =>
       { info with metrics := info.metrics ++ metrics }
-    let stageName := state.stages[lastIdx]!.name
+    let stageName := last.name
     let report := state.report.logMetrics stageName metrics
     set { state with stages := stages, report := report }
     if state.isMaster then

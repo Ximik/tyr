@@ -49,7 +49,6 @@ structure Args where
   beamSize : Nat := 1
   noTimestamps : Bool := true
   noFallback : Bool := true
-  deriving Inhabited
 
 -- ============================================================================
 -- Arg parsing

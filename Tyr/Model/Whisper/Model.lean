@@ -430,7 +430,6 @@ def decode {batch seq encSeq : Nat}
 /-- Self-attention KV caches of every decoder layer, each holding `len` tokens. -/
 structure SelfKVCaches (cfg : WhisperConfig) (batch cap len : Nat) (dtype : DType := .Float32) where
   layers : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch cap len)
-  deriving Inhabited
 
 /-- Initialize one self-attention KV cache per decoder layer. -/
 def initLayerKVCaches {batch : Nat}

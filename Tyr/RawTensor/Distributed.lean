@@ -12,7 +12,7 @@ inductive ReduceOp where
   | product : ReduceOp
   | min     : ReduceOp
   | max     : ReduceOp
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 /-- Initialize the distributed process group.
 

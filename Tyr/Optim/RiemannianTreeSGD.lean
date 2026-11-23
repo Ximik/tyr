@@ -15,7 +15,7 @@ structure StepDiagnostics where
   innerConditionEstimate : Float := 0.0
   residualNorm : Float := 0.0
   updateNorm : Float := 0.0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Result of one tree-structured Riemannian update. -/
 structure StepResult (Params : Type) (s : Shape) where

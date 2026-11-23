@@ -47,7 +47,7 @@ definitionally interchangeable. `Tensor.raw` exposes the unindexed handle;
 device, and aborts on a mismatch. Every index is required and exact. Runtime-selected dtypes and devices remain in dependent
 packages rather than weakening the tensor contract. `zerosFor` accepts a
 specification with `DType.ConstantSupported` evidence and supplies the native
-zero factory used by the equally constrained `Inhabited` instance.
+zero factory.
 
 Runtime representation casts are private **unsafe** implementations behind
 opaque public declarations. Their safety does not depend on name privacy:

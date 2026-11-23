@@ -44,7 +44,7 @@ structure Config where
   seed : UInt64 := 42
   /-- Shuffle documents within each rank-local file partition each epoch. -/
   shuffle : Bool := true
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Validate the batch token count before it reaches native code.
     `extra` is used for the additional GPT target token in each row. -/
@@ -395,7 +395,7 @@ structure StreamCursor where
   epoch : Nat
   globalStep : Nat
   batchCount : Nat
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 private def streamSeed (config : Config) (rank : Nat) (pathIdx : Nat) : Option UInt64 :=
   if config.shuffle then some (lcgNext (config.seed + rank.toUInt64) + pathIdx.toUInt64) else none

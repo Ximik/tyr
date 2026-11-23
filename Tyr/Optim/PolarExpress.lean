@@ -21,7 +21,7 @@ structure Config where
   numIters : Nat := 5
   /-- Whether to use split baddbmm for memory efficiency (advanced) -/
   splitBaddbmm : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Apply Polar Express orthogonalization to a gradient matrix.
 

@@ -28,14 +28,14 @@ variable {d : DType} {dev : Device} [DType.RealFloating d]
 inductive MatrixOptimizerKind where
   | norMuon
   | manifoldMuon
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 /-- Matrix manifold family for constrained matrix updates. -/
 inductive MatrixManifoldFamily where
   | stiefel
   | orthogonal
   | grassmann
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 /-- Configuration for dual optimizer setup -/
 structure Config where
@@ -93,7 +93,7 @@ structure Config where
   useModularBudget : Bool := false
   /-- Optional groupwise modular budget multipliers. -/
   budget : GroupBudget := {}
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Get Muon config from dual optimizer config -/
 def toMuonConfig (cfg : Config) : NorMuon.Config := {
@@ -121,7 +121,7 @@ structure MatrixBackendSpec where
   mlp : Option Config := none
   /-- Smear-gate matrix override. -/
   smearGate : Option Config := none
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Resolve per-label matrix backend configuration from a `MatrixBackendSpec`. -/
 def MatrixBackendSpec.configForLabel (spec : MatrixBackendSpec) (label : ParamLabel) : Config :=
@@ -180,7 +180,7 @@ structure GenericManifoldState (m n : Nat) (dtype : DType := .Float32)
   momentumBuffer : Option (Tensor ⟨#[m, n], dtype, device⟩) := none
   /-- Local step count for this parameter. -/
   step : Nat := 0
-  deriving Repr, Inhabited
+  deriving Repr
 
 instance {m n : Nat} {d : DType} {dev : Device} :
     TensorStruct (GenericManifoldState m n d dev) where

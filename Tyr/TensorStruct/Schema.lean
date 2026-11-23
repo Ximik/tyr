@@ -18,7 +18,7 @@ open Lean
 /-- Path to a structural leaf inside a `TensorStruct` value. -/
 structure TensorLeafPath where
   segments : Array String := #[]
-  deriving Repr, BEq, Inhabited, DecidableEq
+  deriving Repr, BEq, DecidableEq
 
 namespace TensorLeafPath
 
@@ -56,7 +56,7 @@ inductive TensorLeafRole where
   | diff
   | static
   | frozen
-  deriving Repr, BEq, Inhabited, DecidableEq
+  deriving Repr, BEq, DecidableEq
 
 /-- One structural leaf in a `TensorStruct` schema. -/
 structure TensorLeafSpec where
@@ -64,13 +64,13 @@ structure TensorLeafSpec where
   role : TensorLeafRole := .diff
   shape : Option (Array Nat) := none
   dtype : Option String := none
-  deriving Repr, BEq, Inhabited, DecidableEq
+  deriving Repr, BEq, DecidableEq
 
 /-- Structural schema for a `TensorStruct` value. -/
 structure TensorStructSchema where
   typeName : Name := Name.anonymous
   leaves : Array TensorLeafSpec := #[]
-  deriving Repr, Inhabited
+  deriving Repr
 
 namespace TensorStructSchema
 
@@ -102,7 +102,7 @@ Controls which tensor leaves participate in flatten/rebuild operations.
 inductive TensorLeafSelection where
   | diffOnly
   | diffAndFrozen
-  deriving Repr, BEq, Inhabited, DecidableEq
+  deriving Repr, BEq, DecidableEq
 
 namespace TensorLeafSelection
 

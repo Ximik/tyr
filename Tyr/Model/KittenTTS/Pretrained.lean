@@ -242,7 +242,7 @@ def loadFromPretrained
     (defaults : KittenTTSConfig := {})
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
-    (log : Handlers := default)
+    (log : Handlers := {})
     : IO PretrainedBundle := do
   let modelDir ← hub.resolvePretrainedDir source { revision := revision, cacheDir := cacheDir }
   let cfg0 ← KittenTTSConfig.loadFromPretrainedDir modelDir defaults

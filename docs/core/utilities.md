@@ -20,7 +20,6 @@ structure Handlers where
   onInfo : Sink := fun _ => pure ()
   onWarn : Sink := fun _ => pure ()
   onError : Sink := fun _ => pure ()
-  deriving Inhabited
 ```
 
 All sinks default to no-ops, so the library-side pattern is to accept `(log : Handlers := {})` and call `log.onInfo ...` etc. — checkpointing is a typical example (`Tyr/Checkpoint.lean`):

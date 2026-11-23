@@ -20,4 +20,10 @@ def assertThrows (action : IO α) (msgPattern : Option String := none) : IO Unit
         throw <| IO.userError
           s!"Assertion failed: exception '{message}' did not contain pattern '{pattern}'"
 
+/-- Element `i` of `xs`; a missing element fails the test. -/
+def get (xs : Array α) (i : Nat) : IO α :=
+  match xs[i]? with
+  | some x => pure x
+  | none => throw <| IO.userError s!"Assertion failed: index {i} out of bounds for size {xs.size}"
+
 end Tests

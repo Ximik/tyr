@@ -52,7 +52,7 @@ structure Cache (numLayers batch maxSeqLen numKvHeads headDim : Nat)
   seqLens : Array Nat
   /-- Maximum sequence length this cache can hold -/
   maxLen : Nat
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Initialize empty KV cache for given dimensions.
     `device` defaults to CPU; pass a device acquired with `Device.cuda n` so

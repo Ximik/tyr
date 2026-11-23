@@ -39,7 +39,7 @@ structure CORETaskConfig where
   numFewshot : Nat := 0
   /-- Delimiter between context and continuation -/
   continuationDelimiter : String := " "
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Default CORE task configurations matching the DCLM benchmark -/
 def defaultCOREConfigs : Array CORETaskConfig := #[

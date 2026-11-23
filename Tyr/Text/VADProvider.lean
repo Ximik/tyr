@@ -5,7 +5,7 @@ namespace Tyr.Text
 structure VADSignal where
   speechActive : Bool := true
   boundary : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 structure SileroProvider where
   device : torch.Device

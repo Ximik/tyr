@@ -6,7 +6,7 @@ structure ConsensusConfig where
   rollbackTokens : Nat := 2
   freezeAfterSteps : Nat := 4
   mutableTailTokensWhileSpeech : Nat := 6
-  deriving Repr, Inhabited
+  deriving Repr
 
 structure ConsensusState where
   cfg : ConsensusConfig := {}
@@ -15,13 +15,13 @@ structure ConsensusState where
   history : Array (Array UInt32) := #[]
   lastIds : Array UInt32 := #[]
   unchangedSteps : Nat := 0
-  deriving Repr, Inhabited
+  deriving Repr
 
 structure TextDelta where
   stableAppend : String := ""
   unstableText : String := ""
   fullText : String := ""
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def safeSub (a b : Nat) : Nat := if a >= b then a - b else 0
 

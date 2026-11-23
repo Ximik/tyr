@@ -20,7 +20,6 @@ example : True := by
 example : Device.CPU.kind = DeviceKind.CPU := rfl
 example : (Device.CPU == Device.CPU) = true := rfl
 example : decide (Device.CPU = Device.CPU) = true := rfl
-example : (default : Device) = Device.CPU := rfl
 
 namespace Tests.TestDeviceAcquisition
 

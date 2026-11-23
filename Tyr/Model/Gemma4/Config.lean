@@ -15,7 +15,7 @@ namespace torch.gemma4
 inductive LayerType where
   | slidingAttention
   | fullAttention
-  deriving Repr, Inhabited, BEq, DecidableEq
+  deriving Repr, BEq, DecidableEq
 
 namespace LayerType
 
@@ -50,7 +50,7 @@ def kvSharingValid (types : Array LayerType) (numLayers shared : Nat) : Bool :=
 inductive FullSize where
   | same
   | distinct (size : PosNat)
-  deriving Repr, Inhabited, BEq, DecidableEq
+  deriving Repr, BEq, DecidableEq
 
 /-- The size given the sliding-layer size. -/
 def FullSize.value (sliding : Nat) : FullSize → Nat

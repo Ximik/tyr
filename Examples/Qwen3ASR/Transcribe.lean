@@ -21,7 +21,6 @@ structure Args where
   streamDecodeMode : StreamingDecodeMode := .rollingWindow
   maxInferenceBatchSize : Option Nat := none
   maxNewTokens : Nat := 1024
-  deriving Inhabited
 
 private def parseNatArg (name : String) (v : String) : IO Nat := do
   match v.toNat? with
@@ -258,7 +257,9 @@ def runMain (argv : List String) : IO UInt32 := do
         (hBatch := hBatch)
         (returnTimeStamps := args.returnTimeStamps)
         (maxNewTokens := args.maxNewTokens)
-      pure (outs.getD 0 default)
+      match outs[0]? with
+      | some out => pure out
+      | none => throw <| IO.userError "transcription returned no result"
   IO.println s!"LANG={out.language}"
   IO.println "TEXT_BEGIN"
   IO.println out.text

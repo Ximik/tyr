@@ -86,7 +86,7 @@ structure ModelEnvState where
   vocabSize : Nat := 65536
   tokenizerMaxChars : Nat := 2000000000
   tokenizerDocCap : Nat := 10000
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Pipeline-wide environment state. -/
 structure PipelineEnvState where
@@ -99,7 +99,7 @@ structure PipelineEnvState where
   enableRL : Bool := false
   wandbRun : String := "dummy"
   wandbEnabled : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Pretraining environment state. -/
 structure PretrainEnvState where
@@ -114,7 +114,7 @@ structure PretrainEnvState where
   textColumn : String := "text"
   tokenizerBatchSize : Nat := 128
   evalTokens : Nat := 10485760
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Midtraining environment state. -/
 structure MidtrainEnvState where
@@ -126,7 +126,7 @@ structure MidtrainEnvState where
   totalBatchSizeTokens : Nat := 524288
   checkpointInterval : StepInterval := 811
   evalTokens : Nat := 10485760
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- SFT environment state. -/
 structure SFTEnvState where
@@ -151,7 +151,7 @@ structure RLEnvState where
 structure EvalEnvState where
   coreMaxExamples : Option Nat := none
   identityConversationsPath : Option String := none
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Canonical environment snapshot for a NanoChat pipeline run. -/
 structure NanoChatEnvState where
@@ -805,13 +805,13 @@ private structure ParquetTokenStreamCursor where
   buffer : Array UInt64 := #[]
   consumed : Nat := 0
   epoch : Nat := 0
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 /-- Rank-local pretraining stream cursor payload persisted alongside checkpoints. -/
 private structure PretrainStreamCursors where
   train : ParquetTokenStreamCursor
   val : ParquetTokenStreamCursor
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 private def ParquetTokenStream.captureCursor (s : ParquetTokenStream) : ParquetTokenStreamCursor := {
   fileIdx := s.fileIdx
@@ -1269,13 +1269,13 @@ private structure TaskTokenStreamCursor where
   steps : Nat := 0
   lastWrapped : Bool := false
   lastProgress : Float := 0.0
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 /-- Rank-local midtraining stream cursor payload persisted alongside checkpoints. -/
 private structure MidtrainStreamCursors where
   train : TaskTokenStreamCursor
   val : TaskTokenStreamCursor
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 private def captureTaskTokenStreamCursor (s : TaskTokenStream b n) : TaskTokenStreamCursor := {
   cursor := s.cursor

@@ -31,7 +31,7 @@ inductive ParamLabel where
   | lmHead      : ParamLabel  -- Language model head
   | scalars     : ParamLabel  -- Learnable scalar parameters
   | valueEmbed  : ParamLabel  -- Value embeddings
-  deriving Repr, BEq, Hashable, Inhabited
+  deriving Repr, BEq, Hashable
 
 /-- NorMuon configuration -/
 structure Config where
@@ -51,10 +51,6 @@ structure Config where
   /-- World size for distributed (set automatically if distributed=true) -/
   worldSize : Nat := 1
   deriving Repr
-
-instance : Inhabited Config where
-  default := { lr := 0.023, weightDecay := 1.2, momentum := 0.95, beta2 := 0.95,
-               numIters := 5, distributed := false, worldSize := 1 }
 
 /-- State for a single parameter in NorMuon -/
 structure ParamState (σ : StaticSpec) where

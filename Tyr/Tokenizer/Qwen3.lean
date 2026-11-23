@@ -64,7 +64,6 @@ structure QwenTokenizer where
   padToken : TokenId
   /-- Whether text is put in Unicode Normalization Form C before splitting. -/
   nfc : Bool
-  deriving Inhabited
 
 /-- Build a length-descending list of special tokens (for greedy matching). -/
 private def sortSpecials (specials : Array String) : Array String := Id.run do

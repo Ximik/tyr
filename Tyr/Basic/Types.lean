@@ -67,7 +67,7 @@ inductive DType where
 | Int7
 | Float8E8M0FNU
 | Float4E2M1FNX2
-deriving Repr, Inhabited, BEq, DecidableEq
+deriving Repr, BEq, DecidableEq, Nonempty
 
 /-- Every concrete ScalarType in the pinned PyTorch 2.10 runtime, excluding
 its Undefined/NumOptions sentinels. Recognition does not imply that a backend
@@ -216,7 +216,7 @@ inductive DeviceKind where
 | CUDA : Nat → DeviceKind
 | CPU
 | MPS
-deriving Repr, Inhabited, BEq, DecidableEq
+deriving Repr, BEq, DecidableEq
 
 /-- Parse the PyTorch device spellings `cpu`, `mps`, `cuda` (ordinal 0) and
 `cuda:<ordinal>`. -/
@@ -256,7 +256,7 @@ def kind (device : Device) : DeviceKind := device.val
 @[match_pattern]
 def CPU : Device := ⟨.CPU, trivial⟩
 
-instance : Inhabited Device := ⟨CPU⟩
+instance : Nonempty Device := ⟨CPU⟩
 
 instance : Repr Device where
   reprPrec device precedence := reprPrec device.kind precedence

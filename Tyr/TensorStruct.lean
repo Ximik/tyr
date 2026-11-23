@@ -156,8 +156,6 @@ structure Static (α : Type) where
   val : α
   deriving Repr, BEq, Hashable
 
-instance [Inhabited α] : Inhabited (Static α) := ⟨⟨default⟩⟩
-
 /-- Coercion from α to Static α -/
 instance : Coe α (Static α) := ⟨Static.mk⟩
 
@@ -259,8 +257,6 @@ instance {σ : StaticSpec} : TensorStruct (Tensor σ) where
 /-- A heterogeneous shape carrier whose leaves retain their dtype and concrete device. -/
 abbrev ShapePackedTensor (dtype : DType) (device : Device) :=
   Sigma fun shape : Shape => Tensor { shape, dtype, device }
-
-instance {dtype : DType} {device : Device} [DType.ConstantSupported dtype device] : Inhabited (ShapePackedTensor dtype device) := ⟨⟨#[], default⟩⟩
 
 instance {dtype : DType} {device : Device} : TensorStruct (ShapePackedTensor dtype device) where
   map f x := ⟨x.1, f x.2⟩

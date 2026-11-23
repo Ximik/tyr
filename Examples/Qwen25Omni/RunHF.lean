@@ -30,7 +30,6 @@ structure Args where
   batchSize : Nat := 1
   maxNewTokens : Nat := 64
   showHelp : Bool := false
-  deriving Inhabited
 
 private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := do
   match xs with

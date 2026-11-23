@@ -32,7 +32,7 @@ structure TensorSchema where
   shape : Shape
   /-- For directory sources this is the shard filename; for single-file sources it is empty. -/
   sourceFile : String := ""
-  deriving Inhabited, Repr, BEq
+  deriving Repr, BEq
 
 -- Dimensions stay string-encoded, the format schema files were written in when shapes were `UInt64`.
 instance : ToJson TensorSchema where
@@ -58,7 +58,7 @@ structure Schema where
   source : String
   sourceIsDirectory : Bool
   tensors : Array TensorSchema
-  deriving Inhabited, Repr, ToJson, FromJson
+  deriving Repr, ToJson, FromJson
 
 /-- Look up a tensor schema by exact tensor name. -/
 def Schema.find? (schema : Schema) (tensorName : String) : Option TensorSchema :=

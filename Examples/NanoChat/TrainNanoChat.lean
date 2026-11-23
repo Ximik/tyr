@@ -39,7 +39,7 @@ structure TrainEnvState where
   masterAddr? : Option String := none
   masterPort? : Option Nat := none
   requestedDevice? : Option String := none
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Resolve distributed/device env vars once into a typed structure. -/
 def loadTrainEnvState : IO TrainEnvState := do
@@ -74,7 +74,7 @@ structure Args where
   localRank : Nat := 0
   /-- Run in debug mode with small model -/
   debug : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Parse args from command line -/
 def parseArgs (args : List String) : Args :=

@@ -146,7 +146,7 @@ structure TaskConfig where
   step : Nat := 1
   /-- Random seed for shuffling -/
   seed : UInt64 := 42
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-! ## ARC Task (AI2 Reasoning Challenge) -/
 
@@ -156,7 +156,7 @@ structure ARCExample where
   choices : Array String
   labels : Array String  -- e.g., ["A", "B", "C", "D"]
   answerKey : String     -- e.g., "A"
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Parse ARC example from JSON -/
 def ARCExample.fromJson? (json : Lean.Json) : Option ARCExample := do
@@ -177,7 +177,7 @@ structure ARCTask where
   examples : Array ARCExample
   /-- Configuration -/
   config : TaskConfig
-  deriving Repr, Inhabited
+  deriving Repr
 
 def ARCTask.size (task : ARCTask) : Nat :=
   let stop := task.config.stop.getD task.examples.size
