@@ -205,12 +205,6 @@ def defaultEosTokenIds : Array tokenizer.TokenId := #[151645, 151643]
 
 namespace Qwen3ASRConfig
 
-def getTextConfig (cfg : Qwen3ASRConfig) : TextConfig :=
-  cfg.thinkerConfig.textConfig
-
-def getAudioConfig (cfg : Qwen3ASRConfig) : AudioEncoderConfig :=
-  cfg.thinkerConfig.audioConfig
-
 end Qwen3ASRConfig
 
 end torch.qwen3asr

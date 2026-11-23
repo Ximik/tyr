@@ -51,12 +51,6 @@ structure WhisperConfig where
 
 namespace WhisperConfig
 
-def encoderHeadDim (cfg : WhisperConfig) : Nat :=
-  cfg.dModel / cfg.encoderAttentionHeads
-
-def decoderHeadDim (cfg : WhisperConfig) : Nat :=
-  cfg.dModel / cfg.decoderAttentionHeads
-
 def conv2OutputSeq (frames : Nat) : Nat :=
   (frames + 2 - (3 - 1) - 1) / 2 + 1
 

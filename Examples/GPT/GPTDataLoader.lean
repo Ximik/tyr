@@ -148,16 +148,4 @@ def SequentialBatchIterator.next {n b s : Nat} (iter : SequentialBatchIterator n
     }
     (some (input, target), newIter)
 
-def loadShakespeareData (trainPath valPath : String) (batchSize seqLen : Nat)
-    : IO (Σ n, SequentialBatchIterator n batchSize seqLen × Option (Σ m, SequentialLoader m)) := do
-  let ⟨nTrain, trainLoader⟩ ← SequentialLoader.fromFile trainPath
-  let trainIter := SequentialBatchIterator.new trainLoader batchSize seqLen
-  let valExists ← data.fileExists valPath
-  let valLoader ← if valExists then do
-    let ⟨nVal, loader⟩ ← SequentialLoader.fromFile valPath
-    pure (some ⟨nVal, loader⟩)
-  else
-    pure none
-  return ⟨nTrain, trainIter, valLoader⟩
-
 end torch.DataLoader

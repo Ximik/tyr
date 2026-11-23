@@ -55,11 +55,6 @@ structure Downsample (channels : Nat) (dtype : DType := .Float32) where
 
 namespace Downsample
 
-/-- Initialize downsample block -/
-def init (channels : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Downsample (device := device) (dtype := dtype) channels) := do
-  let conv ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 3 1
-  pure { conv }
-
 /-- Forward pass: strided conv for 2× downsample.
     Input: [batch, channels, height, width]
     Output: [batch, channels, ceil(height/2), ceil(width/2)] -/

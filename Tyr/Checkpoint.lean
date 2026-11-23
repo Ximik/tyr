@@ -159,10 +159,6 @@ any model structure containing tensors. Tensors are saved with auto-generated
 sequential names based on traversal order.
 -/
 
-/-- State for tracking tensor index during save -/
-structure SaveState where
-  index : IO.Ref Nat
-
 /-- Save all tensors in a TensorStruct to a directory with a namePrefix -/
 def saveParams [TensorStruct α]
     (params : α)

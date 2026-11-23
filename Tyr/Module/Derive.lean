@@ -67,20 +67,6 @@ instance : TensorStruct MyLayer where
 ```
 -/
 
-/-! ## Helper Functions for Manual Instances -/
-
-/-- Helper: map a function over a tensor field -/
-@[inline] def mapTensor {σ : StaticSpec}
-    (f : ∀ {σ}, Tensor σ → Tensor σ) (t : Tensor σ) : Tensor σ := f t
-
-/-- Helper: map a function over a frozen field -/
-@[inline] def mapFrozen {σ : StaticSpec}
-    (f : ∀ {σ}, Tensor σ → Tensor σ) (fr : Frozen σ) : Frozen σ :=
-  Frozen.map f fr
-
-/-- Helper: skip a static field -/
-@[inline] def mapStatic {α : Type} (_ : ∀ {σ}, Tensor σ → Tensor σ) (s : Static α) : Static α := s
-
 /-! ## Instance for Single Tensor
 
 A single tensor is trivially a TensorStruct.

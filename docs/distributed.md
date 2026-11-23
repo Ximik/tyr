@@ -62,7 +62,6 @@ def allGather {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
 
 structure WorkHandle where id : UInt64
 def wait (handle : WorkHandle) : IO Unit
-def WorkHandle.isCompleted (handle : WorkHandle) : IO Bool
 def waitAll (handles : Array WorkHandle) : IO Unit
 ```
 
@@ -122,10 +121,10 @@ native declarations in `Tyr/RawTensor/Distributed.lean`) — orthogonalization m
 see [Optimization](optimization.md).
 
 ### Sharding: `torch.Sharding` (`Tyr/Sharding.lean`)
+
 `shardSize` and `shardOffset` give one shard's size and start when a dimension
 of `fullSize` is split across `numShards` ranks; the first
 `fullSize % numShards` shards take one extra element.
-
 
 Sharding is expressed at the type level: `shardedShape` projects a compile-time
 `Shape` to this rank's shard shape, so a `ShardedTensor`'s local data has a
@@ -194,12 +193,8 @@ Stage API:
 
 ```lean
 def stage (name : String) (action : PipelineM Unit) : PipelineM Unit
-def stageWithRetry (name : String) (policy : RetryPolicy) (action : PipelineM Unit) : PipelineM Unit
 def recordMetrics (metrics : List (String × String)) : PipelineM Unit
-def log / logError (msg : String) : PipelineM Unit        -- master rank only
-def masterOnly (action : PipelineM α) (default : α) : PipelineM α
-def syncBarrier : PipelineM Unit
-def checkAllRanksHealthy : PipelineM Bool
+def log (msg : String) : PipelineM Unit        -- master rank only
 ```
 
 Each `stage` records a `StageInfo` (status `pending | running | completed |
@@ -215,13 +210,11 @@ completion the checkpoint file is removed.
 Entry points:
 
 ```lean
-def runPipeline (config : PipelineConfig) (action : PipelineM α) : IO α
 def runPipelineWithHandlers (config) (logHandlers : LogHandlers := {}) (action) : IO α
-def withDistributed (config : PipelineConfig) (action : PipelineM α) : IO α
 def withDistributedWithHandlers (config) (logHandlers := {}) (action) : IO α
 ```
 
-`Pipeline.withDistributed` (not to be confused with `dist.withDistributed`)
+`Pipeline.withDistributedWithHandlers` (not to be confused with `dist.withDistributed`)
 reads the torchrun environment — `WORLD_SIZE`, `RANK`, `LOCAL_RANK`,
 `MASTER_ADDR`, `MASTER_PORT` — and initializes NCCL only when `WORLD_SIZE > 1`
 (`Tyr/Pipeline.lean`). `resolveTrainingDevice`
@@ -229,8 +222,7 @@ reads the torchrun environment — `WORLD_SIZE`, `RANK`, `LOCAL_RANK`,
 `LOCAL_RANK` to the CUDA ordinal. Logging is silent unless you pass
 `LogHandlers` (`onInfo`/`onError` callbacks, `Tyr/Pipeline.lean`).
 
-There is a background-task API (`background`, `await`, `backgroundTracked`,
-`awaitTrackedOrThrow`, `Tyr/Pipeline.lean`). `spawnBackground`
+There is a background-task API (`background`, `await`, `Tyr/Pipeline.lean`). `spawnBackground`
 (`Tyr/Pipeline.lean`) starts the action immediately via `IO.asTask`
 and defers the wait to `await`, so these tasks run concurrently. At the end,
 `finalizePipeline` writes `report.md` via the `Report` accumulator
@@ -253,7 +245,7 @@ def appendCheckpointEvent (artifacts) (event : CheckpointEvent) : IO Unit
 ```
 
 `MetricEvent` carries a `scope`, optional `step`, and `MetricFields` built
-with `metricStr` / `metricFloat` / `metricNat` / `metricUInt64` / `metricBool`;
+with `metricStr` / `metricFloat` / `metricNat`;
 a zero `timestampMs` is filled with `IO.monoMsNow`. Evaluator scheduling:
 
 ```lean
@@ -316,8 +308,7 @@ the file header advertising a dual Muon/Adam optimizer.
 
 Data plumbing: `makeTaskDataGenerator (iter : TaskIterator) (maxLen)
 (padTokenId) : IO (IO (SFTBatch (device := .CPU)))` adapts the task-mixture iterator from
-`Tyr.Data.Task` (see [Data](data.md)); `prepareSFTBatch` builds the shifted
-input/target/mask triple directly. `Callbacks` (`onTrainStep`, `onValidation`)
+`Tyr.Data.Task` (see [Data](data.md)). `Callbacks` (`onTrainStep`, `onValidation`)
 compose via `Callbacks.combine`; `artifactCallbacks artifacts "sft"` logs to
 the ledger under `sft/train` and `sft/eval`.
 
@@ -334,8 +325,7 @@ def computePGLoss {device : Device} (logProbs : Tensor { shape := #[b, t], dtype
     (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : Tensor { shape := #[], dtype := .Float32, device := device }
 ```
 
-Rewards are pluggable; `mathReward` parses the GSM8K `#### <answer>` marker,
-`exactMatchReward` is a string compare. Rollout generation is callback-driven
+Rewards are pluggable; `mathReward` parses the GSM8K `#### <answer>` marker. Rollout generation is callback-driven
 — you supply `generateOneFn : Array UInt64 → IO UInt64` (context → next
 token); `createRolloutBatch` samples `numSamples` completions per prompt and
 scores them. `GRPOConfig.temperature`/`topK` are plumbed but never applied —
@@ -365,7 +355,7 @@ at `config.matrixLr * getLrMultiplier ...` (`Tyr/RL/GRPO.lean`).
 | Task | API | Where |
 |---|---|---|
 | Init/teardown a process group | `dist.initProcessGroup`, `dist.destroyProcessGroup`, `dist.setCudaDevice`, `dist.barrier` | `Tyr/Distributed.lean` |
-| Rank/world queries | `dist.getRankAndWorldSize`, `dist.isMaster`, `dist.isInitialized` | `Tyr/Distributed.lean` |
+| Rank/world queries | `dist.getRankAndWorldSize`, `dist.isInitialized` | `Tyr/Distributed.lean` |
 | Sync parameters across ranks | `dist.broadcastParams` | `Tyr/Distributed.lean` |
 | Average gradients across ranks | `dist.allReduceGrads grads .avg` | `Tyr/Distributed.lean` |
 | Raw collectives | `dist.allReduce`, `dist.broadcast`, `dist.reduceScatter`, `dist.allGather` (+ `*Async`, `WorkHandle`) | `Tyr/Distributed.lean` |

@@ -41,32 +41,6 @@ structure PretrainingConfig where
   learningRate : Float := 3e-4
   deriving Repr
 
-/-- Default config for small-scale pretraining (testing) -/
-def PretrainingConfig.small : PretrainingConfig := {
-  modelConfig := torch.gpt.Config.nanogpt_cpu_shakespeare
-  deviceBatchSize := 4
-  seqLen := 512
-  totalSteps := 1000
-  warmupSteps := 50
-  evalInterval := 100
-  logInterval := 10
-}
-
-/-- Default config for medium-scale pretraining -/
-def PretrainingConfig.medium : PretrainingConfig := {
-  modelConfig := {
-    vocab_size := 32768
-    block_size := 2048
-    n_embd := 768
-    n_head := 12
-    n_layer := 12
-    dropout := 0.0
-  }
-  deviceBatchSize := 8
-  totalSteps := 50000
-  warmupSteps := 500
-}
-
 /-! ## Training State -/
 
 /-- Training state for checkpointing -/
@@ -184,32 +158,5 @@ def runPretraining (cfg : PretrainingConfig)
 
   IO.println s!"Training complete! Final running loss: {state.runningLoss}"
   return currentParams
-
-/-! ## Entry Point -/
-
-/-- Main pretraining entry point -/
-def main : IO Unit := do
-  IO.println "=== Tyr Base Pretraining ==="
-
-  let device ← getBestDevice
-  IO.println s!"Using device: {repr device}"
-
-  -- Use small config for testing
-  let cfg := PretrainingConfig.small
-  IO.println s!"Config: layers={cfg.modelConfig.n_layer}, d_model={cfg.modelConfig.n_embd}"
-
-  -- Generate random training data for testing
-  IO.println "Generating random training data..."
-  let numTokens : Nat := 50000
-  let trainData ← Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[numTokens]
-
-  -- No validation data for simple test
-  let valData : Option (Tokens (device := .CPU) #[numTokens]) := none
-
-  -- Run training
-  IO.println "Starting training..."
-  let _finalParams ← runPretraining cfg numTokens trainData valData device
-
-  IO.println "Done!"
 
 end Examples.GPT.Pretraining

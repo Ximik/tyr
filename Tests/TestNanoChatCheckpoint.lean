@@ -208,11 +208,6 @@ private def metadata (tokens : Nat) : CheckpointMetadata := {
   assertTrue (change.isFinite && change > 0) "Optimizer updates the output head"
 
 
-def run : IO Unit := do
-  testNanoChatSnapshotRestoresOptimizerUpdate
-  testNanoChatSnapshotReplacementAndCorruption
-  testNanoChatLegacyFlatCheckpoint
-
 @[test] def testNanoChatIntervalsRoundTripAndRejectZero : IO Unit := do
   let hp : Hyperparameters := { valInterval := none, logInterval := 7 }
   let json := Lean.toJson hp

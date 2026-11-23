@@ -24,23 +24,15 @@ namespace tokenizer.laguna
 
 open Lean
 
-/-- `〈|EOS|〉` id: both BOS and EOS for Laguna (bos_token == eos_token). -/
-def eosTokenId : TokenId := 2
 /-- BOS prepended by the post-processor to every encoding (same token as EOS). -/
 def bosTokenId : TokenId := 2
 /-- `〈|PAD|〉` id. -/
 def padTokenId : TokenId := 9
-/-- `〈|CLS|〉` id. -/
-def clsTokenId : TokenId := 10
-/-- `</assistant>` id: second EOS (generation stop token). -/
-def assistantEndTokenId : TokenId := 24
 
 /-- Surface form of the BOS/EOS token (U+3008/U+3009 angle brackets). -/
 def eosToken : String := "〈|EOS|〉"
 /-- Surface form of the PAD token. -/
 def padToken : String := "〈|PAD|〉"
-/-- Surface form of the second EOS token. -/
-def assistantEndToken : String := "</assistant>"
 
 /-- Default system message baked into chat_template.jinja. -/
 def defaultSystemMessage : String :=
@@ -439,9 +431,5 @@ def chatTemplate (prompt : String) (enableThinking : Bool := true) : String :=
   eosToken ++ "<system>" ++ defaultSystemMessage ++ "</system>\n" ++
   "<user>" ++ prompt ++ "</user>\n" ++
   "<assistant>" ++ (if enableThinking then "<think>" else "</think>")
-
-/-- Convert TokenId array to Int64 array (for tensor creation). -/
-def toInt64Array (tokens : Array TokenId) : Array Int64 :=
-  tokens.map (fun t => (t.toUInt64).toInt64)
 
 end tokenizer.laguna

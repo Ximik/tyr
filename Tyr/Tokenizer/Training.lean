@@ -294,31 +294,4 @@ This is a placeholder - actual implementation would use
 regex via FFI to a Rust/C++ library.
 -/
 
-/-- Simple word-level pretokenization (placeholder).
-    Real implementation would use regex patterns. -/
-def simplePretokenize (text : String) : Array String := Id.run do
-  -- Simple split on whitespace and keep punctuation separate
-  let mut tokens : Array String := #[]
-  let mut current := ""
-
-  for c in text.toList do
-    if c.isWhitespace then
-      if !current.isEmpty then
-        tokens := tokens.push current
-        current := ""
-      tokens := tokens.push c.toString
-    else if c.isAlphanum then
-      current := current.push c
-    else
-      -- Punctuation: emit current word, then punctuation
-      if !current.isEmpty then
-        tokens := tokens.push current
-        current := ""
-      tokens := tokens.push c.toString
-
-  if !current.isEmpty then
-    tokens := tokens.push current
-
-  return tokens
-
 end tokenizer

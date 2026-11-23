@@ -27,10 +27,6 @@ def ofString? (s : String) : Option LayerType :=
   else
     none
 
-def toString : LayerType → String
-  | .slidingAttention => "sliding_attention"
-  | .fullAttention => "full_attention"
-
 end LayerType
 
 instance : TensorStruct LayerType where
@@ -43,10 +39,6 @@ instance : TensorStruct LayerType where
 def defaultLayerTypes (numLayers interval : Nat) : Array LayerType :=
   Array.ofFn (n := numLayers) fun i =>
     if (i.val + 1) % interval == 0 || i.val + 1 == numLayers then .fullAttention else .slidingAttention
-
-@[simp] theorem defaultLayerTypes_size (numLayers interval : Nat) :
-    (defaultLayerTypes numLayers interval).size = numLayers := by
-  simp [defaultLayerTypes]
 
 /-- The last `shared` of `numLayers` layers reuse K/V from the last earlier layer of their
 attention kind; every such layer needs one. -/
@@ -344,9 +336,6 @@ def layerIntermediateSize (cfg : Gemma4Config) (layerIdx : Nat) : Nat :=
   else
     cfg.intermediate_size
 
-theorem firstKVSharedLayer_le (cfg : Gemma4Config) : firstKVSharedLayer cfg ≤ cfg.num_hidden_layers := by
-  unfold firstKVSharedLayer; split <;> omega
-
 /-- The earlier layer whose K/V a shared layer reads: the last non-shared layer of its type. -/
 def sharedSourceLayer? (cfg : Gemma4Config) (layerIdx : Nat) : Option (Fin layerIdx) :=
   let first := firstKVSharedLayer cfg
@@ -411,12 +400,9 @@ theorem kvSliding_le (cfg : Config) : cfg.num_key_value_heads * cfg.head_dim ≤
 
 theorem kvFull_le (cfg : Config) : fullNumKVHeads cfg * fullHeadDim cfg ≤ maxKVProjDim cfg :=
   Nat.mul_le_mul cfg.fullKVHeads_le_max cfg.fullHeadDim_le_max
-def fullRotaryDim (cfg : Config) : Nat := Gemma4Config.fullRotaryDim cfg
 def fullRotaryHalfDim (cfg : Config) : Nat := Gemma4Config.fullRotaryHalfDim cfg
 def maxIntermediateSize (cfg : Config) : Nat := Gemma4Config.maxIntermediateSize cfg
 def layerTypeAt (cfg : Config) (layerIdx : Nat) : LayerType := Gemma4Config.layerTypeAt cfg layerIdx
-def firstKVSharedLayer (cfg : Config) : Nat := Gemma4Config.firstKVSharedLayer cfg
-def isKVSharedLayer (cfg : Config) (layerIdx : Nat) : Bool := Gemma4Config.isKVSharedLayer cfg layerIdx
 def layerIntermediateSize (cfg : Config) (layerIdx : Nat) : Nat := Gemma4Config.layerIntermediateSize cfg layerIdx
 def sharedSourceLayer? (cfg : Config) (layerIdx : Nat) : Option (Fin layerIdx) :=
   Gemma4Config.sharedSourceLayer? cfg layerIdx

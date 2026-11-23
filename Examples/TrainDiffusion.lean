@@ -53,18 +53,6 @@ def tensorToArray {n : Nat} (t : Tokens #[n]) : IO (Array Int64) := do
 def tensorToFloatArray {n : Nat} (t : Activation #[n]) : IO (Array Float) :=
   t.toFloatArray
 
-/-- Decode multiple blocks from a batched tensor [numBlocks, seqLen] -/
-def decodeMultipleBlocks {numBlocks seqLen : Nat}
-    (tensor : Tokens #[numBlocks, seqLen]) : IO (Array String) := do
-  let mut results := #[]
-  for h : i in [:numBlocks] do
-    -- Extract row i: slice along batch dimension
-    let row : Tokens #[1, seqLen] := tensor.slice 0 i 1 (_bounds := by have := h.upper; simp at this ⊢; omega)
-    let rowFlat := Tensor.reshape row #[seqLen]
-    let arr ← tensorToArray rowFlat
-    results := results.push (asciiDecode arr)
-  return results
-
 /-- Render mask with confidence-based background color -/
 def renderMask (conf : Float) : String :=
   let bg := if conf > 0.7 then ansiBgGreen
@@ -85,15 +73,6 @@ def progressBar (current total : Nat) (width : Nat := 30) : String :=
   let bar := String.ofList (List.replicate filled '=') ++ ">" ++
              String.ofList (List.replicate (width - filled) ' ')
   s!"[{bar}]"
-
-/-- Move cursor to absolute position (1-indexed) -/
-def ansiMoveTo (row col : Nat) : String := s!"\x1b[{row};{col}H"
-
-/-- Save cursor position -/
-def ansiSaveCursor : String := "\x1b[s"
-
-/-- Restore cursor position -/
-def ansiRestoreCursor : String := "\x1b[u"
 
 /-- Animated generation of multiple blocks in sequence with continuity.
     Each block uses the last `overlap` tokens from the previous block as context,

@@ -315,9 +315,6 @@ deriving Repr, BEq
     if keepdim then s.set (Fin.mk dim h) 1 else s.eraseIdx dim h
   else s
 
-@[simp] def replaceAtDim (s : Shape) (dim : Nat) (newSize : Nat) : Shape :=
-  if h : dim < s.size then s.set (Fin.mk dim h) newSize else s
-
 /-- Compute output shape for unbinding: remove dimension at `dim` -/
 @[simp] def unbindShape (s : Shape) (dim : Nat) (h : dim < s.size) : Shape :=
   s.eraseIdx dim h

@@ -10,30 +10,6 @@ namespace Tests.Pipeline
 
 open torch.Pipeline
 
-/-! ## Float Assertion Helpers -/
-
-/-- Assert two floats are approximately equal within epsilon -/
-def assertFloatEq (actual expected : Float) (epsilon : Float := 0.001)
-    (msg : String := "") : IO Unit := do
-  let diff := Float.abs (actual - expected)
-  if diff > epsilon then
-    LeanTest.fail s!"{msg}: expected {expected}, got {actual} (diff {diff} > epsilon {epsilon})"
-
-/-- Assert a float is less than a threshold -/
-def assertFloatLt (actual threshold : Float) (msg : String := "") : IO Unit := do
-  if actual >= threshold then
-    LeanTest.fail s!"{msg}: expected {actual} < {threshold}"
-
-/-- Assert a float is greater than a threshold -/
-def assertFloatGt (actual threshold : Float) (msg : String := "") : IO Unit := do
-  if actual <= threshold then
-    LeanTest.fail s!"{msg}: expected {actual} > {threshold}"
-
-/-- Assert a float is in range [lo, hi] -/
-def assertFloatInRange (actual lo hi : Float) (msg : String := "") : IO Unit := do
-  if actual < lo || actual > hi then
-    LeanTest.fail s!"{msg}: expected {actual} in [{lo}, {hi}]"
-
 /-! ## RetryPolicy Tests -/
 
 @[test]

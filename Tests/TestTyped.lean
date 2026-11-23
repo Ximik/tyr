@@ -409,36 +409,6 @@ def testBroadcastOpsParity : IO Unit := do
   LeanTest.assertEqual packed.1 .Float32
   assertValid packed.2 "existential dtype keeps exact metadata"
 
-/-- Fully typed model layers: shape and dtype agree end to end, runtime
-    metadata matches the phantom claims, and values are sane. -/
-@[test]
-def testTypedLayers : IO Unit := do
-  -- Linear with bias: [2, 3] -> [2, 4] and [2, 5, 3] -> [2, 5, 4]
-  let lin ← Typed.Linear.init 3 4
-  let x2 := Tensor.ones #[2, 3]
-  assertValid (lin.forward2d x2) "typed Linear forward2d"
-  let x3 := Tensor.ones #[2, 5, 3]
-  assertValid (lin.forward3d x3) "typed Linear forward3d (affine)"
-  -- without bias the 3d path goes through linear3d
-  let linNb ← Typed.Linear.init 3 4 (withBias := false)
-  assertValid (linNb.forward3d x3) "typed Linear forward3d (no bias)"
-  -- RMSNorm: normalizing all-ones with unit weights gives ~1.0 everywhere
-  let rn ← Typed.RMSNorm.init 3
-  let y := rn.forward3d x3
-  assertValid y "typed RMSNorm forward3d"
-  let vals ← y.toFloatArray
-  LeanTest.assertEqual vals.size 30 "rmsnorm preserves numel"
-  for v in vals do
-    LeanTest.assertTrue ((v - 1.0).abs < 1e-3) s!"rmsnorm(ones) ≈ 1, got {v}"
-  -- bf16 layer: the f32 stability upcast is visible in the result type
-  -- (promote Float32 BFloat16 = Float32), and the runtime agrees
-  let rnBf : Typed.RMSNorm 3 .BFloat16 := { weight := (Tensor.ones #[3]).toBFloat16 }
-  let yBf := rnBf.forward2d x2.toBFloat16
-  assertValid yBf "typed RMSNorm bf16 upcasts to f32"
-  LeanTest.assertEqual yBf.raw.dtype DType.Float32
-    "rmsnorm computes in f32 regardless of layer dtype"
-  assertValid yBf.toBFloat16 "explicit cast back restores bf16"
-
 /-- Placement is part of every spec; admission checks the native device and
     preserving operations retain the device index. -/
 @[test]

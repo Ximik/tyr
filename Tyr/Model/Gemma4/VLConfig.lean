@@ -110,7 +110,6 @@ abbrev VLConfig := Gemma4VLConfig
 
 namespace VisionConfig
 
-@[simp] def in_channels (cfg : VisionConfig) : Nat := Gemma4VisionConfig.in_channels cfg
 @[simp] def patchDim (cfg : VisionConfig) : Nat := Gemma4VisionConfig.patchDim cfg
 
 end VisionConfig

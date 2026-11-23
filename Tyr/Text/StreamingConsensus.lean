@@ -135,11 +135,4 @@ def updateWithSignals
   }
   (st', { stableAppend, unstableText, fullText })
 
-def update
-    (st : ConsensusState)
-    (ids : Array UInt32)
-    (decode : Array UInt32 → String)
-    : ConsensusState × TextDelta :=
-  updateWithSignals st ids true false decode
-
 end Tyr.Text

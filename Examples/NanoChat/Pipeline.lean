@@ -1939,16 +1939,6 @@ def printBanner : PipelineM Unit := do
   log "     ████ █████░░████████ ████ █████░░██████ ░░██████  ████ █████░░███████  ░░█████"
   log "    ░░░░ ░░░░░  ░░░░░░░░ ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░ ░░░░░  ░░░░░░░░   ░░░░░"
 
-/-- Estimate training cost based on GPU type and duration -/
-def estimateCost (gpuType : String) (numGpus : Nat) (hoursEstimate : Float) : PipelineM Unit := do
-  let hourlyRate := match gpuType with
-    | "H100" => 3.00
-    | "A100" => 1.79
-    | "V100" => 0.55
-    | _ => 2.00
-  let totalCost := hourlyRate * numGpus.toFloat * hoursEstimate
-  log s!"Estimated cost: ${totalCost} ({numGpus}x {gpuType} @ ${hourlyRate}/GPU/hour)"
-
 /-! ## Full Pipeline -/
 
 /-- Run the complete NanoChat training pipeline -/

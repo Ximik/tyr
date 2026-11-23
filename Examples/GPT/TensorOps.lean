@@ -39,9 +39,5 @@ def embedding1d {t v e : Nat} (idx : Tokens (device := device) #[t])
     (weight : Activation (device := device) #[v,e]) : Activation (device := device) #[t,e] :=
   Tensor.embedding1d idx weight
 
-def crossEntropy {n c : Nat} (logits : Activation (device := device) #[n,c])
-    (targets : Tokens (device := device) #[n]) : Activation (device := device) #[] :=
-  Tensor.crossEntropy! logits targets
-
 end TensorOps
 end torch.gpt

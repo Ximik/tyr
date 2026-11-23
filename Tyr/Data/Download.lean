@@ -15,22 +15,6 @@ namespace torch.Data.Download
 
 open torch.Log
 
-/-! ## Configuration -/
-
-/-- Configuration for download operations -/
-structure DownloadConfig where
-  /-- Base cache directory -/
-  cacheDir : String := "~/.cache/nanochat"
-  /-- URL for CORE evaluation bundle -/
-  evalBundleUrl : String := "https://karpathy-public.s3.us-west-2.amazonaws.com/eval_bundle.zip"
-  /-- Maximum retry attempts for downloads -/
-  maxRetries : Nat := 5
-  /-- Initial backoff delay in milliseconds -/
-  initialBackoffMs : Nat := 1000
-  deriving Repr, Inhabited
-
-instance : Inhabited DownloadConfig := ⟨{}⟩
-
 /-! ## Path Utilities -/
 
 /-- Expand ~ to home directory -/

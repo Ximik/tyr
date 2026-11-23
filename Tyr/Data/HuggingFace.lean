@@ -17,14 +17,6 @@ open torch.Data.Download
 open torch.Data.Parquet (readParquetAsJson readRowGroupAsJson getParquetMetadata)
 open torch.Log
 
-/-- HuggingFace dataset configuration -/
-structure HFDatasetConfig where
-  repoId : String
-  subset : String := "default"
-  split : String := "train"
-  cacheDir : String := "~/.cache/huggingface"
-  deriving Repr, Inhabited
-
 /-- Read parquet file and return JSON objects per row using FFI.
     This uses the Apache Arrow library via C++ bindings. -/
 def readParquetToJson (filePath : String) (log : Handlers := {}) : IO (Array Lean.Json) := do
@@ -39,21 +31,6 @@ def readParquetToJson (filePath : String) (log : Handlers := {}) : IO (Array Lea
     | .error e =>
       log.onWarn s!"Warning: Failed to parse JSON: {e}"
   return jsons
-
-/-- Read parquet file row group by row group for large files.
-    More memory efficient than reading the entire file at once. -/
-def readParquetToJsonStreaming (filePath : String) : IO (Array Lean.Json) := do
-  let metadata ← getParquetMetadata filePath
-  let mut allJsons : Array Lean.Json := #[]
-
-  for rgIdx in [:metadata.numRowGroups] do
-    let jsonStrings ← readRowGroupAsJson filePath rgIdx
-    for jsonStr in jsonStrings do
-      match Lean.Json.parse jsonStr with
-      | .ok json => allJsons := allJsons.push json
-      | .error _ => pure ()
-
-  return allJsons
 
 /-- Load ARC dataset from HuggingFace -/
 def loadARC (subset : String) (split : String)
@@ -174,22 +151,6 @@ def loadSmolTalk (split : String)
     let part ← readParquetToJson file log
     rows := rows ++ part
   return rows
-
-/-- Load JSONL file from URL -/
-def loadJsonlFromUrl (url : String) (cacheDir : String) (filename : String)
-    (log : Handlers := {})
-    : IO (Array Lean.Json) := do
-  let expandedCacheDir ← expandHome cacheDir
-  let localPath := s!"{expandedCacheDir}/{filename}"
-  let _ ← downloadWithRetry url localPath 3 1000 log
-  let content ← IO.FS.readFile ⟨localPath⟩
-  let lines := content.splitOn "\n" |>.filter (!·.isEmpty)
-  let mut jsons : Array Lean.Json := #[]
-  for line in lines do
-    match Lean.Json.parse line with
-    | .ok json => jsons := jsons.push json
-    | .error _ => pure ()
-  return jsons
 
 /-- Load JSONL file from local path -/
 def loadJsonlFromFile (path : String) : IO (Array Lean.Json) := do

@@ -8,25 +8,14 @@
 
 Everything in `Tyr/Module/` lives in the `torch` namespace; everything in `Tyr/Modular/` lives in `Tyr.Modular`.
 
-### Tyr/Module: layers and the Module classes
+### Tyr/Module: layers and the Module class
 
-`Tyr/Module/Core.lean` defines three Equinox-style typeclasses over the `TensorStruct` parameter-tree substrate:
+`Tyr/Module/Core.lean` defines an Equinox-style typeclass over the `TensorStruct` parameter-tree substrate:
 
 ```lean
-class Module (M : Type) (In : Type) (Out : Type) where
-  [toTensorStruct : TensorStruct M]
+class Module (M : Type) (In : Type) (Out : Type) extends TensorStruct M where
   forward : M → In → Out
-
-class ModuleIO (M : Type) (In : Type) (Out : Type) where
-  [toTensorStruct : TensorStruct M]
-  forward : M → In → IO Out
-
-class ModuleCtx (M : Type) (Ctx : Type) (In : Type) (Out : Type) where
-  [toTensorStruct : TensorStruct M]
-  forward : M → Ctx → In → IO Out
 ```
-
-A blanket instance lifts any `Module` to `ModuleIO` (`Core.lean`). Application syntax is scoped infix: `m |> x` (pure) and `m |>! x` (IO), defined via `Module.apply` / `ModuleIO.apply` (`Core.lean`). `TrainingCtx` (`Core.lean`) bundles a `training : Bool` flag and `dropout_p : Float` with `train` / `eval` / `withDropout` constructors for context-passing modules.
 
 The concrete layers are plain structures indexed by `UInt64` dimensions, deriving `TensorStruct` and `ToModuleDisplay` (widget rendering, see `Tyr/Widget.lean`):
 
@@ -53,16 +42,12 @@ structure RMSNorm (dim : UInt64) (dtype : DType := .Float32)
 
 `Linear.init` uses Kaiming/He initialization (`std = sqrt(2 / in_dim)`) and marks every parameter as a trainable autograd leaf (`Linear.lean`); `LayerNorm.init` / `RMSNorm.init` do the same with ones/zeros. All three trainable initializers return `IO` so repeated equal initializations receive independent gradient identities. Each layer exposes explicit `forwardNd` functions plus `Module` instances for the common arities (see the API table below).
 
-`Affine.lean` provides an indexed affine map with `[input, output]` weights, `TensorStruct` and `Module` instances, and typed gradient extraction. Its forward operation is `input @ weight + bias`; `Linear` uses the transposed weight convention instead. `Conv2d.lean` has runtime hyperparameters with indexed weight and bias fields; initialization validates grouped-channel dimensions and retains dtype and device. It currently has no model call sites.
-
 ### Deriving parameter-tree instances
 
 `Tyr/Module/Derive.lean` registers two deriving handlers (`Derive.lean`):
 
 - `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector n α`, `Static α`, and `Frozen σ`; `Derive.lean` adds the pair instance `α × β`. Parametric structures (shape or type parameters) are supported.
 - `deriving Model` — one-shot derivation of `TensorStruct` + `ToTensorStructSchema` + `TensorStructFlatten` (`Derive.lean`; `Model` is a marker class at `Tyr/TensorStruct.lean`, the two schema handlers come from `Tyr/TensorStruct/Schema.lean`). Use it when the structure should also serialize/flatten, e.g. for checkpointing.
-
-For hand-written instances, `mapTensor` / `mapFrozen` / `mapStatic` (`Derive.lean`) are small helpers for the common field kinds.
 
 ### Tyr/Modular: normed modules and budgets
 
@@ -306,9 +291,8 @@ def manifoldStepExample : IO Unit := do
 
 ## Caveats and rough edges
 
-- The `Module` / `ModuleIO` / `ModuleCtx` classes are thinly adopted: instances exist for the three built-in layers and two audio encoders (`Tyr/Model/Qwen3ASR/AudioEncoder.lean`, `Tyr/Model/Qwen3TTS/SpeakerEncoder.lean`), and the `|>` / `|>!` notations and `TrainingCtx` have no production call sites. Most model code calls `Linear.forward2d`-style functions directly, as in the examples above.
-- The `Tyr/Module.lean` umbrella re-exports `Core`, `Derive`, `Linear`, `LayerNorm`, `Affine`, and `Conv2d` — but **not** `RMSNorm`. Write `import Tyr.Module.RMSNorm` explicitly (this is what `Tyr/Model/Qwen/Model.lean` and others do).
-- `Affine` has indexed parameters and typed module/gradient interfaces, currently exercised by tests. `Conv2d` has indexed parameters and checked initialization, but no `TensorStruct`/`Module` instances or model call sites.
+- The `Module` class is thinly adopted: instances exist only for the three built-in layers. Most model code calls `Linear.forward2d`-style functions directly, as in the examples above.
+- The `Tyr/Module.lean` umbrella re-exports `Core`, `Derive`, `Linear`, `LayerNorm` and `RMSNorm`.
 - There is no shared `Embedding` in `Tyr/Module`; the embedding table used for modular norms is `Tyr.Modular.Embedding` and is currently only exercised by tests. Its indexed weights preserve dtype and concrete device, and `Embedding.forward` requires Int64 token tensors. The underlying typed `Tensor.embedding` and `Tensor.embedding1d` operations are also used by GPT. There is no `NormedModule` instance for `RMSNorm`.
 
 ## Related guides

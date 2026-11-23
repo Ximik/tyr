@@ -100,24 +100,6 @@ def Cache.currentLen (cache : Cache numLayers batch maxSeqLen numKvHeads headDim
     : Nat :=
   cache.seqLens[0]?.getD 0
 
-/-- Check if cache has room for more tokens -/
-def Cache.hasRoom (cache : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device) : Bool :=
-  cache.currentLen < cache.maxLen
-
-/-- Get layer cache at index -/
-def Cache.getLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device)
-    (idx : Nat) : Option (LayerCache batch maxSeqLen numKvHeads headDim dtype device) :=
-  cache.layers[idx]?
-
-/-- Set layer cache at index -/
-def Cache.setLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device)
-    (idx : Nat) (layer : LayerCache batch maxSeqLen numKvHeads headDim dtype device)
-    : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device :=
-  if idx < cache.layers.size then
-    { cache with layers := cache.layers.set! idx layer }
-  else
-    cache
-
 /-- Append a single new K, V token at runtime position `pos`.
 
     The new K and V tensors have shape `[batch, numKvHeads, 1, headDim]` (one

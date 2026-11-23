@@ -3,7 +3,6 @@ import Tyr.Typed.Spec
 import Tyr.Typed.Device
 import Tyr.Typed.Tensor
 import Tyr.Typed.Ops
-import Tyr.Typed.Layers
 
 /-!
 # Tyr.Typed

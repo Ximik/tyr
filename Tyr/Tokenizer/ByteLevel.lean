@@ -65,8 +65,4 @@ def byteLevelToBytes (s : String) : ByteArray := Id.run do
 def stringToByteLevel (s : String) : String :=
   bytesToByteLevel s.toUTF8
 
-/-- Convert byte-level representation back to regular string -/
-def byteLevelToString (s : String) : String :=
-  String.fromUTF8! (byteLevelToBytes s)
-
 end tokenizer

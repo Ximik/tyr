@@ -72,9 +72,6 @@ structure Conversation where
 
 def Conversation.empty : Conversation := { messages := #[] }
 
-def Conversation.addMessage (conv : Conversation) (msg : Message) : Conversation :=
-  { conv with messages := conv.messages.push msg }
-
 def Conversation.fromMessages (msgs : Array Message) : Conversation :=
   { messages := msgs }
 
@@ -108,10 +105,6 @@ structure LoadedTask where
   conversations : Array Conversation
   config : TaskConfig
   deriving Repr, Inhabited
-
-def LoadedTask.size (t : LoadedTask) : Nat := t.conversations.size
-def LoadedTask.get (t : LoadedTask) (idx : Nat) : Conversation :=
-  t.conversations[idx]?.getD Conversation.empty
 
 /-! ## Task Mixture -/
 
@@ -441,15 +434,6 @@ def TaskIterator.nextBatch (iter : TaskIterator)
 
   return (some batch, newIter)
 
-/-- Reset iterator to beginning -/
-def TaskIterator.reset (iter : TaskIterator) : TaskIterator :=
-  { iter with currentIdx := 0 }
-
-/-- Get progress through current epoch -/
-def TaskIterator.progress (iter : TaskIterator) : Float :=
-  if iter.mixture.size == 0 then 1.0
-  else iter.currentIdx.toFloat / iter.mixture.size.toFloat
-
 /-- Streaming token buffer for autoregressive GPT-style training over task mixtures.
 
     This mirrors nanochat midtraining data flow:
@@ -570,9 +554,5 @@ def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream batchSize seqLen)
       lastProgress := progress
     }
     return (some (inputTensor, targetTensor), sOut)
-
-/-- Stream progress over current mixed dataset epoch. -/
-def TaskTokenStream.progress (s : TaskTokenStream batchSize seqLen) : Float :=
-  s.lastProgress
 
 end torch.Data.Task

@@ -40,11 +40,6 @@ private def repeatToken (tok : String) (n : Nat) : String :=
       out := out ++ tok
     out
 
-/-- Port of processor-side helper.
-    Converts raw feature lengths to audio-token lengths after conv stack. -/
-def featExtractOutputLengths (inputLens : Array Nat) : Array Nat :=
-  AudioEncoderConfig.featExtractOutputLengths inputLens
-
 private def replaceInSample
     (audioToken : String)
     (sample : String)
@@ -130,11 +125,6 @@ def getChunkedIndex (tokenIndices : Array Nat) (tokensPerChunk : Nat) : Array (N
           currentChunk := currentChunk + 1
         i := i + 1
       out.push (startIdx, tokenIndices.size)
-
-/-- Equivalent of processor `model_input_names` merge.
-    We expose the canonical multimodal names used by the Lean port. -/
-def modelInputNames (_p : Qwen3ASRProcessor) : Array String :=
-  #["input_ids", "attention_mask", "input_features", "feature_attention_mask"]
 
 private def mkRoleBlock (p : Qwen3ASRProcessor) (role content : String) : String :=
   p.imStartToken ++ role ++ "\n" ++ content ++ p.imEndToken ++ "\n"

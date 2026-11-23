@@ -25,22 +25,12 @@ def decodeToken (tok : BPETokenizer) (id : TokenId) : ByteArray :=
     | some bytes => bytes
     | none => ByteArray.empty
 
+/-- Decode tokens to their concatenated bytes. -/
+def decodeToBytes (tok : BPETokenizer) (ids : Array TokenId) : ByteArray :=
+  ids.foldl (fun bytes id => bytes ++ decodeToken tok id) ByteArray.empty
+
 /-- Decode an array of token IDs to a string -/
-def decode (tok : BPETokenizer) (ids : Array TokenId) : String := Id.run do
-  let mut bytes := ByteArray.empty
-  for id in ids do
-    bytes := bytes ++ decodeToken tok id
-  return decodeUtf8Lossy bytes
-
-/-- Decode tokens, returning bytes instead of string -/
-def decodeToBytes (tok : BPETokenizer) (ids : Array TokenId) : ByteArray := Id.run do
-  let mut bytes := ByteArray.empty
-  for id in ids do
-    bytes := bytes ++ decodeToken tok id
-  return bytes
-
-/-- Decode a single token to string (for debugging) -/
-def decodeOne (tok : BPETokenizer) (id : TokenId) : String :=
-  decodeUtf8Lossy (decodeToken tok id)
+def decode (tok : BPETokenizer) (ids : Array TokenId) : String :=
+  decodeUtf8Lossy (decodeToBytes tok ids)
 
 end tokenizer

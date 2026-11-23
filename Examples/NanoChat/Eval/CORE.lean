@@ -167,23 +167,6 @@ def findCommonSuffixLength (sequences : Array (Array UInt64)) : Nat := Id.run do
         return i
   minLen
 
-/-- Pad sequences to same length -/
-def padSequences (sequences : Array (Array UInt64)) (padToken : UInt64) : Array (Array UInt64) := Id.run do
-  if sequences.isEmpty then return #[]
-  let maxLen := sequences.foldl (fun acc seq => max acc seq.size) 0
-  let mut result := #[]
-  for seq in sequences do
-    let padding := (List.replicate (maxLen - seq.size) padToken).toArray
-    result := result.push (seq ++ padding)
-  result
-
-/-- Convert padded sequences to input tensor -/
-def sequencesToTensor {batch seq : Nat} (sequences : Array (Array UInt64))
-    : Except String (Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) :=
-  -- Flatten and convert to int64 array
-  let flat := sequences.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
-  Tensor.fromInt64ArrayAs? flat #[batch, seq]
-
 /-! ## Batching -/
 
 /-- Batch info for evaluation -/

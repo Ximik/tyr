@@ -12,14 +12,6 @@ namespace torch.flux
 
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
-/-- Sampling configuration -/
-structure SamplingConfig where
-  /-- Number of sampling steps -/
-  num_steps : Nat := 4
-  /-- CFG scale (if using classifier-free guidance) -/
-  guidance_scale : Float := 1.0
-  deriving Repr, Inhabited
-
 /-- Compute empirical mu for Flux2 schedule. -/
 private def computeEmpiricalMu (image_seq_len : Nat) (num_steps : Nat) : Float :=
   let a1 := 8.73809524e-05
@@ -90,20 +82,6 @@ def denoise {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
     let pred := model.forward cfg x txt t img_ids txt_ids
     -- Euler step
     eulerStep x pred t_curr t_next
-
-/-- Sample from pure noise.
-    Returns denoised latents ready for VAE decoding. -/
-def sample {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
-    (model : FluxModel (device := device) (dtype := dtype) cfg)
-    (txt : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, cfg.context_in_dim] })
-    (img_ids : Tensor { device := device, shape := #[batch, img_seq, 4], dtype := .Int64 })
-    (txt_ids : Tensor { device := device, shape := #[batch, txt_seq, 4], dtype := .Int64 })
-    (num_steps : Nat := 4)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, cfg.in_channels] }) := do
-  -- Start from pure noise
-  let noise ← randomWeight (dtype := dtype) (device := device) #[batch, img_seq, cfg.in_channels]
-  let noise := Tensor.castLike model.img_in (noise.to model.img_in.device)
-  pure (denoise cfg model noise txt img_ids txt_ids num_steps)
 
 /-- Compute image position IDs for RoPE.
     For a 32x32 latent, returns position IDs with 4 axes: [t, h, w, l]

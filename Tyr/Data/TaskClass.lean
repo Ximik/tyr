@@ -122,15 +122,8 @@ def boxTask [EvalTask α] (task : α) : BoxedTask :=
 -- Forward operations to the boxed task
 namespace BoxedTask
 
-def name (t : BoxedTask) : String := t.ops.name
-def evalType (t : BoxedTask) : EvalType := t.ops.evalType
 def size (t : BoxedTask) : Nat := t.ops.size
 def getExample (t : BoxedTask) (idx : Nat) : Option Conversation := t.ops.getExample idx
-def evaluate (t : BoxedTask) (conv : Conversation) (response : String) : EvalResult :=
-  t.ops.evaluate conv response
-def reward (t : BoxedTask) (conv : Conversation) (response : String) : Float :=
-  t.ops.reward conv response
-
 end BoxedTask
 
 /-! ## Task Mixture with Typeclass -/
@@ -190,20 +183,6 @@ def GenericTaskMixture.getExample (mix : GenericTaskMixture) (index : Nat) : Opt
   let entry ← mix.entries[taskIdx]?
   entry.task.getExample localIdx
 
-def GenericTaskMixture.evaluate (mix : GenericTaskMixture) (index : Nat) (response : String)
-    : Option EvalResult := do
-  let (taskIdx, localIdx) ← mix.indexMap[index]?
-  let entry ← mix.entries[taskIdx]?
-  let conv ← entry.task.getExample localIdx
-  return entry.task.evaluate conv response
-
-def GenericTaskMixture.reward (mix : GenericTaskMixture) (index : Nat) (response : String)
-    : Option Float := do
-  let (taskIdx, localIdx) ← mix.indexMap[index]?
-  let entry ← mix.entries[taskIdx]?
-  let conv ← entry.task.getExample localIdx
-  return entry.task.reward conv response
-
 /-- Project a boxed task mixture onto the shared conversation mixture interface. -/
 def GenericTaskMixture.toConversationMixture (mix : GenericTaskMixture) : ConversationMixture :=
   {
@@ -236,13 +215,5 @@ def GenericTaskMixture.toConversationMixtureSharded
 /-- Create a mixture entry from any EvalTask instance -/
 def entry [EvalTask α] (task : α) (weight : Nat := 1) : MixtureEntry :=
   { task := boxTask task, weight }
-
-/-- Create a mixture from a list of tasks with equal weights -/
-def mixtureSame (tasks : Array BoxedTask) (seed : UInt64 := 42) : GenericTaskMixture :=
-  GenericTaskMixture.create (tasks.map fun t => { task := t, weight := 1 }) seed
-
-/-- Create a mixture from weighted task entries -/
-def mixtureWeighted (entries : Array MixtureEntry) (seed : UInt64 := 42) : GenericTaskMixture :=
-  GenericTaskMixture.create entries seed
 
 end torch.Data.TaskClass

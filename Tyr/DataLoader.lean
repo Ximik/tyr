@@ -146,9 +146,6 @@ def BOSFinder.init {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, 
     currentPos := 0
   }
 
-def BOSFinder.findNextValidStart {n : Nat} (finder : BOSFinder n) (after : Nat) : Option Nat :=
-  (finder.bosPositions.find? (·.val >= after)).map (·.val)
-
 /-- Consume up to `count` real tokens in document order. Documents are packed
     across batch boundaries, never padded or repeated inside a shard.
     The result holds exactly `min count (remaining)` Int64 tokens. -/
@@ -500,9 +497,5 @@ def loadValidationData (path : String) (_seqLen : Nat) (bosToken : UInt64)
     : IO (Σ n, DataShard n) := do
   let valPaths ← resolveShardPaths path .val
   DataShard.load valPaths[0]! 0 1 bosToken
-
-def estimateRemainingTime (currentStep totalSteps : Nat)
-    (msPerStep : Float) : Float :=
-  (totalSteps - currentStep).toFloat * msPerStep / 1000.0 / 60.0
 
 end torch.DataLoader

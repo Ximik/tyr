@@ -61,10 +61,6 @@ structure Config where
   adamBeta2 : Float := 0.95
   /-- AdamW epsilon -/
   adamEps : Float := 1e-8
-  /-- Model dimension (for LR scaling) -/
-  modelDim : Nat := 768
-  /-- Reference dimension for LR scaling (typically 768 for GPT-2 base) -/
-  refDim : Nat := 768
   /-- Total training steps (for scheduling) -/
   totalSteps : Nat := 10000
   /-- Warmup steps for momentum -/
@@ -99,12 +95,6 @@ structure Config where
   budget : GroupBudget := {}
   deriving Repr, Inhabited
 
-/-- Compute dimension-based learning rate scaling.
-    scale = (modelDim / refDim)^(-0.5)
-    Larger models get smaller learning rates. -/
-def dimLrScale (cfg : Config) : Float :=
-  Float.pow (cfg.modelDim.toFloat / cfg.refDim.toFloat) (-0.5)
-
 /-- Get Muon config from dual optimizer config -/
 def toMuonConfig (cfg : Config) : NorMuon.Config := {
   lr := cfg.matrixLr
@@ -115,23 +105,6 @@ def toMuonConfig (cfg : Config) : NorMuon.Config := {
   distributed := cfg.muonDistributed
   worldSize := 1
 }
-
-/-- Get AdamW config from dual optimizer config -/
-def toAdamConfig (cfg : Config) : DistAdam.Config := {
-  lr := cfg.embeddingLr * dimLrScale cfg
-  beta1 := cfg.adamBeta1
-  beta2 := cfg.adamBeta2
-  eps := cfg.adamEps
-  weightDecay := 0.0  -- AdamW typically has no weight decay in nanochat
-}
-
-/-- Parameter group classification for dual optimizer -/
-inductive ParamGroup where
-  | matrix     : ParamGroup  -- Use Muon (attention, MLP weights)
-  | embedding  : ParamGroup  -- Use AdamW (token embeddings)
-  | lmHead     : ParamGroup  -- Use AdamW (output layer)
-  | scalar     : ParamGroup  -- Use AdamW (per-layer scalars)
-  deriving Repr, BEq, Inhabited
 
 /--
 Per-label matrix backend spec.
@@ -150,18 +123,6 @@ structure MatrixBackendSpec where
   smearGate : Option Config := none
   deriving Repr, Inhabited
 
-/-- Map NorMuon's ParamLabel to ParamGroup -/
-def labelToGroup (label : ParamLabel) : ParamGroup :=
-  match label with
-  | .attn => .matrix
-  | .mlp => .matrix
-  | .smearGate => .matrix
-  | .attnGate => .matrix
-  | .embed => .embedding
-  | .valueEmbed => .embedding
-  | .lmHead => .lmHead
-  | .scalars => .scalar
-
 /-- Resolve per-label matrix backend configuration from a `MatrixBackendSpec`. -/
 def MatrixBackendSpec.configForLabel (spec : MatrixBackendSpec) (label : ParamLabel) : Config :=
   match label with
@@ -170,43 +131,6 @@ def MatrixBackendSpec.configForLabel (spec : MatrixBackendSpec) (label : ParamLa
   | .mlp => spec.mlp.getD spec.default
   | .smearGate => spec.smearGate.getD spec.default
   | _ => spec.default
-
-/-- Get learning rate multiplier for a parameter group -/
-def baseGroupLrMul (cfg : Config) (group : ParamGroup) : Float :=
-  let scale := dimLrScale cfg
-  match group with
-  | .matrix => 1.0  -- Base LR for Muon
-  | .embedding => cfg.embeddingLr / cfg.matrixLr * scale
-  | .lmHead => cfg.lmHeadLr / cfg.matrixLr * scale
-  | .scalar => cfg.scalarLr / cfg.matrixLr
-
-/-- Get learning rate multiplier for a parameter group (optionally budget-scaled). -/
-def groupLrMul (cfg : Config) (group : ParamGroup) : Float :=
-  let raw := baseGroupLrMul cfg group
-  if !cfg.useModularBudget then
-    raw
-  else
-    let budgetMul :=
-      match group with
-      | .matrix => cfg.budget.matrix
-      | .embedding => cfg.budget.embedding
-      | .lmHead => cfg.budget.lmHead
-      | .scalar => cfg.budget.scalar
-    raw * budgetMul
-
-/-- Get weight decay multiplier for a parameter group -/
-def groupWdMul (_cfg : Config) (group : ParamGroup) : Float :=
-  match group with
-  | .matrix => 1.0
-  | .embedding => 0.0  -- No weight decay on embeddings
-  | .lmHead => 0.0     -- No weight decay on lm_head
-  | .scalar => 0.0     -- No weight decay on scalars
-
-/-- Determine if a parameter group should use orthogonalized updates (Muon) -/
-def groupUsesMuon (group : ParamGroup) : Bool :=
-  match group with
-  | .matrix => true
-  | _ => false
 
 /-- Determine whether current config uses manifold-Muon for matrix groups. -/
 def usesManifoldMuon (cfg : Config) : Bool :=
@@ -224,20 +148,7 @@ def getScheduledMomentum (cfg : Config) (step : Nat) : Float :=
 
 /-- Get scheduled weight decay for a given step (linear decay to zero) -/
 def getScheduledWeightDecay (cfg : Config) (step : Nat) : Float :=
-  Scheduler.linearWeightDecay { baseWd := cfg.muonWeightDecay, totalSteps := cfg.totalSteps } step
-
-/-- Simple training step tracker -/
-structure TrainingStep where
-  /-- Current step -/
-  step : Nat := 0
-  deriving Repr, Inhabited
-
-/-- Initialize training step tracker -/
-def TrainingStep.init : TrainingStep := { step := 0 }
-
-/-- Increment step counter -/
-def TrainingStep.next (ts : TrainingStep) : TrainingStep :=
-  { ts with step := ts.step + 1 }
+  Scheduler.linear_weight_decay cfg.muonWeightDecay cfg.totalSteps step
 
 /-- Get current Muon config with scheduled values -/
 def getMuonConfigAtStep (cfg : Config) (step : Nat) : NorMuon.Config :=
@@ -261,10 +172,6 @@ def getManifoldMuonConfigAtStep (cfg : Config) (step : Nat) : torch.Optim.Manifo
     fixedPointDamping := cfg.manifoldFixedPointDamping
     distributed := cfg.manifoldDistributed
   }
-
-/-- Initialize Muon optimizer state -/
-def initMuonState (cfg : Config) : IO NorMuon.State :=
-  NorMuon.State.init (toMuonConfig cfg)
 
 /-- Generic dual-map manifold state for matrix parameters. -/
 structure GenericManifoldState (m n : Nat) (dtype : DType := .Float32)
@@ -340,14 +247,6 @@ def initMatrixParamState {m n : Nat} (cfg : Config) (param : Tensor ⟨#[m, n], 
     .manifoldMuon (torch.Optim.ManifoldMuon.initParamState param)
   else
     .genericManifold (initGenericManifoldState param)
-
-/-- Extract per-parameter step count from matrix state. -/
-def MatrixParamState.step {m n : Nat} {d : DType} {dev : Device}
-    (st : MatrixParamState m n d dev) : Nat :=
-  match st with
-  | .norMuon s => s.step
-  | .manifoldMuon s => s.step
-  | .genericManifold s => s.step
 
 /-- Backend tag name for a matrix state (used in error messages). -/
 def MatrixParamState.backendName {m n : Nat} {d : DType} {dev : Device}
@@ -604,15 +503,5 @@ def matrixBackendOps {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating 
   stepGroupLocal := fun ps gs ss => stepMatrixGroupLocal ps gs ss cfg step lrMul wdMul
   stepGroupDistributed := fun ps gs ss => stepMatrixGroupDistributed ps gs ss cfg step lrMul wdMul
 }
-
-/-- Build matrix backend ops for a specific parameter label from a backend spec. -/
-def matrixBackendOpsForLabel {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
-    (spec : MatrixBackendSpec)
-    (label : ParamLabel)
-    (step : Nat)
-    (lrMul : Float := 1.0)
-    (wdMul : Float := 1.0)
-    : MatrixBackendOps m n d dev :=
-  matrixBackendOps (cfg := spec.configForLabel label) (step := step) (lrMul := lrMul) (wdMul := wdMul)
 
 end torch.Optim.DualOptimizer

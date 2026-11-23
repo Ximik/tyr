@@ -98,12 +98,6 @@ def computeAdvantages (rewards : Array Float) : Array Float :=
     let mu := sum / rewards.size.toFloat
     rewards.map (· - mu)
 
-/-- Compute advantages from a tensor of rewards -/
-def computeAdvantagesTensor (rewards : Tensor { shape := #[b], dtype := .Float32, device := device }) : Tensor { shape := #[b], dtype := .Float32, device := device } :=
-  let mu := Tensor.meanAll rewards
-  let muExpanded := Tensor.broadcastTo mu #[b]
-  rewards - muExpanded
-
 /-! ## Reward Functions -/
 
 /-- Result of reward computation -/
@@ -128,11 +122,6 @@ def mathReward (expectedAnswer : String) (response : String) : RewardResult :=
     -- Simple string comparison (could be more sophisticated)
     let isCorrect := extracted == expectedAnswer.trimAscii.toString
     { reward := if isCorrect then 1.0 else 0.0, isValid := true }
-
-/-- Exact match reward -/
-def exactMatchReward (expected : String) (response : String) : RewardResult :=
-  let isCorrect := response.trimAscii.toString == expected.trimAscii.toString
-  { reward := if isCorrect then 1.0 else 0.0, isValid := true }
 
 /-! ## Rollout Data Structures -/
 
@@ -261,226 +250,9 @@ def padSequence (seq : Array UInt64) (targetLen : Nat) (padValue : UInt64) : Arr
   if seq.size >= targetLen then seq
   else seq ++ (List.replicate (targetLen - seq.size) padValue).toArray
 
-/-- Create input and target sequences from a full sequence (shift by 1) -/
-def createInputTarget (fullSeq : Array UInt64) (padToken : UInt64 := 0)
-    : Array UInt64 × Array UInt64 :=
-  -- Keep a valid one-step pair for degenerate sequences.
-  if fullSeq.size <= 1 then
-    (#[padToken], #[padToken])
-  else
-    -- Input: all tokens except last (seq[:-1])
-    let input := fullSeq.extract 0 (fullSeq.size - 1)
-    -- Target: all tokens except first (seq[1:])
-    let target := fullSeq.extract 1 fullSeq.size
-    (input, target)
-
 /-- Create mask for valid tokens (1.0 for valid, 0.0 for padding) -/
 def createValidMask (seqLen : Nat) (paddedLen : Nat) : Array Float :=
   (List.replicate seqLen 1.0).toArray ++ (List.replicate (paddedLen - seqLen) 0.0).toArray
-
-/-- Batch rollout data for training -/
-structure BatchedRollout where
-  /-- All sequences (prompt + response), padded to same length [B, T] -/
-  sequences : Array (Array UInt64)
-  /-- Rewards per sequence [B] -/
-  rewards : Array Float
-  /-- Valid token masks [B, T] -/
-  masks : Array (Array Float)
-  /-- Batch size -/
-  batchSize : Nat
-  /-- Sequence length (after padding) -/
-  seqLen : Nat
-  deriving Repr
-
-/-- Prepare batched data from rollouts -/
-def prepareBatchedRollouts (rollouts : Array RolloutBatch) (padToken : UInt64 := 0)
-    : BatchedRollout := Id.run do
-  -- Collect all sequences and rewards
-  let mut allSeqs : Array (Array UInt64) := #[]
-  let mut allRewards : Array Float := #[]
-
-  for batch in rollouts do
-    for sample in batch.samples do
-      -- Combine prompt and response
-      let fullSeq := batch.promptTokens ++ sample.responseTokens
-      allSeqs := allSeqs.push fullSeq
-      allRewards := allRewards.push sample.reward
-
-  if allSeqs.isEmpty then
-    return { sequences := #[], rewards := #[], masks := #[], batchSize := 0, seqLen := 0 }
-
-  -- Find max length
-  let maxLen := allSeqs.foldl (fun acc seq => max acc seq.size) 0
-
-  -- Pad all sequences and create masks
-  let mut paddedSeqs : Array (Array UInt64) := #[]
-  let mut masks : Array (Array Float) := #[]
-
-  for seq in allSeqs do
-    paddedSeqs := paddedSeqs.push (padSequence seq maxLen padToken)
-    masks := masks.push (createValidMask seq.size maxLen)
-
-  {
-    sequences := paddedSeqs
-    rewards := allRewards
-    masks := masks
-    batchSize := allSeqs.size
-    seqLen := maxLen
-  }
-
-/-- Perform one GRPO training step (simple version without model).
-
-    This variant computes rollout statistics and a proxy PG score.
-    Use grpoStepWithModel/grpoStepWithModelUpdate for gradient updates. -/
-def grpoStep
-    (rollouts : Array RolloutBatch)
-    (_config : GRPOConfig)
-    (state : GRPOState)
-    : IO (StepResult × GRPOState) := do
-  -- Collect all rewards
-  let mut allRewards : Array Float := #[]
-  let mut totalGenLen := 0
-
-  for batch in rollouts do
-    for sample in batch.samples do
-      allRewards := allRewards.push sample.reward
-      totalGenLen := totalGenLen + sample.responseTokens.size
-
-  -- Compute advantages (nanochat: A = r - mean(r))
-  let advantages := computeAdvantages allRewards
-
-  -- Compute mean reward
-  let meanReward := if allRewards.isEmpty then 0.0
-    else allRewards.foldl (· + ·) 0.0 / allRewards.size.toFloat
-
-  -- Mean generation length
-  let meanGenLen := if allRewards.isEmpty then 0.0
-    else totalGenLen.toFloat / allRewards.size.toFloat
-
-  -- Proxy PG objective for logging in non-gradient mode.
-  let mut pgObj : Float := 0.0
-  for i in [:allRewards.size] do
-    pgObj := pgObj + allRewards[i]! * advantages[i]!
-  let pgLoss := if allRewards.isEmpty then 0.0 else -(pgObj / allRewards.size.toFloat)
-
-  -- Update state
-  let newState := { state with
-    step := state.step + 1
-    examplesProcessed := state.examplesProcessed + rollouts.size
-    runningMeanReward := 0.9 * state.runningMeanReward + 0.1 * meanReward
-  }
-
-  return ({
-    meanReward
-    pgLoss
-    numValidSamples := allRewards.size
-    meanGenLen
-  }, newState)
-
-/-- Perform one GRPO training step with model forward/backward.
-
-    Following nanochat's training loop exactly:
-    1. Pad all sequences to same length
-    2. Create input/target tensors (shifted by 1)
-    3. Forward pass: get per-token NLL
-    4. Convert to log prob: logp = -nll
-    5. Compute PG loss: -sum(logp * A) / num_valid
-    6. Backward pass
-
-    Parameters:
-    - rollouts: Generated samples with rewards
-    - forwardFn: Model forward pass, returns per-token NLL [B, T]
-    - config: GRPO configuration
-    - state: Current training state
-    - padToken: Padding token ID (default 0) -/
-def grpoStepWithModel (b t : Nat)
-    (rollouts : Array RolloutBatch)
-    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))  -- (input, target) → nll_per_token
-    (config : GRPOConfig)
-    (state : GRPOState)
-    (padToken : UInt64 := 0)
-    : IO (StepResult × GRPOState) := do
-
-  -- Prepare batched data
-  let batched := prepareBatchedRollouts rollouts padToken
-
-  if batched.batchSize == 0 then
-    return ({
-      meanReward := 0.0
-      pgLoss := 0.0
-      numValidSamples := 0
-      meanGenLen := 0.0
-    }, state)
-
-  -- Compute advantages: A = r - mean(r)
-  let advantages := computeAdvantages batched.rewards
-
-  -- Create input/target tensors (shift sequences by 1)
-  let mut inputSeqs : Array (Array UInt64) := #[]
-  let mut targetSeqs : Array (Array UInt64) := #[]
-  let mut shiftedMasks : Array (Array Float) := #[]
-
-  for i in [:batched.batchSize] do
-    let seq := batched.sequences[i]!
-    let mask := batched.masks[i]!
-    -- Input: seq[:-1], Target: seq[1:]
-    let inputSeq := seq.extract 0 (seq.size - 1)
-    let targetSeq := seq.extract 1 seq.size
-    -- Shift mask accordingly (drop first element)
-    let shiftedMask := mask.extract 1 mask.size
-    inputSeqs := inputSeqs.push inputSeq
-    targetSeqs := targetSeqs.push targetSeq
-    shiftedMasks := shiftedMasks.push shiftedMask
-
-  let inputFlat : Array Int64 := inputSeqs.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
-  let targetFlat : Array Int64 := targetSeqs.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
-  let maskFlat : Array Float := shiftedMasks.foldl (fun acc m => acc ++ m) #[]
-
-  -- The rollouts must fill the claimed [B, T] exactly.
-  let inputTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
-    (← IO.ofExcept (Tensor.fromInt64ArrayAs? inputFlat #[b, t])).to device
-  let targetTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
-    (← IO.ofExcept (Tensor.fromInt64ArrayAs? targetFlat #[b, t])).to device
-
-  let maskTensor : Tensor { shape := #[b, t], dtype := .Float32, device := device } :=
-    (← IO.ofExcept (Tensor.fromFloatArrayAs? maskFlat #[b, t])).to device
-
-  let advTensor : Tensor { shape := #[b], dtype := .Float32, device := device } :=
-    (← IO.ofExcept (Tensor.fromFloatArrayAs? advantages #[b])).to device
-
-  -- Forward pass: get per-token NLL
-  let nllPerToken ← forwardFn inputTensor targetTensor  -- [B, T-1]
-
-  -- Convert NLL to log prob: logp = -nll
-  let logProbs := negateToLogProb nllPerToken
-
-  -- Compute policy gradient loss
-  let pgLoss := computePGLoss logProbs advTensor maskTensor config.examplesPerStep 1
-
-  -- Backward pass
-  Tensor.backwardLoss pgLoss
-
-  -- Compute statistics
-  let meanReward := batched.rewards.foldl (· + ·) 0.0 / batched.batchSize.toFloat
-  let totalGenLen := batched.sequences.foldl (fun acc seq => acc + seq.size) 0
-  let meanGenLen := totalGenLen.toFloat / batched.batchSize.toFloat
-
-  -- Get loss value for logging
-  let lossValue := Tensor.item pgLoss
-
-  -- Update state
-  let newState := { state with
-    step := state.step + 1
-    examplesProcessed := state.examplesProcessed + rollouts.size
-    runningMeanReward := 0.9 * state.runningMeanReward + 0.1 * meanReward
-  }
-
-  return ({
-    meanReward
-    pgLoss := lossValue
-    numValidSamples := batched.batchSize
-    meanGenLen
-  }, newState)
 
 /-! ## Evaluation -/
 
@@ -619,20 +391,6 @@ def generateSample
 
   return newTokens
 
-/-- Generate multiple samples from a prompt (for pass@k evaluation).
-    Returns array of generated token sequences. -/
-def generateMultipleSamples
-    (promptTokens : Array UInt64)
-    (generateOneFn : Array UInt64 → IO UInt64)
-    (numSamples : Nat)
-    (config : GenerationConfig)
-    : IO (Array (Array UInt64)) := do
-  let mut samples : Array (Array UInt64) := #[]
-  for _ in [:numSamples] do
-    let sample ← generateSample promptTokens generateOneFn config
-    samples := samples.push sample
-  return samples
-
 /-- Create a rollout batch from a prompt by generating samples and computing rewards. -/
 def createRolloutBatch
     (promptTokens : Array UInt64)
@@ -656,18 +414,6 @@ def createRolloutBatch
 
 /-! ## Full Training Loop -/
 
-/-- Training loop state -/
-structure TrainLoopState where
-  /-- GRPO state -/
-  grpoState : GRPOState
-  /-- Total steps completed -/
-  stepsCompleted : Nat := 0
-  /-- Best pass@1 seen during training -/
-  bestPass1 : Float := 0.0
-  /-- Steps without improvement (for early stopping) -/
-  stepsWithoutImprovement : Nat := 0
-  deriving Repr, Inhabited
-
 /-- Result of full training run -/
 structure TrainResult where
   /-- Final GRPO state -/
@@ -679,84 +425,6 @@ structure TrainResult where
   /-- Total steps trained -/
   totalSteps : Nat
   deriving Repr
-
-/-- Run a full GRPO training loop.
-
-    This orchestrates:
-    1. Sample generation from prompts
-    2. Reward computation
-    3. Policy gradient update
-
-    Parameters:
-    - getPromptFn: Function to get (promptTokens, promptText, expectedAnswer) for step i
-    - generateOneFn: Model generation function (context → next token)
-    - forwardFn: Model forward pass for NLL computation
-    - decodeFn: Token decoder
-    - rewardFn: Reward function (expected → response → reward)
-    - evalFn: Optional evaluation function
-    - config: GRPO configuration
-    - numSteps: Number of training steps -/
-def trainLoop (b t : Nat)
-    (getPromptFn : Nat → IO (Array UInt64 × String × String))  -- step → (tokens, text, answer)
-    (generateOneFn : Array UInt64 → IO UInt64)
-    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
-    (decodeFn : Array UInt64 → String)
-    (rewardFn : String → String → Float)
-    (config : GRPOConfig)
-    (numSteps : Nat)
-    (callbacks : Callbacks := {})
-    : IO TrainResult := do
-
-  let genConfig : GenerationConfig := {
-    maxNewTokens := config.maxNewTokens
-    temperature := config.temperature
-    topK := config.topK
-    eosToken := config.eosToken.toUInt64
-    padToken := config.padToken.toUInt64
-  }
-
-  let initialState : GRPOState := {
-    totalSteps := numSteps
-  }
-
-  let mut state := initialState
-  let mut bestPass1 : Float := 0.0
-  let logEvery := config.logEvery
-
-  for step in [:numSteps] do
-    -- Generate rollouts for this step
-    let mut rollouts : Array RolloutBatch := #[]
-
-    for _ in [:config.examplesPerStep] do
-      let (promptTokens, promptText, expectedAnswer) ← getPromptFn step
-      let rollout ← createRolloutBatch
-        promptTokens promptText expectedAnswer
-        generateOneFn decodeFn rewardFn
-        config.numSamples genConfig
-      rollouts := rollouts.push rollout
-
-    -- Training step
-    let (result, newState) ← grpoStepWithModel b t rollouts forwardFn config state config.padToken.toUInt64
-
-    state := newState
-
-    -- Log progress
-    if step % logEvery == 0 || step + 1 == numSteps then
-      callbacks.onTrainStep result state
-
-    -- Evaluation
-    if step > 0 && step % config.evalEvery == 0 then
-      let passK := computePassK rollouts config.numSamples
-      callbacks.onEval passK step
-      if passK.pass1 > bestPass1 then
-        bestPass1 := passK.pass1
-
-  return {
-    finalState := state
-    finalPass1 := state.runningMeanReward  -- Approximate
-    bestPass1
-    totalSteps := numSteps
-  }
 
 /-- Perform one GRPO training step with parameter updates.
 
@@ -940,27 +608,6 @@ def trainLoopWithUpdates (b t : Nat) [TensorStruct P] [FloatingTensorStruct P]
   }
 
   return (currentParams, currentOptState, trainResult)
-
-/-- Simplified training interface for when you have pre-generated prompts. -/
-def trainOnPrompts (b t : Nat)
-    (prompts : Array (Array UInt64 × String × String))  -- (tokens, text, answer)
-    (generateOneFn : Array UInt64 → IO UInt64)
-    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
-    (decodeFn : Array UInt64 → String)
-    (rewardFn : String → String → Float)
-    (config : GRPOConfig)
-    (numEpochs : Nat := 1)
-    (callbacks : Callbacks := {})
-    : IO TrainResult := do
-
-  let numSteps := numEpochs * (prompts.size / config.examplesPerStep)
-
-  -- Create prompt getter that cycles through prompts
-  let getPromptFn := fun step => do
-    let idx := step % prompts.size
-    return prompts[idx]!
-
-  trainLoop b t getPromptFn generateOneFn forwardFn decodeFn rewardFn config numSteps callbacks
 
 /-- Prompt-array convenience wrapper for the update-enabled GRPO loop. -/
 def trainOnPromptsWithUpdates (b t : Nat) [TensorStruct P] [FloatingTensorStruct P]
