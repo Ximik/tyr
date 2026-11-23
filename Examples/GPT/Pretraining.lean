@@ -1,16 +1,12 @@
 /-
   Tyr/Examples/GPT/Pretraining.lean
 
-  Base pretraining script following nanochat's approach:
-  - Streaming data from parquet files
-  - BPB (bits-per-byte) evaluation
-  - Cosine LR schedule with warmup
-  - Checkpointing and resume
-
-  This is the foundation for training GPT models from scratch
-  on large datasets like FineWeb.
+  GPT pretraining on an in-memory token stream: random contiguous batches,
+  AdamW with linear warmup and cosine decay, and the running loss reported at
+  each evaluation interval when validation data is given.
 -/
 import Tyr.Torch
+import Tyr.Optim.Scheduler
 import Examples.GPT.GPT
 import Examples.GPT.Train
 
@@ -29,8 +25,6 @@ open torch.Optim
 structure PretrainingConfig where
   /-- Model configuration -/
   modelConfig : torch.gpt.Config
-  /-- Data directory containing parquet files -/
-  dataPath : String := "data/fineweb"
   /-- Batch size per device -/
   deviceBatchSize : Nat := 8
   /-- Sequence length -/
@@ -41,18 +35,10 @@ structure PretrainingConfig where
   warmupSteps : Nat := 300
   /-- Evaluation interval -/
   evalInterval : Nat := 500
-  /-- Number of eval steps -/
-  evalSteps : Nat := 50
   /-- Log interval -/
   logInterval : Nat := 10
-  /-- Checkpoint directory -/
-  checkpointDir : String := "checkpoints/pretrain"
-  /-- Checkpoint interval -/
-  checkpointInterval : Nat := 1000
   /-- Learning rate -/
   learningRate : Float := 3e-4
-  /-- Gradient accumulation steps -/
-  gradAccumSteps : Nat := 4
   deriving Repr
 
 /-- Default config for small-scale pretraining (testing) -/
@@ -95,31 +81,16 @@ structure TrainState where
   runningLoss : Float := 0.0
   deriving Repr, Inhabited
 
-/-! ## Learning Rate Schedule -/
-
-/-- Cosine learning rate schedule with warmup.
-    Following nanochat: linear warmup, cosine decay to 0. -/
-def cosineSchedule (step : Nat) (warmupSteps totalSteps : Nat) (baseLr : Float) : Float :=
-  if step < warmupSteps then
-    -- Linear warmup
-    baseLr * step.toFloat / warmupSteps.toFloat
-  else
-    -- Cosine decay using cos(x) = cos(π * progress)
-    let progress := (step - warmupSteps).toFloat / (totalSteps - warmupSteps).toFloat
-    let piApprox := 3.14159265358979
-    let decay := 0.5 * (1.0 + Float.cos (progress * piApprox))
-    baseLr * decay
-
 /-! ## Training Loop -/
 
 /-- Run single training step -/
 def trainStep (cfg : torch.gpt.Config)
     (params : GPTParams (device := device) cfg)
-    (opt : GradientTransformation (GPTParams (device := device) cfg) (AdamWState (GPTParams (device := device) cfg)))
-    (optState : AdamWState (GPTParams (device := device) cfg))
+    (opt : GradientTransformation (GPTParams (device := device) cfg) (AdamWScheduleState (GPTParams (device := device) cfg)))
+    (optState : AdamWScheduleState (GPTParams (device := device) cfg))
     (x : Tokens (device := device) #[batchSize, seqLen])
     (y : Tokens (device := device) #[batchSize, seqLen])
-    : IO (GPTParams (device := device) cfg × AdamWState (GPTParams (device := device) cfg) × Float) := do
+    : IO (GPTParams (device := device) cfg × AdamWScheduleState (GPTParams (device := device) cfg) × Float) := do
   -- Zero gradients
   TensorStruct.zeroGrads params
 
@@ -152,7 +123,9 @@ def runPretraining (cfg : PretrainingConfig)
   IO.println "Initializing model..."
   let params ← GPTParams.init cfg.modelConfig device
 
-  let opt := adamw (lr := cfg.learningRate)
+  let schedule := Scheduler.cosine_decay cfg.learningRate cfg.totalSteps
+    (warmupSteps := cfg.warmupSteps)
+  let opt := adamw_schedule schedule
   let optState := opt.init params
 
   let mut currentParams := params
@@ -162,9 +135,6 @@ def runPretraining (cfg : PretrainingConfig)
   IO.println s!"Starting training for {cfg.totalSteps} steps..."
 
   for stepNum in [:cfg.totalSteps] do
-    -- Get learning rate for this step
-    let _lr := cosineSchedule stepNum cfg.warmupSteps cfg.totalSteps cfg.learningRate
-
     -- Sample random batch from training data
     let batchTokens := cfg.deviceBatchSize * cfg.seqLen + 1
     if batchTokens > numTokens || cfg.deviceBatchSize == 0 || cfg.seqLen == 0 then
@@ -199,8 +169,7 @@ def runPretraining (cfg : PretrainingConfig)
 
     -- Logging
     if stepNum % cfg.logInterval == 0 then
-      let lr := cosineSchedule stepNum cfg.warmupSteps cfg.totalSteps cfg.learningRate
-      IO.println s!"Step {stepNum}/{cfg.totalSteps}: loss={loss} lr={lr}"
+      IO.println s!"Step {stepNum}/{cfg.totalSteps}: loss={loss} lr={schedule stepNum}"
 
     -- Evaluation
     if stepNum > 0 && stepNum % cfg.evalInterval == 0 then
