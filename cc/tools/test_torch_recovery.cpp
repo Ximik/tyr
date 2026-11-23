@@ -139,12 +139,6 @@ int main() {
     expectError(lean_torch_bin_file_token_count(path.get()));
     require(lean_is_exclusive(path.get()), "borrowed path reference leaked");
   });
-  test("missing fileExists is false", [] {
-    Object path(lean_mk_string("/tyr-nonexistent-runtime-test-directory/file"), lean_dec);
-    Object result(lean_torch_file_exists(path.get()), lean_dec);
-    require(lean_io_result_is_ok(result.get()), "fileExists returned IO.error");
-    require(lean_unbox(lean_io_result_get_value(result.get())) == 0, "missing path exists");
-  });
   test("missing WAV directory is IO.error", [] {
     Object path(lean_mk_string("/tyr-nonexistent-runtime-test-directory/audio.wav"), lean_dec);
     expectError(lean_torch_wav_begin(path.get(), lean_box(24000)));

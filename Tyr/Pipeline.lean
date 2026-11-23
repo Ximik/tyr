@@ -34,10 +34,6 @@ open torch
 open Lean (Json)
 open torch.Train.RunLedger
 
--- Re-export needed functions
-def toJson [Lean.ToJson α] (a : α) : Json := Lean.toJson a
-def fromJson? [Lean.FromJson α] (j : Json) : Except String α := Lean.fromJson? j
-
 /-! ## Retry Policy -/
 
 /-- Retry configuration for transient failures -/
@@ -65,26 +61,7 @@ inductive StageStatus where
   | running
   | completed
   | failed (error : String)
-  deriving Repr, BEq
-
-instance : Lean.ToJson StageStatus where
-  toJson
-    | .pending => .str "pending"
-    | .running => .str "running"
-    | .completed => .str "completed"
-    | .failed err => .mkObj [("failed", .str err)]
-
-instance : Lean.FromJson StageStatus where
-  fromJson? json := do
-    match json with
-    | .str "pending" => pure .pending
-    | .str "running" => pure .running
-    | .str "completed" => pure .completed
-    | _ =>
-      -- Try to parse as failed with error message
-      match json.getObjValAs? String "failed" with
-      | .ok err => pure (.failed err)
-      | .error _ => throw "Invalid StageStatus"
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
 /-- Information about a pipeline stage -/
 structure StageInfo where
@@ -100,27 +77,7 @@ structure StageInfo where
   metrics : List (String × String) := []
   /-- Number of retry attempts made -/
   retryCount : Nat := 0
-  deriving Repr
-
-instance : Lean.ToJson StageInfo where
-  toJson info := .mkObj [
-    ("name", .str info.name),
-    ("status", toJson info.status),
-    ("startTime", match info.startTime with | some t => .num t | none => .null),
-    ("endTime", match info.endTime with | some t => .num t | none => .null),
-    ("metrics", toJson info.metrics),
-    ("retryCount", .num info.retryCount)
-  ]
-
-instance : Lean.FromJson StageInfo where
-  fromJson? json := do
-    let name ← json.getObjValAs? String "name"
-    let status ← json.getObjValAs? StageStatus "status"
-    let startTime := (json.getObjValAs? Nat "startTime").toOption
-    let endTime := (json.getObjValAs? Nat "endTime").toOption
-    let metrics := (json.getObjValAs? (List (String × String)) "metrics").toOption.getD []
-    let retryCount := (json.getObjValAs? Nat "retryCount").toOption.getD 0
-    pure { name, status, startTime, endTime, metrics, retryCount }
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 /-- Get stage duration in milliseconds -/
 def StageInfo.durationMs (info : StageInfo) : Option Nat :=
@@ -237,24 +194,7 @@ structure PipelineCheckpoint where
   runId : String
   /-- `repr config` captured at save time to prevent cross-config stage skipping. -/
   configRepr : String := ""
-  deriving Repr
-
-instance : Lean.ToJson PipelineCheckpoint where
-  toJson cp := .mkObj [
-    ("stages", .arr (cp.stages.map toJson)),
-    ("timestamp", .num cp.timestamp),
-    ("runId", .str cp.runId),
-    ("configRepr", .str cp.configRepr)
-  ]
-
-instance : Lean.FromJson PipelineCheckpoint where
-  fromJson? json := do
-    let stagesArr ← json.getObjValAs? (Array Json) "stages"
-    let stages ← stagesArr.mapM fromJson?
-    let timestamp ← json.getObjValAs? Nat "timestamp"
-    let runId := (json.getObjValAs? String "runId").toOption.getD ""
-    let configRepr := (json.getObjValAs? String "configRepr").toOption.getD ""
-    pure { stages, timestamp, runId, configRepr }
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 /-- Path for checkpoint file -/
 def checkpointPath (baseDir : String) : String :=
@@ -321,14 +261,14 @@ def saveCheckpoint (baseDir : String) (stages : Array StageInfo) (runId : String
   let timestamp ← IO.monoMsNow
   let checkpoint : PipelineCheckpoint := { stages, timestamp, runId, configRepr }
   let path := checkpointPath baseDir
-  IO.FS.writeFile ⟨path⟩ (toJson checkpoint).pretty
+  IO.FS.writeFile ⟨path⟩ (Lean.toJson checkpoint).pretty
 
 /-- Load checkpoint from disk -/
 def loadCheckpoint (baseDir : String) : IO (Option PipelineCheckpoint) := do
   let path := checkpointPath baseDir
   if ← System.FilePath.pathExists ⟨path⟩ then
     let content ← IO.FS.readFile ⟨path⟩
-    match Json.parse content >>= fromJson? with
+    match Json.parse content >>= Lean.fromJson? with
     | .ok checkpoint => return some checkpoint
     | .error _ => return none
   else

@@ -109,14 +109,14 @@ private def loadMaskIds (path : String) (maxLen : Nat) : IO (Array Int64) := do
 /-- Construct indexed token IDs and attention masks from a prompt or token files. -/
 private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × Nat) := do
   if cfg.useTokenFiles then
-    if !(← data.fileExists cfg.tokensPath) then
+    if !(← System.FilePath.pathExists cfg.tokensPath) then
       throw (IO.userError s!"Token file not found: {cfg.tokensPath}")
     IO.println s!"    Loading tokens from {cfg.tokensPath}"
     let ids ← loadTokenIds cfg.tokensPath maxSeqLen
     let tokenCount := ids.size
     let (padded, defaultMask) := padTokens ids maxSeqLen qwenPadId
     let mask ←
-      if (← data.fileExists cfg.attnMaskPath) then
+      if (← System.FilePath.pathExists cfg.attnMaskPath) then
         IO.println s!"    Loading attention mask from {cfg.attnMaskPath}"
         loadMaskIds cfg.attnMaskPath maxSeqLen
       else

@@ -70,7 +70,7 @@ def testTensorStructMapReachesEveryLeaf : IO Unit := do
 
 @[test]
 def testTensorStructFoldCountsScalars : IO Unit := do
-  let numScalars := TensorStruct.fold (fun {s} _t acc => acc + s.shape.foldl (· * ·) 1) 0 smokeParams
+  let numScalars := TensorStruct.fold (fun {s} _t acc => acc + TensorSpec.numelOfShape s.shape) 0 smokeParams
   LeanTest.assertEqual numScalars 8 "2x3 weight plus 2 bias entries give 8 scalars"
 
 end Tests.CoreSmoke

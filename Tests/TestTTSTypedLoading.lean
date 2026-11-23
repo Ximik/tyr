@@ -95,7 +95,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
       if key == name then some bf16 else none).getD
         (if name.startsWith "speaker_encoder." then options.speakerBF16 else bf16)
     let start := data.size
-    for _ in [:shape.foldl (· * ·) 1] do
+    for _ in [:TensorSpec.numelOfShape shape] do
       data := data ++ (if entryBF16 then ByteArray.mk #[128, 63] else ByteArray.mk #[0, 0, 128, 63])
     header := header ++ [(name, Json.mkObj [
       ("dtype", toJson (if entryBF16 then "BF16" else "F32")),

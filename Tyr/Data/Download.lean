@@ -32,11 +32,6 @@ def ensureDir (path : String) : IO Unit := do
   let expandedPath ← expandHome path
   IO.FS.createDirAll ⟨expandedPath⟩
 
-/-- Check if a file exists -/
-def fileExists (path : String) : IO Bool := do
-  let expandedPath ← expandHome path
-  System.FilePath.pathExists ⟨expandedPath⟩
-
 /-! ## Download Operations -/
 
 /-- Download a file with exponential backoff retry.
@@ -46,7 +41,7 @@ def downloadWithRetry (url : String) (dest : String) (maxRetries : Nat := 5)
   let expandedDest ← expandHome dest
 
   -- Check if file already exists
-  if ← fileExists expandedDest then
+  if ← System.FilePath.pathExists expandedDest then
     log.onInfo s!"  [cached] {expandedDest}"
     return true
 
@@ -76,7 +71,7 @@ def downloadWithRetry (url : String) (dest : String) (maxRetries : Nat := 5)
       log.onWarn s!"  Attempt {attempt}/{maxRetries} failed: {result.stderr}"
 
       -- Clean up temp file
-      if ← fileExists tempPath then
+      if ← System.FilePath.pathExists tempPath then
         IO.FS.removeFile ⟨tempPath⟩
 
       if attempt < maxRetries then
@@ -96,7 +91,7 @@ def downloadAndExtractZip (url : String) (destDir : String) (maxRetries : Nat :=
   let zipPath := s!"{expandedDestDir}.zip"
 
   -- Check if already extracted
-  if ← fileExists expandedDestDir then
+  if ← System.FilePath.pathExists expandedDestDir then
     log.onInfo s!"  [cached] Extracted directory: {expandedDestDir}"
     return expandedDestDir
 
@@ -135,16 +130,16 @@ def ensureCOREData (cacheDir : String := "~/.cache/nanochat") (log : Handlers :=
 
   let resolveBundleRoot (rootDir : String) : IO String := do
     let directDataDir := s!"{rootDir}/eval_data"
-    if ← fileExists directDataDir then
+    if ← System.FilePath.pathExists directDataDir then
       return rootDir
     let nestedRoot := s!"{rootDir}/eval_bundle"
     let nestedDataDir := s!"{nestedRoot}/eval_data"
-    if ← fileExists nestedDataDir then
+    if ← System.FilePath.pathExists nestedDataDir then
       return nestedRoot
     return rootDir
 
   -- Check if already exists
-  if ← fileExists evalBundleDir then
+  if ← System.FilePath.pathExists evalBundleDir then
     return (← resolveBundleRoot evalBundleDir)
 
   log.onInfo "Downloading CORE evaluation bundle..."
@@ -187,7 +182,7 @@ def ensureHFParquet (repoId : String) (subset : String) (split : String)
   ]
 
   -- Check if already downloaded
-  if ← fileExists localPath then
+  if ← System.FilePath.pathExists localPath then
     return localPath
 
   -- Try each URL pattern

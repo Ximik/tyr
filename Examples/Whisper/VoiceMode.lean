@@ -141,7 +141,7 @@ private def sampleRate : Nat := 16000
 
 /-- Convert seconds to sample count at 16kHz. -/
 private def toSamples (sec : Float) : Nat :=
-  let n := ((sec * sampleRate.toFloat) + 0.5).toUInt64.toNat
+  let n := (sec * sampleRate.toFloat).round.toUInt64.toNat
   if n == 0 then 1 else n
 
 -- ============================================================================

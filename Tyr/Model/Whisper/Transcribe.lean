@@ -536,10 +536,9 @@ private def applyTimestampPairMask
             { rules with forbidden := forb }
 
 private def logProbsFromLogitsArray (logits : Array Float) : Array Float :=
-  if logits.isEmpty then
-    #[]
-  else
-    let maxLogit := logits.foldl (fun acc x => if x > acc then x else acc) logits[0]!
+  match logits.max? with
+  | none => #[]
+  | some maxLogit =>
     let sumExp := logits.foldl (fun acc x => acc + Float.exp (x - maxLogit)) 0.0
     let logDen :=
       if sumExp <= 0.0 then
@@ -1161,7 +1160,7 @@ private def maybeAppendTailRescue
   if wav16k.isEmpty then
     pure currentText
   else
-    let targetSamples := ((chunkSeconds * pre.samplingRate.toFloat) + 0.5).toUInt64.toNat
+    let targetSamples := (chunkSeconds * pre.samplingRate.toFloat).round.toUInt64.toNat
     let tailSpan := Nat.max 1 (Nat.min wav16k.size targetSamples)
     let tail := wav16k.extract (wav16k.size - tailSpan) wav16k.size
     let pack ←
@@ -1280,14 +1279,14 @@ private def transcribeWavCore
     else
       if preChunkSec <= cfgCapSec then preChunkSec else cfgCapSec
   let sr := if pre.samplingRate == 0 then sampleRate16k else pre.samplingRate
-  let chunkSamplesRaw := ((chunkSeconds * sr.toFloat) + 0.5).toUInt64.toNat
+  let chunkSamplesRaw := (chunkSeconds * sr.toFloat).round.toUInt64.toNat
   let chunkSamples := if chunkSamplesRaw == 0 then wav16k.size else chunkSamplesRaw
   let overlapSec :=
     if decodeOpts.chunkOverlapSeconds <= 0.0 then
       0.0
     else
       decodeOpts.chunkOverlapSeconds
-  let overlapSamplesRaw := ((overlapSec * sr.toFloat) + 0.5).toUInt64.toNat
+  let overlapSamplesRaw := (overlapSec * sr.toFloat).round.toUInt64.toNat
   let overlapSamples :=
     if chunkSamples <= 1 then
       0
@@ -1295,7 +1294,7 @@ private def transcribeWavCore
       Nat.min overlapSamplesRaw (chunkSamples - 1)
   let defaultAdvance := Nat.max 1 (chunkSamples - overlapSamples)
   let timestampBeginId := if noTimestamps then none else tokenIdByText? tok "<|0.00|>"
-  let samplesPerTimestamp := Nat.max 1 (((0.02 * sr.toFloat) + 0.5).toUInt64.toNat)
+  let samplesPerTimestamp := Nat.max 1 ((0.02 * sr.toFloat).round.toUInt64.toNat)
 
   let mut rollingContext : Array UInt32 := #[]
   let mut texts : Array String := #[]

@@ -37,22 +37,22 @@ def isQwen3ASRCollectionRepoId (repoId : String) : Bool :=
     - Otherwise treat it as HF `repo_id` and resolve/download locally. -/
 def resolvePretrainedDir (source : String) (opts : DownloadOptions := {}) : IO String := do
   let sourceExpanded ← expandHome source
-  if ← dirExists sourceExpanded then
+  if ← System.FilePath.isDir sourceExpanded then
     return sourceExpanded
 
   if let some snap ← findCachedSnapshot? source opts.revision then
     let hasTok ←
       if opts.includeTokenizer then
-        let tokJson ← fileExists s!"{snap}/tokenizer.json"
-        let tokCfg ← fileExists s!"{snap}/tokenizer_config.json"
-        let vocab ← fileExists s!"{snap}/vocab.json"
-        let merges ← fileExists s!"{snap}/merges.txt"
+        let tokJson ← System.FilePath.pathExists s!"{snap}/tokenizer.json"
+        let tokCfg ← System.FilePath.pathExists s!"{snap}/tokenizer_config.json"
+        let vocab ← System.FilePath.pathExists s!"{snap}/vocab.json"
+        let merges ← System.FilePath.pathExists s!"{snap}/merges.txt"
         pure <| tokJson || (tokCfg && vocab && merges)
       else
         pure true
     let hasPre ←
       if opts.includePreprocessor then
-        fileExists s!"{snap}/preprocessor_config.json"
+        System.FilePath.pathExists s!"{snap}/preprocessor_config.json"
       else
         pure true
     if hasTok && hasPre then

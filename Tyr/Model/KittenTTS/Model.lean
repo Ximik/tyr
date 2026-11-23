@@ -125,7 +125,7 @@ private def geluApprox {s : Shape} (x : Tensor { shape := s, dtype := .Float32, 
 private def durationToFrames (vals : Array Float) (speed : Float) : Array Nat :=
   vals.map fun v =>
     let denom := if speed <= 0.0 then 1.0 else speed
-    let raw := ((v / denom) + 0.5).toUInt64.toNat
+    let raw := (v / denom).round.toUInt64.toNat
     if raw == 0 then 1 else raw
 
 private def buildAlignment {seq frames : Nat}

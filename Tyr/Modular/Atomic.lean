@@ -34,7 +34,7 @@ instance (in_dim out_dim : Nat) {d : DType} {dev : Device} [DType.FloatingOrComp
   norm m :=
     let weightNorm := Tensor.spectralNorm! m.weight
     match m.bias with
-    | some b => floatMax weightNorm (Tensor.l2Norm b)
+    | some b => max weightNorm (Tensor.l2Norm b)
     | none => weightNorm
 
   dualNorm m :=

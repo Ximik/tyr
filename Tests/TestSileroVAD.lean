@@ -47,7 +47,7 @@ def testSileroVADRuntimeStepAndAudioForward : IO Unit := do
 @[test]
 def testSileroVADLoadPretrainedIfAvailable : IO Unit := do
   let path := "../silero-vad/src/silero_vad/data/silero_vad_16k.safetensors"
-  let hasWeights ← data.fileExists path
+  let hasWeights ← System.FilePath.pathExists path
   if hasWeights then
     let model ← SileroVAD.load path
     let rt0 := SileroVADRuntime.init model
@@ -105,7 +105,7 @@ private def writeSileroCheckpoint (path : System.FilePath) (bf16 : Bool) : IO Un
     let high : UInt8 := if name == "conv1.bias" then 62 else if name == "final_conv.bias" then 63 else 0
     let low : UInt8 := if name == "conv1.bias" then 128 else 0
     let value := if bf16 then ByteArray.mk #[low, high] else ByteArray.mk #[0, 0, low, high]
-    for _ in [:shape.foldl (· * ·) 1] do data := data ++ value
+    for _ in [:TensorSpec.numelOfShape shape] do data := data ++ value
     fields := fields ++ [(name, Lean.Json.mkObj [
       ("dtype", Lean.toJson (if bf16 then "BF16" else "F32")),
       ("shape", Lean.toJson shape), ("data_offsets", Lean.toJson #[start, data.size])])]

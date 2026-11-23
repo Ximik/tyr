@@ -7,6 +7,7 @@
   - Whisper-style log-mel extraction
   - feature attention-mask generation
 -/
+import Tyr.Tokenizer.IO
 import Tyr.Torch
 import Tyr.Typed.Neural
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
@@ -31,24 +32,6 @@ inductive ASRAudioInput where
   /-- In-memory mono waveform with explicit source sampling rate. -/
   | waveform (samples : Array Float) (sampleRate : Nat)
   deriving Repr
-
-private def readU16LE (bytes : ByteArray) (offset : Nat) : Option UInt16 :=
-  if offset + 2 > bytes.size then
-    none
-  else
-    let b0 := bytes[offset]!
-    let b1 := bytes[offset + 1]!
-    some (b0.toUInt16 ||| (b1.toUInt16 <<< 8))
-
-private def readU32LE (bytes : ByteArray) (offset : Nat) : Option UInt32 :=
-  if offset + 4 > bytes.size then
-    none
-  else
-    let b0 := bytes[offset]!
-    let b1 := bytes[offset + 1]!
-    let b2 := bytes[offset + 2]!
-    let b3 := bytes[offset + 3]!
-    some (b0.toUInt32 ||| (b1.toUInt32 <<< 8) ||| (b2.toUInt32 <<< 16) ||| (b3.toUInt32 <<< 24))
 
 private def hasTag4 (bytes : ByteArray) (offset : Nat) (tag : String) : Bool :=
   offset + 4 <= bytes.size && bytes.extract offset (offset + 4) == tag.toUTF8
@@ -79,7 +62,7 @@ private def loadMonoPcm16WavFromBytes
   let mut off : Nat := 12
   while off + 8 <= bytes.size do
     let csizeU32 ←
-      match readU32LE bytes (off + 4) with
+      match tokenizer.readU32 bytes (off + 4) with
       | some x => pure x
       | none => throw <| IO.userError s!"Invalid WAV chunk header in {sourceLabel}"
     let csize := csizeU32.toNat
@@ -110,12 +93,12 @@ private def loadMonoPcm16WavFromBytes
     throw <| IO.userError s!"Unsupported fmt chunk size ({fmtSize}) in {sourceLabel}"
 
   let readFmtU16 (rel : Nat) (name : String) : IO UInt16 := do
-    match readU16LE bytes (fmtOff + rel) with
+    match tokenizer.readU16 bytes (fmtOff + rel) with
     | some x => pure x
     | none => throw <| IO.userError s!"Invalid fmt field `{name}` in {sourceLabel}"
 
   let readFmtU32 (rel : Nat) (name : String) : IO UInt32 := do
-    match readU32LE bytes (fmtOff + rel) with
+    match tokenizer.readU32 bytes (fmtOff + rel) with
     | some x => pure x
     | none => throw <| IO.userError s!"Invalid fmt field `{name}` in {sourceLabel}"
 
@@ -146,7 +129,7 @@ private def loadMonoPcm16WavFromBytes
       let sampleIdx := frame * chNat + ch
       let byteOff := dataOff + sampleIdx * 2
       let u ←
-        match readU16LE bytes byteOff with
+        match tokenizer.readU16 bytes byteOff with
         | some x => pure x
         | none => throw <| IO.userError s!"Invalid PCM sample in {sourceLabel}"
       acc := acc + i16ToFloat u
@@ -347,9 +330,6 @@ def resampleLinear (audio : Array Float) (srcRate targetRate : Nat) : Array Floa
           out := out.push ((1.0 - w) * v0 + w * v1)
         out
 
-private def fmax (a b : Float) : Float := if a > b then a else b
-private def fmin (a b : Float) : Float := if a < b then a else b
-
 private def log10f (x : Float) : Float :=
   Float.log x / Float.log 10.0
 
@@ -411,7 +391,7 @@ private def buildSlaneyMelFilterBankFlat
             if downDen == 0.0 then 0.0 else (fft - f0) / downDen
           let up :=
             if upDen == 0.0 then 0.0 else (f2 - fft) / upDen
-          let tri := fmax 0.0 (fmin down up)
+          let tri := max 0.0 (min down up)
           let enormDen := f2 - f0
           let enorm := if enormDen == 0.0 then 0.0 else 2.0 / enormDen
           out := out.push (tri * enorm)
@@ -561,7 +541,7 @@ def waveformToWhisperFeaturesDynamic
   let melBins := cfg.featureSize
   have melPos : 0 < melBins := cfg.featureSizePos
 
-  let minSamplesRaw := ((minSeconds * cfg.samplingRate.toFloat) + 0.5).toUInt64.toNat
+  let minSamplesRaw := (minSeconds * cfg.samplingRate.toFloat).round.toUInt64.toNat
   let minSamples := if minSamplesRaw == 0 then 1 else minSamplesRaw
   -- `stft(center := true)` reflection-pads by `nFft/2`, so very short inputs must
   -- still exceed that padding width to avoid a hard runtime exception in libtorch.
@@ -578,7 +558,7 @@ def waveformToWhisperFeaturesDynamic
   | none => pure ()
   | some sec =>
       if sec > 0.0 then
-        let maxSamples := ((sec * cfg.samplingRate.toFloat) + 0.5).toUInt64.toNat
+        let maxSamples := (sec * cfg.samplingRate.toFloat).round.toUInt64.toNat
         if maxSamples > 0 && targetSamples > maxSamples then
           throw <| IO.userError
             s!"Audio duration exceeds maxSeconds={sec}: samples={targetSamples}, limit={maxSamples}"

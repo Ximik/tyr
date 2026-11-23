@@ -4,6 +4,7 @@
   Qwen3 tokenizer loader + encoder for Flux Klein text encoder.
   Matches HuggingFace tokenizer.json + chat template behavior.
 -/
+import Tyr.Model.ConfigJson
 import Tyr.Tokenizer.Types
 import Tyr.Tokenizer.ByteLevel
 import Tyr.Tokenizer.WordSplit
@@ -14,13 +15,6 @@ import Lean.Data.Json.FromToJson.Basic
 namespace tokenizer.qwen3
 
 open Lean
-
-/-- Helper: parse JSON file. -/
-private def parseJsonFile (path : String) : IO Json := do
-  let contents <- IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
 
 /-- Tokenizer for Qwen3 (ByteLevel BPE). -/
 structure QwenTokenizer where
@@ -39,31 +33,15 @@ structure QwenTokenizer where
   /-- Whether text is put in Unicode Normalization Form C before splitting. -/
   nfc : Bool
 
-/-- Build a length-descending list of special tokens (for greedy matching). -/
-private def sortSpecials (specials : Array String) : Array String := Id.run do
-  let mut out : Array String := #[]
-  for s in specials do
-    let mut inserted := false
-    let mut next : Array String := #[]
-    for existing in out do
-      if !inserted && s.length > existing.length then
-        next := next.push s
-        inserted := true
-      next := next.push existing
-    if !inserted then
-      next := next.push s
-    out := next
-  out
-
 /-- Load Qwen3 tokenizer from HF tokenizer.json (+ tokenizer_config.json for pad token). -/
 def loadTokenizer (dir : String) : IO QwenTokenizer := do
-  let cfgJson <- parseJsonFile s!"{dir}/tokenizer_config.json"
+  let cfgJson <- torch.ConfigJson.parseFile s!"{dir}/tokenizer_config.json"
   let tokenizerJsonPath := s!"{dir}/tokenizer.json"
   let hasTokenizerJson ← System.FilePath.pathExists ⟨tokenizerJsonPath⟩
 
   let (tokJson?, vocabJson, mergesJson, unkTokenName?) ←
     if hasTokenizerJson then
-      let tokJson <- parseJsonFile tokenizerJsonPath
+      let tokJson <- torch.ConfigJson.parseFile tokenizerJsonPath
       let modelJson <-
         match (tokJson.getObjVal? "model").toOption with
         | some v => pure v
@@ -82,7 +60,7 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
         | _ => none
       pure (some tokJson, vocabJson, mergesJson, unkName)
     else
-      let vocabJson <- parseJsonFile s!"{dir}/vocab.json"
+      let vocabJson <- torch.ConfigJson.parseFile s!"{dir}/vocab.json"
       let mergesText <- IO.FS.readFile s!"{dir}/merges.txt"
       let mut merges : Array Json := #[]
       for raw in mergesText.splitOn "\n" do
@@ -162,7 +140,7 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
         | _, _ => pure ()
   | _ => pure ()
 
-  let specialList := sortSpecials (List.toArray (specialTokens.toList.map Prod.fst))
+  let specialList := (specialTokens.toList.map Prod.fst).toArray.insertionSort (·.length > ·.length)
 
   -- unk token (if present)
   let unkToken : Option TokenId :=

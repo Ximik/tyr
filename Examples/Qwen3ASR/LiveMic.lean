@@ -44,14 +44,8 @@ private def parseNatArg (name : String) (v : String) : IO Nat :=
   | some n => pure n
   | none => throw <| IO.userError s!"Invalid {name}: {v}"
 
-private def trimWhitespace (s : String) : String :=
-  let xs := s.toList
-  let left := xs.dropWhile Char.isWhitespace
-  let right := left.reverse.dropWhile Char.isWhitespace
-  String.ofList right.reverse
-
 private def parseUseCaseArg (v : String) : IO UseCase := do
-  let s := (trimWhitespace v).toLower
+  let s := v.trimAscii.toString.toLower
   if s = "generic" then
     pure .generic
   else if s = "tv" || s = "broadcast" then
@@ -147,7 +141,7 @@ private def parseArgs (xs : List String) : IO Args :=
   parseArgsLoop xs {}
 
 private def toSamples (sec : Float) : Nat :=
-  let n := ((sec * 16000.0) + 0.5).toUInt64.toNat
+  let n := (sec * 16000.0).round.toUInt64.toNat
   if n == 0 then 1 else n
 
 private structure AudioRing where
@@ -241,7 +235,7 @@ private def dedupeWithCommittedTail (committedTail candidate : String) : String 
   if overlap >= xs.size then "" else fromChars (xs.extract overlap xs.size)
 
 private def previewTailText (s : String) (n : Nat := 120) : String :=
-  let t := trimWhitespace s
+  let t := s.trimAscii.toString
   let xs := toChars t
   if xs.size <= n then
     t
@@ -286,7 +280,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let hopSamples := toSamples args.hopSec
   let silenceSamples := toSamples args.silenceSec
   let minSpeechSamples := toSamples args.minSpeechSec
-  let ratioSteps := Nat.max 1 (((args.chunkSec / args.hopSec) + 0.5).toUInt64.toNat)
+  let ratioSteps := Nat.max 1 ((args.chunkSec / args.hopSec).round.toUInt64.toNat)
   let autoCommitEvery := Nat.max 1 (ratioSteps - 1)
   let commitEverySteps := if args.commitEvery == 0 then autoCommitEvery else args.commitEvery
   let maxNewTokensStream : Nat :=
@@ -296,7 +290,7 @@ def runMain (argv : List String) : IO UInt32 := do
       96
     else
       args.maxNewTokens
-  let steps := Nat.max 1 (((args.runSec / args.hopSec) + 0.5).toUInt64.toNat)
+  let steps := Nat.max 1 ((args.runSec / args.hopSec).round.toUInt64.toNat)
 
   IO.println s!"live mic: use_case={args.useCase.toString} chunk_sec={args.chunkSec} hop_sec={args.hopSec} keep_sec={args.keepSec} run_sec={args.runSec}"
   if args.useCase != .conversation then
@@ -352,7 +346,7 @@ def runMain (argv : List String) : IO UInt32 := do
               tok pre hMel utteranceAudio
               (context := args.context) (language := args.language)
               (maxNewTokens := maxNewTokensStream)
-            let text := trimWhitespace out.text
+            let text := out.text.trimAscii.toString
             if !text.isEmpty && text != prevSimple then
               prevSimple := text
               if args.simpleOutput then
@@ -369,7 +363,7 @@ def runMain (argv : List String) : IO UInt32 := do
               tok pre hMel utteranceAudio
               (context := args.context) (language := args.language)
               (maxNewTokens := maxNewTokensStream)
-            let finalText := trimWhitespace out.text
+            let finalText := out.text.trimAscii.toString
             if !finalText.isEmpty then
               if args.prettyUI then
                 uiClearInline
@@ -387,7 +381,7 @@ def runMain (argv : List String) : IO UInt32 := do
             tok pre hMel utteranceAudio
             (context := args.context) (language := args.language)
             (maxNewTokens := maxNewTokensStream)
-          let finalText := trimWhitespace out.text
+          let finalText := out.text.trimAscii.toString
           if !finalText.isEmpty then
             if args.prettyUI then
               uiClearInline
@@ -440,11 +434,11 @@ def runMain (argv : List String) : IO UInt32 := do
             continue
 
           if lockedLanguage.isNone then
-            let detected := trimWhitespace asrState.language
+            let detected := asrState.language.trimAscii.toString
             if !detected.isEmpty then
               lockedLanguage := some detected
               asrState := { asrState with forceLanguage := some detected }
-          let partialText := trimWhitespace asrState.text
+          let partialText := asrState.text.trimAscii.toString
 
           if args.simpleOutput then
             if partialText != prevSimple then
@@ -482,7 +476,7 @@ def runMain (argv : List String) : IO UInt32 := do
           (maxNewTokens := maxNewTokensStream)
         asrState := asrFinal
         if asrState.chunkId > chunkIdBeforeFlush then
-          let partialText := trimWhitespace asrState.text
+          let partialText := asrState.text.trimAscii.toString
           if args.simpleOutput then
             if partialText != prevSimple then
               IO.println s!"TEXT: {partialText}"

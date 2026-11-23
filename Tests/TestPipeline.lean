@@ -34,8 +34,8 @@ def testRetryDelayMaxCap : IO Unit := do
 def testStageStatusJsonRoundTrip : IO Unit := do
   -- Test all variants
   for status in [StageStatus.pending, .running, .completed, .failed "test error"] do
-    let json := toJson status
-    match (fromJson? json : Except String StageStatus) with
+    let json := Lean.toJson status
+    match (Lean.fromJson? json : Except String StageStatus) with
     | .ok status' => LeanTest.assertTrue (status == status') "status should round-trip"
     | .error e => LeanTest.fail s!"Failed to parse: {e}"
 
@@ -51,8 +51,8 @@ def testStageInfoJsonRoundTrip : IO Unit := do
     metrics := [("loss", "0.5"), ("tokens", "1024")]
     retryCount := 1
   }
-  let json := toJson info
-  match (fromJson? json : Except String StageInfo) with
+  let json := Lean.toJson info
+  match (Lean.fromJson? json : Except String StageInfo) with
   | .ok info' =>
     LeanTest.assertEqual info.name info'.name
     LeanTest.assertEqual info.metrics info'.metrics
@@ -83,8 +83,8 @@ def testPipelineCheckpointJsonRoundTrip : IO Unit := do
     timestamp := 12345
     runId := "test-run-123"
   }
-  let json := toJson checkpoint
-  match (fromJson? json : Except String PipelineCheckpoint) with
+  let json := Lean.toJson checkpoint
+  match (Lean.fromJson? json : Except String PipelineCheckpoint) with
   | .ok checkpoint' =>
     LeanTest.assertEqual checkpoint.stages.size checkpoint'.stages.size
     LeanTest.assertEqual checkpoint.runId checkpoint'.runId

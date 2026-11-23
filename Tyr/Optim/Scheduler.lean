@@ -17,8 +17,6 @@ open torch.Optim (Schedule)
 
 private def pi : Float := 3.14159265358979323846
 
-private def maxFloat (a b : Float) : Float := if a > b then a else b
-
 /-! ## Primitive Schedule Constructors
 
 Each constructor returns a `Schedule` (i.e., `Nat → Float`) directly.
@@ -33,11 +31,11 @@ def constant (value : Float) : Schedule := fun _ => value
 def cosine_decay (peak : Float) (totalSteps : Nat) (end_value : Float := 0.0)
     (warmupSteps : Nat := 0) : Schedule := fun step =>
   if step < warmupSteps then
-    peak * (step.toFloat / maxFloat warmupSteps.toFloat 1.0)
+    peak * (step.toFloat / max warmupSteps.toFloat 1.0)
   else if step >= totalSteps then
     end_value
   else
-    let progress := (step - warmupSteps).toFloat / maxFloat (totalSteps - warmupSteps).toFloat 1.0
+    let progress := (step - warmupSteps).toFloat / max (totalSteps - warmupSteps).toFloat 1.0
     let coeff := 0.5 * (1.0 + Float.cos (pi * progress))
     end_value + coeff * (peak - end_value)
 
@@ -45,11 +43,11 @@ def cosine_decay (peak : Float) (totalSteps : Nat) (end_value : Float := 0.0)
 def linear_decay (peak : Float) (totalSteps : Nat) (end_value : Float := 0.0)
     (warmupSteps : Nat := 0) : Schedule := fun step =>
   if step < warmupSteps then
-    peak * (step.toFloat / maxFloat warmupSteps.toFloat 1.0)
+    peak * (step.toFloat / max warmupSteps.toFloat 1.0)
   else if step >= totalSteps then
     end_value
   else
-    let progress := (step - warmupSteps).toFloat / maxFloat (totalSteps - warmupSteps).toFloat 1.0
+    let progress := (step - warmupSteps).toFloat / max (totalSteps - warmupSteps).toFloat 1.0
     peak - progress * (peak - end_value)
 
 /-- Step decay: value = initial * gamma^(step / stepSize) -/
@@ -68,10 +66,10 @@ def one_cycle (peak : Float) (totalSteps : Nat) (min_value : Float := 0.0)
   else
     let warmupSteps := (pctStart * totalSteps.toFloat).toUInt64.toNat
     if step < warmupSteps then
-      let progress := step.toFloat / maxFloat warmupSteps.toFloat 1.0
+      let progress := step.toFloat / max warmupSteps.toFloat 1.0
       min_value + progress * (peak - min_value)
     else
-      let progress := (step - warmupSteps).toFloat / maxFloat (totalSteps - warmupSteps).toFloat 1.0
+      let progress := (step - warmupSteps).toFloat / max (totalSteps - warmupSteps).toFloat 1.0
       let coeff := 0.5 * (1.0 + Float.cos (pi * progress))
       min_value + coeff * (peak - min_value)
 
@@ -80,13 +78,13 @@ def warmup_plateau_cosine (peak : Float) (totalSteps : Nat)
     (warmupSteps : Nat) (plateauSteps : Nat) (end_value : Float := 0.0) : Schedule := fun step =>
   let decayStart := warmupSteps + plateauSteps
   if step < warmupSteps then
-    peak * (step.toFloat / maxFloat warmupSteps.toFloat 1.0)
+    peak * (step.toFloat / max warmupSteps.toFloat 1.0)
   else if step < decayStart then
     peak
   else if step >= totalSteps then
     end_value
   else
-    let progress := (step - decayStart).toFloat / maxFloat (totalSteps - decayStart).toFloat 1.0
+    let progress := (step - decayStart).toFloat / max (totalSteps - decayStart).toFloat 1.0
     let coeff := 0.5 * (1.0 + Float.cos (pi * progress))
     end_value + coeff * (peak - end_value)
 

@@ -777,7 +777,7 @@ def tensorToProps {σ : StaticSpec} (t : Tensor σ) : IO TensorDisplayProps := d
   let requiresGrad := t.requiresGrad
   let stats := t.raw.stats
   let values := t.raw.getValues 10000  -- Get up to 10k values
-  let numel := shape.foldl (· * ·) 1
+  let numel := TensorSpec.numelOfShape shape
   let gradient ←
     if requiresGrad then
       pure (some (← Tensor.gradOf t))

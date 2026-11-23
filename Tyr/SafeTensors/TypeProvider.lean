@@ -78,25 +78,6 @@ private def typeNameBase (path : List String) : String :=
         acc ++ capitalizeWord (if merged.isEmpty then part else merged)
     "Weights" ++ suffix
 
-private def escapeLeanStringChars : List Char → List Char
-  | [] => []
-  | c :: cs =>
-      let escaped :=
-        match c with
-        | '\"' => ['\\', '\"']
-        | '\\' => ['\\', '\\']
-        | '\n' => ['\\', 'n']
-        | '\r' => ['\\', 'r']
-        | '\t' => ['\\', 't']
-        | other => [other]
-      escaped ++ escapeLeanStringChars cs
-
-private def escapeLeanString (raw : String) : String :=
-  String.ofList <| escapeLeanStringChars raw.toList
-
-private def leanStringLit (raw : String) : String :=
-  "\"" ++ escapeLeanString raw ++ "\""
-
 private def renderShapeLit (shape : Shape) : String :=
   let dims := shape.toList.map (fun d => toString d)
   "#[" ++ String.intercalate ", " dims ++ "]"
@@ -132,10 +113,10 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
     s!"/-- Tensor schema for `{tensor.name}`. -/\n" ++
     s!"abbrev {declName}Spec : _root_.torch.safetensors.TensorSchema :=\n" ++
     "  {\n" ++
-    s!"    name := {leanStringLit tensor.name},\n" ++
+    s!"    name := {String.quote tensor.name},\n" ++
     s!"    dtype := {dtypeExpr},\n" ++
     s!"    shape := {declName}Shape,\n" ++
-    s!"    sourceFile := {leanStringLit tensor.sourceFile}\n" ++
+    s!"    sourceFile := {String.quote tensor.sourceFile}\n" ++
     "  }\n"
   let tensorSpecDecl :=
     s!"/-- Shared tensor spec for `{tensor.name}`. -/\n" ++
@@ -632,7 +613,7 @@ private def elabSafeTensorsTypeProviderCore
       try
         elabGeneratedCommand <|
           s!"/-- Provider default source path (file or directory). -/\n" ++
-          s!"def defaultSource : String := {leanStringLit discovered.source}\n"
+          s!"def defaultSource : String := {String.quote discovered.source}\n"
         elabGeneratedCommand <|
           s!"/-- True when `defaultSource` is a directory containing shard files. -/\n" ++
           s!"def sourceIsDirectory : Bool := {if discovered.sourceIsDirectory then "true" else "false"}\n"
@@ -705,7 +686,7 @@ private def elabSafeTensorsTypeProviderCore
             elabGeneratedCommand loadAllDecl
 
         let fieldPairsLit := tensorFieldPairs.map fun (fieldName, tensorName) =>
-          s!"({leanStringLit fieldName}, {leanStringLit tensorName})"
+          s!"({String.quote fieldName}, {String.quote tensorName})"
         elabGeneratedCommand <|
           "/-- Mapping from generated flat tensor identifiers to original tensor names. -/\n" ++
           "def fieldToTensorName : List (String × String) :=\n" ++

@@ -152,12 +152,7 @@ namespace Qwen3TTSConfig
 
 /-- Supported language names inferred from language-id map (+ Auto). -/
 def supportedLanguages (cfg : Qwen3TTSConfig) : Array String :=
-  Id.run do
-    let mut langs := #["auto"]
-    for (k, _) in cfg.talkerConfig.codecLanguageId do
-      if !k.contains "dialect" then
-        langs := langs.push k
-    langs
+  #["auto"] ++ (cfg.talkerConfig.codecLanguageId.filter (!·.1.contains "dialect")).map (·.1)
 
 end Qwen3TTSConfig
 

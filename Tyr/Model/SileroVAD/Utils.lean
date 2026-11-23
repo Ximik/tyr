@@ -37,16 +37,13 @@ structure TimestampConfig where
 private def msToSamples (samplingRate ms : Nat) : Nat :=
   (samplingRate * ms) / 1000
 
-private def fmax (a b : Float) : Float :=
-  if a > b then a else b
-
 private def roundToResolution (x : Float) (digits : Nat) : Float :=
   let scaleNat := Nat.pow 10 digits
   let scale := scaleNat.toFloat
   if scale <= 0.0 then
     x
   else
-    (((x * scale) + 0.5).toUInt64.toFloat) / scale
+    ((x * scale).round.toUInt64.toFloat) / scale
 
 /-- Port of Silero `get_speech_timestamps` core segmentation over chunk probabilities. -/
 def timestampsFromProbabilities
@@ -68,7 +65,7 @@ def timestampsFromProbabilities
       windowSize.toFloat -
       2.0 * speechPadSamples.toFloat
 
-  let negThreshold := cfg.negThreshold.getD (fmax (cfg.threshold - 0.15) 0.01)
+  let negThreshold := cfg.negThreshold.getD (max (cfg.threshold - 0.15) 0.01)
 
   let mut triggered : Bool := false
   let mut speeches : Array SpeechTimestamp := #[]

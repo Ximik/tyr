@@ -14,6 +14,7 @@
   - Post-processor: TemplateProcessing always prepends `〈|EOS|〉` (id 2).
   - Decoder: ByteLevel.
 -/
+import Tyr.Model.ConfigJson
 import Tyr.Tokenizer.Types
 import Tyr.Tokenizer.ByteLevel
 import Tyr.Tokenizer.WordSplit
@@ -55,32 +56,9 @@ structure LagunaTokenizer where
   addedList : Array String
   padTokenId' : TokenId
 
-/-- Helper: parse JSON file. -/
-private def parseJsonFile (path : String) : IO Json := do
-  let contents <- IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
-
-/-- Build a length-descending list of added tokens (for greedy matching). -/
-private def sortAddedByLength (added : Array String) : Array String := Id.run do
-  let mut out : Array String := #[]
-  for s in added do
-    let mut inserted := false
-    let mut next : Array String := #[]
-    for existing in out do
-      if !inserted && s.length > existing.length then
-        next := next.push s
-        inserted := true
-      next := next.push existing
-    if !inserted then
-      next := next.push s
-    out := next
-  out
-
 /-- Load the Laguna tokenizer from `<modelDir>/tokenizer.json`. -/
 def loadTokenizer (modelDir : String) : IO LagunaTokenizer := do
-  let tokJson <- parseJsonFile s!"{modelDir}/tokenizer.json"
+  let tokJson <- torch.ConfigJson.parseFile s!"{modelDir}/tokenizer.json"
   let modelJson <-
     match (tokJson.getObjVal? "model").toOption with
     | some v => pure v
@@ -141,7 +119,7 @@ def loadTokenizer (modelDir : String) : IO LagunaTokenizer := do
       | _, _ => pure ()
   | none => pure ()
 
-  let addedList := sortAddedByLength (List.toArray (addedTokens.toList.map Prod.fst))
+  let addedList := (addedTokens.toList.map Prod.fst).toArray.insertionSort (·.length > ·.length)
 
   let padTokenId' : TokenId := addedTokens.getD padToken laguna.padTokenId
 

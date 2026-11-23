@@ -148,7 +148,7 @@ def publishSnapshot (dir : String) (pointer : String)
 /-- Check whether a committed checkpoint has metadata. -/
 def checkpointExists (dir : String) : IO Bool := do
   let snapshot ← resolveSnapshot dir
-  data.fileExists (snapshot ++ "/meta.txt")
+  System.FilePath.pathExists (snapshot ++ "/meta.txt")
 
 /-! ## TensorStruct-based Save/Load
 
@@ -271,7 +271,7 @@ def loadOptimizerState [TensorStruct α]
 /-- Check if optimizer state exists -/
 def optimStateExists (dir : String) : IO Bool := do
   let snapshot ← resolveSnapshot dir "OPTIMIZER_CURRENT"
-  data.fileExists (snapshot ++ "/optim_count.txt")
+  System.FilePath.pathExists (snapshot ++ "/optim_count.txt")
 
 /-- Atomically save model parameters, Adam moments, count, and metadata together.
 Use this API when a training resume must observe one consistent optimizer step. -/

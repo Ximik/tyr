@@ -135,17 +135,11 @@ def toQwenConfig (cfg : TextConfig) : qwen.QwenConfig := {
 
 end TextConfig
 
-/-- Composite thinker config: audio encoder + text decoder. -/
-private def containsSubstr (s pat : String) : Bool :=
-  if pat.isEmpty then
-    false
-  else
-    (s.splitOn pat).length > 1
-
 /-- Forced-aligner checkpoints expose `model_type` containing `"forced_aligner"`. -/
 def isForcedAlignerType (modelType : String) : Bool :=
-  containsSubstr modelType "forced_aligner"
+  modelType.contains "forced_aligner"
 
+/-- Composite thinker config: audio encoder + text decoder. -/
 structure ThinkerConfig where
   audioConfig : AudioEncoderConfig := {}
   textConfig : TextConfig := {}
