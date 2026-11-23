@@ -182,9 +182,6 @@ Mixtures come in three forms, all projecting to the function-closure
   (`Tyr/Data/TaskClass.lean`) — the open extension point; add your
   own task type with an `EvalTask` instance, box it with `boxTask`, combine
   with `entry`/`GenericTaskMixture.create`.
-- Built-in toy tasks in `Tyr/Data/Tasks.lean` (identity, math, spelling,
-  multiple choice) and mixture presets `createMidtrainingMixture` /
-  `createSFTMixture` (`Tasks.lean`).
 
 Consumers: `TaskIterator` (`Task.lean`) yields padded
 `[batch, maxLen]` batches with masks; `TaskTokenStream` (`Task.lean`)
@@ -264,7 +261,7 @@ one-token shift — the nanochat midtraining data flow.
 | `loadARC` / `loadGSM8K` / `loadMMLU` / `loadSmolTalk` | `... : IO (Array Lean.Json)` | `Tyr/Data/HuggingFace.lean` |
 | `loadJsonlFromUrl` / `loadJsonlFromFile` | `... : IO (Array Lean.Json)` | `HuggingFace.lean` |
 
-### Tasks — `torch.Data.Task`, `torch.Data.TaskClass`, `torch.Data.Tasks`
+### Tasks — `torch.Data.Task`, `torch.Data.TaskClass`
 
 | API | Signature | Location |
 | --- | --- | --- |
@@ -276,7 +273,6 @@ one-token shift — the nanochat midtraining data flow.
 | `TaskTokenStream.new` / `.nextGPTBatch` | rank-strided token windows; indexed Int64 input/target pairs with the stream dimensions | `Task.lean` |
 | `TaskMixture.create` / `.toConversationMixture` | `(entries : Array MixtureEntry) (seed := 42)` | `Task.lean` |
 | `EvalTask` class / `boxTask` / `entry` / `GenericTaskMixture.create` | open task typeclass + existential mixture | `Tyr/Data/TaskClass.lean` |
-| `createMidtrainingMixture` / `createSFTMixture` | `(modelName : String) : TaskMixture` | `Tyr/Data/Tasks.lean` |
 
 ### Streaming text — `namespace Tyr.Text`
 

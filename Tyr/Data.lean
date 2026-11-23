@@ -1,6 +1,5 @@
 import Tyr.Data.Task
 import Tyr.Data.TaskClass
-import Tyr.Data.Tasks
 import Tyr.Data.Download
 import Tyr.Data.HuggingFace
 
