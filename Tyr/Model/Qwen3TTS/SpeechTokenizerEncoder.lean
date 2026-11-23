@@ -692,15 +692,6 @@ def encodeWithRoPEOffsetDynamic {batch samples : Nat}
   let out : Tensor { shape := #[batch, semK + acK, t5], dtype := .Int64, device := device } := Tensor.reshape (Tensor.transpose codes 0 1) #[batch, semK + acK, t5]
   ⟨semK + acK, out⟩
 
-/-- Encode waveform `[batch,1,samples]` with zero RoPE offset. -/
-def encode {batch samples : Nat}
-    (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
-    (audio : Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device })
-    (hs : 0 < samples)
-    (hBooks : 1 ≤ m.semanticRVQ.codebooks.size ∧ 15 ≤ m.acousticRVQ.codebooks.size) :
-    Tensor { shape := #[batch, 16, encodedFrames samples], dtype := .Int64, device := device } :=
-  encodeWithRoPEOffset m audio hs hBooks 0
-
 /-- Convenience encode for mono waveform `[samples]` into frame-major `[frames,16]`.
     RoPE offset is in the pre-downsample transformer timeline. -/
 def encodeMonoFrameMajorWithRoPEOffset {samples : Nat}
@@ -752,52 +743,6 @@ def initEncodeStreamState
     (leftContextSamples : Nat := 288000)
     : EncodeStreamState :=
   { chunkSamples, leftContextSamples, offsetSamples := 0, history := #[] }
-
-/-- Encode one streaming chunk and emit flat codec IDs (`rows * 16` values). -/
-def pushEncodeStream
-    (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
-    (st : EncodeStreamState)
-    (newSamples : Array Float)
-    : IO (EncodeStreamState × Array UInt64) := do
-  if newSamples.isEmpty then
-    return (st, #[])
-
-  let ctxStart : Nat := st.offsetSamples - st.history.size
-  let chunk := st.history ++ newSamples
-  let chunkSamplesU64 : Nat := chunk.size
-  let audioChunk0 : Tensor { shape := #[chunkSamplesU64], dtype := .Float32, device := .CPU } := Tensor.reshape (Tensor.fromFloatArray chunk) #[chunkSamplesU64]
-  let audioChunk : Tensor { shape := #[chunkSamplesU64], dtype := dtypes.compute.val, device := device } :=
-    Tensor.castLike m.conv0Weight (audioChunk0.to m.conv0Weight.device)
-  let framesChunk : Nat := encodedFrames chunkSamplesU64
-  let ropeStartPos : Nat := framesBeforeFinalDownsample ctxStart
-  let ⟨hChunk⟩ ← if h : 0 < chunkSamplesU64 then pure (PLift.up h) else
-    throw <| IO.userError "speech tokenizer stream chunk is empty"
-  let ⟨hBooks⟩ ← if h : 1 ≤ m.semanticRVQ.codebooks.size ∧ 15 ≤ m.acousticRVQ.codebooks.size then pure (PLift.up h) else
-    throw <| IO.userError
-      s!"speech tokenizer needs 1 semantic and 15 acoustic codebooks, has {m.semanticRVQ.codebooks.size} and {m.acousticRVQ.codebooks.size}"
-  let codesChunk : Tensor { shape := #[framesChunk, 16], dtype := .Int64, device := device } := encodeMonoFrameMajorWithRoPEOffset m audioChunk hChunk hBooks ropeStartPos
-  let flatChunk : Tensor { shape := #[framesChunk * 16], dtype := .Int64, device := device } := Tensor.reshape codesChunk #[framesChunk * 16]
-  let valsChunk ← Tensor.toUInt64Array flatChunk
-
-  let dropRows : Nat := (encodedFrames st.history.size)
-  let keepRows : Nat := (encodedFrames newSamples.size)
-  let startIdx : Nat := dropRows * 16
-  let endIdx : Nat := Nat.min valsChunk.size ((dropRows + keepRows) * 16)
-  let valsKeep := valsChunk.extract startIdx endIdx
-
-  let nextOffset := st.offsetSamples + newSamples.size
-  let histStart :=
-    if chunk.size > st.leftContextSamples then
-      chunk.size - st.leftContextSamples
-    else
-      0
-  let nextHist := chunk.extract histStart chunk.size
-  let st' : EncodeStreamState := {
-    st with
-      offsetSamples := nextOffset
-      history := nextHist
-  }
-  return (st', valsKeep)
 
 /-- Encode one streaming chunk and emit flat codec IDs (`rows * codeGroups` values). -/
 def pushEncodeStreamDynamic

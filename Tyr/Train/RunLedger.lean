@@ -102,9 +102,6 @@ abbrev MetricFields := List (String × Json)
 def metricStr (name value : String) : String × Json := (name, .str value)
 def metricFloat (name : String) (value : Float) : String × Json := (name, Lean.toJson value)
 def metricNat (name : String) (value : Nat) : String × Json := (name, Lean.toJson value)
-def metricUInt64 (name : String) (value : UInt64) : String × Json := (name, Lean.toJson value.toNat)
-def metricBool (name : String) (value : Bool) : String × Json := (name, Lean.toJson value)
-
 /-- One structured metrics row in `metrics.jsonl`. -/
 structure MetricEvent where
   scope : String

@@ -64,7 +64,6 @@ instance : Repr RawTensor where
 /-- Native metadata, independent of any static tensor specification. -/
 def runtimeShape (t : RawTensor) : Shape := runtimeShapeImpl t
 def dtype (t : RawTensor) : DType := dtypeImpl t
-def dtypeStr (t : RawTensor) : String := t.dtype.canonicalName
 def device (t : RawTensor) : Device := deviceImpl t
 def deviceStr (t : RawTensor) : String := deviceStrImpl t
 def getValues (t : RawTensor) (maxElements : Nat := 1000) : FloatArray :=

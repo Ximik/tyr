@@ -24,12 +24,6 @@ def timestepEmbedding {batch : Nat}
     : Tensor { device := device, shape := #[batch, dim], dtype := .Float32 } :=
   (Tensor.ofRaw! (RawTensor.timestepEmbedding t.raw dim max_period time_factor))
 
-/-- Modulation output: shift, scale, gate triplets.
-    For double blocks: 6 values (2 triplets for img and txt)
-    For single blocks: 3 values (1 triplet) -/
-structure ModulationOutput (batch num_mods hidden_size : Nat) (dtype : DType := .Float32) where
-  values : Tensor { dtype := dtype, device := device, shape := #[batch, num_mods, hidden_size] }
-
 /-- Modulation layer: projects timestep embedding to shift/scale/gate.
     For double blocks: outputs 6 modulation vectors
     For single blocks: outputs 3 modulation vectors -/
@@ -41,10 +35,6 @@ structure Modulation (hidden_size : Nat) (isDouble : Bool) (dtype : DType := .Fl
 
 namespace Modulation
 
-/-- Number of modulation outputs -/
-@[simp] def numMods (isDouble : Bool) : Nat :=
-  if isDouble then 6 else 3
-
 /-- Initialize modulation layer -/
 def init (hidden_size : Nat) (isDouble : Bool := false) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Modulation (device := device) (dtype := dtype) hidden_size isDouble) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
@@ -53,13 +43,6 @@ def init (hidden_size : Nat) (isDouble : Bool := false) (device : Device := .CPU
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
   let w ← randomWeight (dtype := dtype) (device := device) #[outDim, hidden_size]
   pure { lin := (← Tensor.parameter (Tensor.mulScalar w std)) }
-
-/-- Initialize modulation with zero weights (for dummy/placeholder modulation).
-    Used when modulation is at model level instead of per-block. -/
-def initZero (hidden_size : Nat) (isDouble : Bool := false) (device : Device := .CPU) (dtype : DType := .Float32)
-    [DType.ConstantSupported dtype device] : Modulation (device := device) (dtype := dtype) hidden_size isDouble :=
-  let outDim := if isDouble then 6 * hidden_size else 3 * hidden_size
-  { lin := Tensor.detach (zerosWeight (dtype := dtype) (device := device) #[outDim, hidden_size]) }
 
 /-- Forward pass: compute modulation from timestep embedding.
     Input vec: [batch, hidden_size] (timestep embedding)

@@ -203,85 +203,7 @@ def maskedCrossEntropy {batch seq vocab : Nat} {d m result : DType} {dev : Devic
   | .ok loss => loss
   | .error message => nativeInvariantFailure s!"{decl_name%}: {message}"
 
-/-! ## Data Preparation -/
-
-/-- Prepare SFT batch from tokenized conversations.
-    Creates input/target pairs where targets are shifted and masked.
-
-    The mask ensures we only train on assistant responses.
-    - Input: tokens[:-1]
-    - Target: tokens[1:]
-    - Mask: mask[1:] (shifted to align with targets)
--/
-def prepareSFTBatch (convs : Array TokenizedConversation) (maxLen : Nat) (padTokenId : UInt64)
-    : IO (SFTBatch (device := .CPU)) := do
-  let batchSize := convs.size
-  if batchSize == 0 then
-    return SFTBatch.empty
-
-  -- Find max length (minus 1 for shift, capped at maxLen)
-  let seqLen := convs.foldl (fun acc c => max acc (min (c.tokens.size - 1) maxLen)) 0
-
-  if seqLen == 0 then
-    return SFTBatch.empty
-
-  -- Build input, target, and mask arrays
-  let mut allInputs : Array Int64 := #[]
-  let mut allTargets : Array Int64 := #[]
-  let mut allMasks : Array Float := #[]
-  let mut numValidTokens : Nat := 0
-
-  for conv in convs do
-    let n := conv.tokens.size
-    -- Input: tokens[:-1], Target: tokens[1:], Mask: mask[1:]
-    for i in [:seqLen] do
-      if i < n - 1 then
-        -- Valid position
-        allInputs := allInputs.push conv.tokens[i]!.toInt64
-        allTargets := allTargets.push conv.tokens[i + 1]!.toInt64
-        -- Mask for target position (i+1)
-        let maskVal : Float := if i + 1 < conv.mask.size && conv.mask[i + 1]! == 1 then 1.0 else 0.0
-        allMasks := allMasks.push maskVal
-        if maskVal > 0 then
-          numValidTokens := numValidTokens + 1
-      else
-        -- Padding position
-        allInputs := allInputs.push padTokenId.toInt64
-        allTargets := allTargets.push padTokenId.toInt64  -- Target doesn't matter, mask is 0
-        allMasks := allMasks.push 0.0  -- Don't train on padding
-
-  -- Convert to tensors
-  let inputsTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? allInputs #[batchSize, seqLen]
-  let targetsTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? allTargets #[batchSize, seqLen]
-  let maskTensor ← IO.ofExcept <| Tensor.fromFloatArrayAs? allMasks #[batchSize, seqLen]
-
-  return {
-    batchSize := batchSize
-    seqLen := seqLen
-    inputs := inputsTensor
-    targets := targetsTensor
-    mask := maskTensor
-    numValidTokens
-  }
-
 /-! ## Training Functions -/
-
-/-- Single forward pass for SFT with masked loss.
-    Returns loss tensor for backprop.
-
-    forwardFn should take inputs [batch, seq] and return logits [batch, seq, vocab]
--/
-def sftForward {batch seq vocab : Nat} {d m result : DType} {dev : Device}
-    [DType.Promotes d m result]
-    (forwardFn : Tensor ⟨#[batch, seq], .Int64, dev⟩ → IO (Tensor ⟨#[batch, seq, vocab], d, dev⟩))
-    (inputs : Tensor ⟨#[batch, seq], .Int64, dev⟩)
-    (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
-    (mask : Tensor ⟨#[batch, seq], m, dev⟩)
-    : IO (Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩) := do
-  -- Get logits from model
-  let logits ← forwardFn inputs
-  -- Compute masked loss
-  IO.ofExcept (maskedCrossEntropy? logits targets mask)
 
 /-- Evaluate validation loss over multiple batches.
 
@@ -522,29 +444,5 @@ def makeTaskDataGenerator
 
     iterRef.set currentIter
     return batch
-
-/-- Simple SFT training helper for models with standard interface.
-    Wraps trainLoop with common defaults.
-
-    `forwardFn` takes Int64 token inputs `[batch, seq]` and returns Float32
-    logits `[batch, seq, vocab]`; `lossFn` computes the scalar masked loss
-    (`maskedCrossEntropy` fits the signature directly). -/
-def trainSFT [TensorStruct P] [FloatingTensorStruct P]
-    (cfg : SFTConfig)
-    (params : P)
-    (forwardFn : P → {b s : Nat} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
-      IO (Σ v : Nat, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
-    (lossFn : {b s v : Nat} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
-      Tensor { shape := #[b, s], dtype := .Float32, device := device } → Tensor { shape := #[], dtype := .Float32, device := device })
-    (trainDataFn : IO (SFTBatch (device := .CPU)))
-    (numTrainExamples : Nat)
-    : IO (P × SFTState) := do
-  -- Initialize optimizer state via the adamw optimizer
-  let opt := Optim.adamw (lr := cfg.embeddingLr) (b1 := 0.9) (b2 := 0.999)
-  let optState := opt.init params
-
-  let (finalParams, _, finalState) ← trainLoop cfg params optState forwardFn lossFn trainDataFn none numTrainExamples
-
-  return (finalParams, finalState)
 
 end torch.Train.ChatSFT

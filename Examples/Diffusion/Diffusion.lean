@@ -42,9 +42,6 @@ structure Config where
   contextFits : context_len ≤ seq_len := by decide
   deriving Repr
 
-/-- Head dimension -/
-def Config.headDim (cfg : Config) : Nat := 2 * cfg.half_head_dim
-
 /-- Embedding dimension: `n_head` heads of `headDim` channels -/
 def Config.n_embd (cfg : Config) : Nat := cfg.n_head * (2 * cfg.half_head_dim)
 
@@ -55,10 +52,6 @@ def Config.tiny : Config :=
 /-- Small config for testing (no context for simpler sampling) -/
 def Config.small : Config :=
   { seq_len := 128, vocab_size := 128, n_layer := 4, n_head := 4, half_head_dim := 32, diffusion_steps := 64, context_len := 0 }
-
-/-- Full config matching tiny-diffusion paper -/
-def Config.full : Config :=
-  { seq_len := 256, vocab_size := 128, n_layer := 6, n_head := 6, half_head_dim := 32, diffusion_steps := 128 }
 
 /-- Full diffusion model parameters -/
 structure DiffusionParams (cfg : Config) where
@@ -188,15 +181,6 @@ def forward {cfg : Config} {batch seq : Nat}
   -- Final norm and output projection
   let x := norm x
   Tensor.linear3d x params.output_head
-
-/-- Compute diffusion loss (cross-entropy on all positions, masking done separately) -/
-def loss {cfg : Config} {batch seq : Nat}
-    (logits : Activation #[batch, seq, cfg.vocab_size])
-    (targets : Tokens #[batch, seq])
-    : Activation #[] :=
-  let logitsFlat := Tensor.reshape logits #[batch * seq, cfg.vocab_size]
-  let targetsFlat := Tensor.reshape targets #[batch * seq]
-  Tensor.crossEntropy! logitsFlat targetsFlat
 
 /-- Helper to get mask of positions that are still masked -/
 def getMaskedPositions' {batch seq : Nat}
@@ -382,49 +366,5 @@ def sampleTopK {cfg : Config} {batch : Nat}
     maskedPositions := samplingMask x cfg.mask_token_id (if contextTokens.isSome then cfg.context_len else 0)
 
   return x
-
-/-- Generate multiple blocks in parallel using batched inference.
-    Each block is an independent sample from the diffusion model.
-    Returns tensor of shape [numBlocks, seq_len].
--/
-def sampleMultiple {cfg : Config} (numBlocks : Nat)
-    (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
-    (k : Nat)
-    (temperature : Float := 1.0)
-    (maxSteps : Nat := 256)
-    : IO (Tokens #[numBlocks, cfg.seq_len]) := do
-  sampleTopK (batch := numBlocks) params rotaryCache k temperature maxSteps none
-
-/-- Generate multiple blocks with shared context prefix.
-    Each block starts with the same context tokens but generates different continuations.
-    contextTokens: [numBlocks, context_len] - can be same or different per block
-    Returns tensor of shape [numBlocks, seq_len].
--/
-def sampleMultipleWithContext {cfg : Config} (numBlocks : Nat)
-    (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
-    (contextTokens : Tokens #[numBlocks, cfg.context_len])
-    (k : Nat)
-    (temperature : Float := 1.0)
-    (maxSteps : Nat := 256)
-    : IO (Tokens #[numBlocks, cfg.seq_len]) := do
-  sampleTopK (batch := numBlocks) params rotaryCache k temperature maxSteps (some contextTokens)
-
-/-- Generate multiple blocks with the same prompt replicated across all blocks.
-    prompt: [context_len] - single prompt tensor replicated to all blocks
-    Returns tensor of shape [numBlocks, seq_len].
--/
-def sampleMultipleWithPrompt {cfg : Config} (numBlocks : Nat)
-    (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
-    (prompt : Tokens #[cfg.context_len])
-    (k : Nat)
-    (temperature : Float := 1.0)
-    (maxSteps : Nat := 256)
-    : IO (Tokens #[numBlocks, cfg.seq_len]) := do
-  -- Replicate prompt across all blocks: [context_len] -> [numBlocks, context_len]
-  let promptExpanded := Tensor.broadcastTo (Tensor.unsqueeze prompt 0) #[numBlocks, cfg.context_len]
-  sampleTopK (batch := numBlocks) params rotaryCache k temperature maxSteps (some promptExpanded)
 
 end torch.diffusion

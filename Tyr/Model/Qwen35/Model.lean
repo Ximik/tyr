@@ -1052,10 +1052,6 @@ def forwardWithCache {batch seq cap : Nat}
 
 end Qwen35Model
 
-/-- Causal-LM output container. -/
-structure CausalLMOutput (cfg : Config) (batch seq : Nat) (dtype : DType := .Float32) where
-  logits : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := dtype }
-
 /-- Full standalone Qwen3.5 causal language model (dense or MoE depending on config). -/
 structure Qwen35ForCausalLM (cfg : Config) (dtype : DType := .Float32) where
   model : Qwen35Model (dtype := dtype) (device := device) cfg

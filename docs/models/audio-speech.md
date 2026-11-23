@@ -98,8 +98,7 @@ index; the speaker encoder may retain a different checkpoint dtype. Pieces:
 - **Speaker encoder** (`SpeakerEncoder.lean`): ECAPA-TDNN producing
   `Tensor ⟨#[batch, cfg.speakerEncoderConfig.encDim], dtypes.speaker.val, device⟩`
   embeddings from mel features; only
-  present for `ttsModelType == "base"`. Used for voice cloning via
-  `VoiceClonePromptItem` (Model.lean).
+  present for `ttsModelType == "base"`. Used for voice cloning.
 - **Speech tokenizer decoder** (`SpeechTokenizer.lean`): `SpeechTokenizer12HzDecoder`
   is a flat parameter record (split RVQ, causal pre-conv + transformer, upsampling conv
   stack; `outputSampleRate = 24000`, `decodeUpsampleRate = 1920`) decoding
@@ -209,7 +208,6 @@ def streamingTranscribe
 `newSession`, `pushAudio`, `flush` — returning `StreamStepOutput` with
 `stableAppend`/`unstableText`/`fullText` from a text-consensus layer
 (`Tyr.Text.StreamingConsensus`), optionally gated by a Silero VAD provider.
-`Realtime.lean` is the lower-level coherent-transcript assembly.
 
 The **forced aligner** (`Transcribe.lean`, `ForcedAligner.lean`) is a separate
 checkpoint wrapped as `Qwen3ForcedAligner`; `alignWaveform`/`align`/`alignBatch` map a

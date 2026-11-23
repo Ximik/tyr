@@ -61,8 +61,7 @@ table for bits-per-byte evaluation, statistics). `save`/`load`
 (`Tyr/Tokenizer/IO.lean`) persist to a little-endian binary format
 with magic `TYR_BPE1`, version 1.
 
-`Tyr/Tokenizer/SpecialTokens.lean` provides legacy "NanoProof" token sets
-(chat, tool-use, math, Lean keywords) and `addSpecialTokens`; `Training.lean`
+`Tyr/Tokenizer/SpecialTokens.lean` provides `addSpecialTokens`; `Training.lean`
 defines `defaultChatSpecialTokens`, the nanochat chat set.
 
 ### Hugging Face tokenizer codecs
@@ -215,7 +214,6 @@ one-token shift — the nanochat midtraining data flow.
 | `countTokens` | `(tok : BPETokenizer) (text : String) : Nat` | `Tyr/Tokenizer/Encode.lean` |
 | `TrainConfig` | `{ vocabSize := 32768, maxChars, docCap, splitPattern, specialTokens, seed }` | `Tyr/Tokenizer/Training.lean` |
 | `defaultChatSpecialTokens` | `Array String` (nanochat chat token set) | `Tyr/Tokenizer/Training.lean` |
-| `createBase` | `BPETokenizer` (256 byte tokens + all special tokens) | `Tyr/Tokenizer/IO.lean` |
 | `TokenBytes.fromTokenizer` / `.totalBytes` | `BPETokenizer → TokenBytes` / `TokenBytes → Array UInt32 → IO UInt64` | `Tyr/Tokenizer/TokenBytes.lean` |
 
 ### HF codecs — `tokenizer.qwen3` / `qwen35` / `qwen36` / `gemma4`
@@ -226,7 +224,7 @@ one-token shift — the nanochat midtraining data flow.
 | `qwen3.encodeText` / `decodeText` | `(tok) (text : String) : Array TokenId` / `(tok) (ids) : String` | `Qwen3.lean` |
 | `qwen3.chatTemplate` | `(prompt : String) : String` | `Qwen3.lean` |
 | `qwen3.encodePrompt` | `(tok) (prompt) (maxLen : Nat := 512) : Array TokenId × Array TokenId` (tokens + attention mask) | `Qwen3.lean` |
-| `qwen3.ttsAssistantText` / `ttsRefText` / `ttsInstructText` | `String → String` | `Qwen3.lean` |
+| `qwen3.ttsAssistantText` | `String → String` | `Qwen3.lean` |
 | `qwen35.chatTemplateThinking`, `userPrefix`, `assistantGenerationSuffix` | `String → String` / `String` | `Tyr/Tokenizer/Qwen35.lean` |
 | `gemma4.loadTokenizer` | `(dir : String) : IO GemmaTokenizer` | `Tyr/Tokenizer/Gemma4.lean` |
 | `gemma4.encodeText` / `decodeText` / `chatTemplate` / `chatTemplateThinking` | as Qwen3 | `Gemma4.lean` |
@@ -249,7 +247,6 @@ one-token shift — the nanochat midtraining data flow.
 | `BatchIterator.nextGPT` | `(iter) (batchSize seqLen : Nat) : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` (input/target shift) | `Examples/GPT/GPTDataLoader.lean` |
 | `DistributedDataGenerator.nextBatchGPT` | `(gen) (batchSize seqLen : Nat)`; GPT input/target batch | `Examples/GPT/GPTDataLoader.lean` |
 | `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }` batches | `Examples/GPT/GPTDataLoader.lean` |
-| `loadShakespeareData` | `(trainPath valPath) (batchSize seqLen) : IO (Σ n, SequentialBatchIterator n .. × Option (Σ m, SequentialLoader m))` — one-shot Shakespeare setup | `Examples/GPT/GPTDataLoader.lean` |
 
 ### Parquet / downloads — `torch.Data.Parquet`, `torch.Data.Download`, `torch.Data.HuggingFace`
 
@@ -259,7 +256,7 @@ one-token shift — the nanochat midtraining data flow.
 | `downloadWithRetry` | `(url dest : String) (maxRetries := 5) (initialBackoffMs := 1000) (log := {}) : IO Bool` | `Tyr/Data/Download.lean` |
 | `ensureHFParquet` | `(repoId subset split : String) (cacheDir ..) : IO String` | `Download.lean` |
 | `loadARC` / `loadGSM8K` / `loadMMLU` / `loadSmolTalk` | `... : IO (Array Lean.Json)` | `Tyr/Data/HuggingFace.lean` |
-| `loadJsonlFromUrl` / `loadJsonlFromFile` | `... : IO (Array Lean.Json)` | `HuggingFace.lean` |
+| `loadJsonlFromFile` | `... : IO (Array Lean.Json)` | `HuggingFace.lean` |
 
 ### Tasks — `torch.Data.Task`, `torch.Data.TaskClass`
 
@@ -373,9 +370,6 @@ Behavior verified against source that the module docs do not advertise:
 
 - `trainBPE` never pretokenizes and ignores `TrainConfig.{maxChars, docCap,
   splitPattern, seed}` (`Tyr/Tokenizer/Training.lean`).
-- `allSpecialTokens` mixes control tokens with ordinary words ("theorem",
-  "def", Greek letters); via `encodeWithSpecials` these match atomically
-  anywhere in text (`Tyr/Tokenizer/SpecialTokens.lean`).
 
 ## Related guides
 

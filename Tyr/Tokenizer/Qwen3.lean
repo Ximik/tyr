@@ -280,14 +280,6 @@ def chatTemplate (prompt : String) : String :=
 def ttsAssistantText (text : String) : String :=
   "<|im_start|>assistant\n" ++ text ++ "<|im_end|>\n<|im_start|>assistant\n"
 
-/-- Qwen3-TTS reference text wrapper used for voice-clone reference IDs. -/
-def ttsRefText (text : String) : String :=
-  "<|im_start|>assistant\n" ++ text ++ "<|im_end|>\n"
-
-/-- Qwen3-TTS instruct wrapper used for style/speaker instruction IDs. -/
-def ttsInstructText (instruct : String) : String :=
-  "<|im_start|>user\n" ++ instruct ++ "<|im_end|>\n"
-
 /-- Greedy match for any special token at position i. -/
 private def matchSpecial (chars : Array Char) (i : Nat) (specials : Array String)
     : Option (String × Nat) := Id.run do

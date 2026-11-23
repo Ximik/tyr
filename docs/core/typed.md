@@ -23,7 +23,6 @@ data, and persistence operations. `import Tyr` aggregates the library.
 | `Tyr.Typed.Tensor` | Checked constructors, validation, existential packaging |
 | `Tyr.Typed.Ops` | Arithmetic, shape transforms, reductions, autograd, host arrays |
 | `Tyr.Typed.Neural` | Neural, data, storage, and dynamic-shape adapters |
-| `Tyr.Typed.Layers` | Parameter structures and typed layer operations |
 | `Tyr.TensorStruct.Cast` | Convert a tensor tree to the specifications in a destination type |
 | `Tyr.TensorStruct.DeriveCast` | Derive field-wise casts between explicitly selected record types |
 | `Tyr.RawTensor` and submodules | Native declarations without static guarantees |

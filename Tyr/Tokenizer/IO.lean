@@ -200,30 +200,4 @@ def load (path : String) : IO BPETokenizer := do
   | some tok => return tok
   | none => throw (IO.userError "Failed to parse tokenizer file")
 
-/-- Create a base tokenizer with 256 byte tokens and special tokens -/
-def createBase : BPETokenizer := Id.run do
-  let mut idToBytes := Array.mkEmpty 512
-  let mut bytesToId : Std.HashMap ByteArray TokenId := {}
-
-  -- Add 256 byte tokens
-  for i in [:256] do
-    let b := ByteArray.mk #[i.toUInt8]
-    idToBytes := idToBytes.push b
-    bytesToId := bytesToId.insert b i.toUInt32
-
-  let tok : BPETokenizer := {
-    vocabSize := 256
-    idToBytes := idToBytes
-    bytesToId := bytesToId
-    merges := #[]
-    mergeLookup := {}
-    mergePriority := {}
-    specialTokens := {}
-    idToSpecial := {}
-  }
-
-  -- Add special tokens
-  let withSpecials := addSpecialTokens tok allSpecialTokens 256
-  { withSpecials with vocabSize := withSpecials.idToBytes.size }
-
 end tokenizer

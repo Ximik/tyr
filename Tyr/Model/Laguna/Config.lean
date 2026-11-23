@@ -128,12 +128,6 @@ def laguna_s_2_1 : LagunaConfig := {}
 def layerType (cfg : LagunaConfig) (i : Nat) : LayerType :=
   cfg.layer_types.getD i .slidingAttention
 
-/-- Query head count of layer `i` (48 full / 72 sliding for S-2.1). -/
-def numHeadsForLayer (cfg : LagunaConfig) (i : Nat) : Nat :=
-  match layerType cfg i with
-  | .fullAttention => cfg.num_attention_heads
-  | .slidingAttention => cfg.num_attention_heads_sliding
-
 /-- Whether layer `i` uses the dense MLP (`mlp_only_layers`) instead of MoE. -/
 def isDenseMlpLayer (cfg : LagunaConfig) (i : Nat) : Bool :=
   cfg.mlp_only_layers.any (· == i)
@@ -141,14 +135,6 @@ def isDenseMlpLayer (cfg : LagunaConfig) (i : Nat) : Bool :=
 /-- Whether this config uses MoE FFN blocks at all. -/
 def isMoE (cfg : LagunaConfig) : Bool :=
   cfg.num_experts > 0
-
-/-- Queries per KV head on full-attention layers. -/
-def numHeadsPerKVGroupFull (cfg : LagunaConfig) : Nat :=
-  cfg.num_attention_heads / cfg.num_key_value_heads
-
-/-- Queries per KV head on sliding-window layers. -/
-def numHeadsPerKVGroupSliding (cfg : LagunaConfig) : Nat :=
-  cfg.num_attention_heads_sliding / cfg.num_key_value_heads
 
 /-- Rotary dims on full-attention layers (64 for partial_rotary 0.5, head_dim 128). -/
 def rotaryDimFull (cfg : LagunaConfig) : Nat :=
@@ -168,16 +154,9 @@ def laguna_s_2_1 : Config := LagunaConfig.laguna_s_2_1
 
 def layerType (cfg : Config) (i : Nat) : LayerType := LagunaConfig.layerType cfg i
 
-def numHeadsForLayer (cfg : Config) (i : Nat) : Nat :=
-  LagunaConfig.numHeadsForLayer cfg i
-
 def isDenseMlpLayer (cfg : Config) (i : Nat) : Bool := LagunaConfig.isDenseMlpLayer cfg i
 
 def isMoE (cfg : Config) : Bool := LagunaConfig.isMoE cfg
-
-def numHeadsPerKVGroupFull (cfg : Config) : Nat := LagunaConfig.numHeadsPerKVGroupFull cfg
-
-def numHeadsPerKVGroupSliding (cfg : Config) : Nat := LagunaConfig.numHeadsPerKVGroupSliding cfg
 
 def rotaryDimFull (cfg : Config) : Nat := LagunaConfig.rotaryDimFull cfg
 

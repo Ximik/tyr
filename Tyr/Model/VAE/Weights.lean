@@ -178,13 +178,4 @@ def loadDecoderAtDType [DType.RealFloating dtype] (path : String) (log : Handler
     conv_out
   }
 
-/-- Load the decoder without converting the checkpoint precision. -/
-def loadDecoder (path : String) (log : Handlers := {}) (device : Device := .CPU) :
-    IO (Σ dtype : RealFloatingDType, Decoder (device := device) dtype.val) := do
-  let anchor ← (← safetensors.Source.open path).load "post_quant_conv.weight" #[32, 32, 1, 1] device
-  let floating ← IO.ofExcept (DType.realFloating? anchor.1)
-  let _ := floating.down
-  let decoder ← loadDecoderAtDType (dtype := anchor.1) path log device
-  pure ⟨RealFloatingDType.ofDType anchor.1, decoder⟩
-
 end torch.vae

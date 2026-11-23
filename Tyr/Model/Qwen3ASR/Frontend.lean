@@ -707,48 +707,6 @@ def wavToWhisperFeatures
       data.resampleSoxrHQ wav sr cfg.samplingRate
   waveformToWhisperFeatures cfg wavTarget
 
-/-- Dynamic-length WAV frontend path.
-    Uses full resampled waveform length (subject to optional min/max seconds). -/
-def wavToWhisperFeaturesDynamic
-    (cfg : PreprocessorConfig)
-    (path : String)
-    (minSeconds : Float := 0.5)
-    (maxSeconds : Option Float := none)
-    (device : Device := Device.CPU)
-    : IO (Sigma (fun frames => WhisperFrontendOutput (device := device) cfg.featureSize frames)) := do
-  let (sr, wav) ← loadMonoPcm16Wav path
-  let wavTarget ←
-    if sr == cfg.samplingRate || sr == 0 then
-      pure wav
-    else
-      data.resampleSoxrHQ wav sr cfg.samplingRate
-  waveformToWhisperFeaturesDynamic cfg wavTarget minSeconds maxSeconds device
-
-/-- Backward-compatible convenience wrapper.
-    This now runs the faithful Whisper-style frontend instead of pseudo-mel. -/
-def wavToPseudoMel {melBins frames : Nat} (path : String) :
-    IO (Tensor { device := .CPU, shape := #[1, melBins, frames], dtype := .Float32 }) := do
-  let ⟨hMel⟩ ← if h : 0 < melBins then pure (PLift.up h) else
-    throw <| IO.userError "Pseudo-mel framing needs at least one mel bin"
-  let cfg : PreprocessorConfig := {
-    featureSize := melBins
-    featureSizePos := hMel
-    hopLength := 160
-    nFft := 400
-    nSamples := frames * 160
-    nbMaxFrames := frames
-    returnAttentionMask := true
-    doNormalize := false
-    dither := 0.0
-  }
-  let out ← wavToWhisperFeatures cfg path
-  let ⟨hFrames⟩ ← if h : PreprocessorConfig.expectedFrames cfg = frames then pure (PLift.up h) else
-    throw <| IO.userError s!"Pseudo-mel framing yields {PreprocessorConfig.expectedFrames cfg} frames, expected {frames}"
-  pure (Tensor.reshape out.inputFeatures #[1, melBins, frames] (by simp [hFrames, cfg]))
-
-def fullFeatureAttentionMask {frames : Nat} : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } :=
-  (Tensor.fullInt #[1, frames] 1).to device
-
 def normalizeAudioTo16kFromWav (path : String) : IO (Array Float) := do
   let path ← expandHome path
   let (sr, wav) ← loadMonoPcm16Wav path
@@ -788,12 +746,5 @@ def normalizeAudioInputTo16k (input : ASRAudioInput) : IO (Array Float) := do
         pure (normalizeFloatRange wav)
       else
         pure (normalizeFloatRange (← data.resampleSoxrHQ wav sr 16000))
-
-/-- Normalize a batch of unified audio inputs to mono 16k float waveforms. -/
-def normalizeAudioInputsTo16k (inputs : Array ASRAudioInput) : IO (Array (Array Float)) := do
-  let mut out : Array (Array Float) := Array.mkEmpty inputs.size
-  for x in inputs do
-    out := out.push (← normalizeAudioInputTo16k x)
-  pure out
 
 end torch.qwen3asr

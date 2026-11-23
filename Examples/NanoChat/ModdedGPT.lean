@@ -126,14 +126,6 @@ def getWindowSizeForLayer (pattern : String) (layerIdx : Nat) (nLayers : Nat) (s
     else
       none  -- Unknown character = full context (safe default)
 
-/-- Compute window sizes for all layers in advance.
-    Returns array of Option Nat where none = full context. -/
-def computeWindowSizes (cfg : Config) : Array (Option Nat) := Id.run do
-  let mut sizes : Array (Option Nat) := #[]
-  for i in [:cfg.nLayer] do
-    sizes := sizes.push (getWindowSizeForLayer cfg.windowPattern i cfg.nLayer cfg.maxSeqLen)
-  return sizes
-
 /-! ## Rotary Embeddings with YaRN -/
 
 /-- YaRN rotary embedding state.
@@ -164,41 +156,6 @@ def YarnRotary.init (half maxSeqLen : Nat) (base : Float := 500000.0) (device : 
     angularFreq := angularFreq
     attnScale := 0.1
   }
-
-/-- Apply YaRN extension when window size changes.
-
-    When extending to longer sequences, we interpolate the
-    rotary frequencies to maintain position information.
--/
-def YarnRotary.applyExtension (yarn : YarnRotary (device := device) half maxSeqLen)
-    (_oldWindow _newWindow : Nat) : YarnRotary (device := device) half maxSeqLen :=
-  -- YaRN frequency interpolation would go here
-  -- For now, return unchanged
-  yarn
-
-/-! ## Attention Arguments -/
-
-/-- Arguments passed to attention layers during forward pass -/
-structure AttnArgs (batch maxSeq nHead headDim : Nat) where
-  /-- Value embeddings for current layer (optional) -/
-  valueEmbed : Option (Tensor { shape := #[batch, maxSeq, nHead * headDim], dtype := .Float32, device := device })
-  /-- SA (scaled attention) lambda for this layer -/
-  saLambda : Float
-  /-- Cumulative sequence lengths for variable-length attention -/
-  seqlens : Option (Tensor { shape := #[batch + 1], dtype := .Int64, device := device })
-  /-- Short window size (in blocks) -/
-  wsShort : Nat
-  /-- Long window size (in blocks) -/
-  wsLong : Nat
-  /-- Cosine frequencies for RoPE -/
-  cos : Tensor { shape := #[maxSeq, headDim], dtype := .Float32, device := device }
-  /-- Sine frequencies for RoPE -/
-  sin : Tensor { shape := #[maxSeq, headDim], dtype := .Float32, device := device }
-  /-- Attention scale factor -/
-  attnScale : Float
-  /-- Whether to shift keys for induction -/
-  keyShift : Bool
-  deriving Repr
 
 /-! ## Linear Layers -/
 
@@ -275,10 +232,6 @@ def CausalSelfAttention.init (dim headDim numHeads : Nat) (device : Device := .C
     wV := ← Tensor.parameter (Tensor.detach wV)
     wO := ← Tensor.parameter (Tensor.detach wO)
   }
-
-/-- Functional RMSNorm (no learnable parameters) -/
-def rmsNorm3d {batch seq dim : Nat} (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device }) : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device } :=
-  Tensor.rmsNorm x
 
 /-- Forward pass for attention with rotary embeddings and QK norm.
     x: [batch, seq, dim]
@@ -654,9 +607,6 @@ def loss {cfg : Config} {batch seq : Nat}
 
 derive_tensor_tree_cast {source target : Device} {half maxSeqLen : Nat} :
   YarnRotary (device := source) half maxSeqLen => YarnRotary (device := target) half maxSeqLen
-
-derive_tensor_tree_cast {source target : Device} {batch maxSeq nHead headDim : Nat} :
-  AttnArgs (device := source) batch maxSeq nHead headDim => AttnArgs (device := target) batch maxSeq nHead headDim
 
 derive_tensor_tree_cast {source target : Device} {inDim outDim : Nat} :
   CastedLinear (device := source) inDim outDim => CastedLinear (device := target) inDim outDim

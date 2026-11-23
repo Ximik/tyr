@@ -15,14 +15,6 @@ namespace torch.qwen3tts
 
 variable {device : Device} {dtypes : DTypeLayout}
 
-/-- Voice clone prompt payload for one sample. -/
-structure VoiceClonePromptItem (cfg : Qwen3TTSConfig) (dtype : RealFloatingDType := float32DType) where
-  refCode : Option (Sigma fun shape => Tensor { shape := shape, dtype := .Int64, device := device }) := none
-  refSpeakerEmbedding : Tensor { shape := #[cfg.speakerEncoderConfig.encDim], dtype := dtype.val, device := device }
-  xVectorOnlyMode : Bool := false
-  iclMode : Bool := false
-  deriving Nonempty
-
 /-- Top-level Qwen3-TTS conditional generation model. -/
 structure Qwen3TTSForConditionalGeneration (cfg : Qwen3TTSConfig) (dtypes : DTypeLayout := {}) where
   talker : TalkerForConditionalGeneration (dtype := dtypes.talker) (device := device) cfg.talkerConfig

@@ -127,23 +127,4 @@ def TokenBytes.dummy (vocabSize : Nat) : TokenBytes :=
   let byteCounts : Array Int64 := Array.replicate vocabSize 2  -- Default 2 bytes per token
   { vocabSize, bytes := Tensor.fromInt64ArrayShaped byteCounts #[vocabSize] (by simp [byteCounts]) }
 
-/-- Create a realistic token bytes mapping for testing.
-    Uses a distribution typical of BPE tokenizers:
-    - Single bytes (0-255): 1 byte each
-    - Common words: 3-6 bytes
-    - Special tokens (last 100): 0 bytes -/
-def TokenBytes.realistic (vocabSize : Nat) (numSpecialTokens : Nat := 100) : TokenBytes :=
-  let byteCounts : Array Int64 := Array.ofFn (n := vocabSize) fun id =>
-    if id.val < 256 then
-      -- Base bytes: 1 byte each
-      1
-    else if id.val >= vocabSize - numSpecialTokens then
-      -- Special tokens: 0 bytes
-      0
-    else
-      -- Regular tokens: average ~3 bytes (BPE merges)
-      3
-
-  { vocabSize, bytes := Tensor.fromInt64ArrayShaped byteCounts #[vocabSize] (by simp [byteCounts]) }
-
 end tokenizer

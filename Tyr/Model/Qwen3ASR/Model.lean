@@ -111,12 +111,6 @@ structure Qwen3ASRThinkerCausalLMOutput (cfg : ThinkerConfig) (batch seq : Nat) 
   logits : Tensor { dtype := dtype, device := device, shape := #[batch, seq, ThinkerLmVocabSize cfg] }
   ropeDeltas : Option (Tensor { device := device, shape := #[batch, 1], dtype := .Int64 }) := none
 
-/-- Small Lean equivalent of generation input preparation payload. -/
-structure ThinkerGenerationInputs (cfg : ThinkerConfig) (batch seq frames : Nat) (featureDType : DType := .Float32) where
-  inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }
-  inputFeatures : Option (Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] }) := none
-  featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none
-
 /-- Thinker model: audio encoder + text decoder + LM head. -/
 structure Qwen3ASRThinkerForConditionalGeneration (cfg : ThinkerConfig) (dtype : DType := .Float32) where
   audioTower : AudioEncoder (device := device) (dtype := dtype) cfg.audioConfig
@@ -626,20 +620,6 @@ private def streamingPromptCacheFor {seq : Nat}
       buildStreamingPromptCacheFromEmbeds m inputsEmbeds promptTokenIds maxNewTokens hSeq
   | none =>
     buildStreamingPromptCacheFromEmbeds m inputsEmbeds promptTokenIds maxNewTokens hSeq
-
-/-- Lean analogue of `prepare_inputs_for_generation` behavior for audio features:
-    only feed audio on the first generation step (`cachePosition == 0`). -/
-def prepareInputsForGeneration {batch seq frames : Nat}
-    (_m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (inputFeatures : Option (Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] }) := none)
-    (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
-    (cachePosition : Nat := 0)
-    : ThinkerGenerationInputs (device := device) (featureDType := featureDType) cfg batch seq frames :=
-  if cachePosition == 0 then
-    { inputIds, inputFeatures, featureAttentionMask }
-  else
-    { inputIds, inputFeatures := none, featureAttentionMask }
 
 /-- Text embeddings with audio placeholder replacement. `training` controls audio attention dropout. -/
 def forwardWithAux {batch seq frames : Nat}

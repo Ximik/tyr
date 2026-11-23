@@ -143,25 +143,6 @@ def loadCheckpointMeta (path : String) : IO DiffusionCheckpointMeta := do
       | none => pure ()
   return { iteration, bestValLoss, trainLoss, optimCount }
 
-/-- Save full checkpoint (model + metadata) -/
-def saveCheckpoint {cfg : Config}
-    (params : DiffusionParams cfg)
-    (iteration : Nat)
-    (bestValLoss : Float)
-    (trainLoss : Float)
-    (dir : String) : IO Unit := do
-  saveDiffusionParams params dir
-  saveCheckpointMeta { iteration, bestValLoss, trainLoss } (dir ++ "/meta.txt")
-  IO.println s!"Diffusion checkpoint saved at iteration {iteration}"
-
-/-- Load checkpoint (model + metadata) -/
-def loadCheckpoint (cfg : Config) (dir : String)
-    : IO (DiffusionParams cfg × DiffusionCheckpointMeta) := do
-  let params ← loadDiffusionParams cfg dir
-  let m ← loadCheckpointMeta (dir ++ "/meta.txt")
-  IO.println s!"Diffusion checkpoint loaded from iteration {m.iteration}"
-  return (params, m)
-
 /-- Check if a checkpoint exists -/
 def checkpointExists (dir : String) : IO Bool := do
   data.fileExists (dir ++ "/meta.txt")
@@ -328,9 +309,5 @@ def loadFullCheckpoint (cfg : Config) (dir : String)
   let ckptMeta ← loadCheckpointMeta (dir ++ "/meta.txt")
   IO.println s!"Full diffusion checkpoint loaded from iteration {ckptMeta.iteration}"
   return (params, optState, ckptMeta)
-
-/-- Check if optimizer state exists in checkpoint -/
-def optimStateExists (dir : String) : IO Bool := do
-  data.fileExists (dir ++ "/optim_count.txt")
 
 end torch.diffusion.checkpoint

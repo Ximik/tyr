@@ -143,8 +143,6 @@ def formatDuration (ms : Nat) : String :=
 
 /-- Handle for a background task -/
 structure BackgroundTask (α : Type) where
-  /-- Task identifier -/
-  id : UInt64
   /-- Description for logging -/
   description : String
   /-- IO action to get result (blocks until complete) -/
@@ -154,9 +152,7 @@ structure BackgroundTask (α : Type) where
     separate thread (`IO.asTask`); the wait is performed lazily by `await`. -/
 def spawnBackground (description : String) (action : IO α) : IO (BackgroundTask α) := do
   let task ← IO.asTask action
-  let id := 0  -- Would be a real task ID
   return {
-    id := id
     description := description
     await := do IO.ofExcept (← IO.wait task)
   }
@@ -374,16 +370,6 @@ structure LogHandlers where
   onError : String → IO Unit := fun _ => pure ()
   deriving Inhabited
 
-/-- Combine two logging handler sets. -/
-def LogHandlers.combine (lhs rhs : LogHandlers) : LogHandlers := {
-  onInfo := fun msg => do
-    lhs.onInfo msg
-    rhs.onInfo msg
-  onError := fun msg => do
-    lhs.onError msg
-    rhs.onError msg
-}
-
 /-- Pipeline execution state -/
 structure PipelineState where
   /-- Configuration -/
@@ -400,43 +386,22 @@ structure PipelineState where
   worldSize : Nat := 1
   /-- Logging handlers -/
   logHandlers : LogHandlers := {}
-  /-- Background tasks -/
-  backgroundTasks : Array (BackgroundTask Unit) := #[]
   deriving Inhabited
 
 /-- Check if this is the master rank -/
 def PipelineState.isMaster (state : PipelineState) : Bool :=
   state.rank == 0
 
-/-- Print only on master rank -/
-def printMaster (state : PipelineState) (msg : String) : IO Unit := do
-  if state.isMaster then
-    state.logHandlers.onInfo msg
-
 /-! ## Pipeline Monad -/
 
 /-- Pipeline monad for sequencing stages -/
 abbrev PipelineM := StateT PipelineState IO
-
-/-- Run pipeline action only on master rank -/
-def masterOnly (action : PipelineM α) (default : α) : PipelineM α := do
-  let state ← get
-  if state.isMaster then
-    action
-  else
-    pure default
 
 /-- Log a message (master only) -/
 def log (msg : String) : PipelineM Unit := do
   let state ← get
   if state.isMaster then
     state.logHandlers.onInfo msg
-
-/-- Log an error message (master only). -/
-def logError (msg : String) : PipelineM Unit := do
-  let state ← get
-  if state.isMaster then
-    state.logHandlers.onError msg
 
 /-- Log a stage start -/
 def logStageStart (name : String) : PipelineM Unit := do
@@ -542,39 +507,6 @@ def stage (name : String) (action : PipelineM Unit) : PipelineM Unit := do
   let config := (← get).config
   runStage name action config.failFast
 
-/-- Execute a stage with retry logic. -/
-def stageWithRetry (name : String) (policy : RetryPolicy) (action : PipelineM Unit) : PipelineM Unit := do
-  let mut lastError := ""
-  for attempt in [:policy.maxAttempts] do
-    try
-      runStage name action true
-      return ()
-    catch e =>
-      lastError := toString e
-      let state ← get
-
-      -- Log retry attempt
-      if state.isMaster then
-        state.logHandlers.onError s!"[WARN] Stage '{name}' failed (attempt {attempt + 1}/{policy.maxAttempts}): {lastError}"
-
-      -- Update retry count in stage info
-      let stages := state.stages.map fun info =>
-        if info.name == name then
-          { info with retryCount := attempt + 1 }
-        else info
-      set { state with stages := stages }
-
-      if attempt + 1 < policy.maxAttempts then
-        let delayMs := policy.delayForAttempt attempt
-        if state.isMaster then
-          state.logHandlers.onInfo s!"[RETRY] Waiting {delayMs}ms before retry..."
-        IO.sleep delayMs.toUInt32
-      else
-        -- Final failure
-        throw e
-
-  throw (IO.userError s!"Stage '{name}' failed after {policy.maxAttempts} attempts: {lastError}")
-
 /-- Spawn a background task within the pipeline -/
 def background (description : String) (action : IO α) : PipelineM (BackgroundTask α) := do
   log s!"Spawning background task: {description}"
@@ -585,75 +517,7 @@ def await (task : BackgroundTask α) : PipelineM α := do
   log s!"Waiting for: {task.description}"
   task.get
 
-/-! ## Tracked Background Tasks -/
-
-/-- Background task with error tracking -/
-structure TrackedTask (α : Type) where
-  /-- Underlying task -/
-  task : BackgroundTask (Except String α)
-  /-- Task description -/
-  description : String
-
-/-- Spawn a background task with error capture -/
-def backgroundTracked (description : String) (action : IO α) : PipelineM (TrackedTask α) := do
-  log s!"Spawning tracked background task: {description}"
-  let wrapped : IO (Except String α) := do
-    try
-      let result ← action
-      return .ok result
-    catch e =>
-      return .error (toString e)
-  let task ← spawnBackground description wrapped
-  return { task := task, description := description }
-
-/-- Await a tracked task with error handling -/
-def awaitTracked (task : TrackedTask α) (onError : String → PipelineM α) : PipelineM α := do
-  let result ← task.task.get
-  match result with
-  | .ok value => return value
-  | .error msg =>
-    log s!"[ERROR] Background task '{task.description}' failed: {msg}"
-    onError msg
-
-/-- Await a tracked task, throwing on error -/
-def awaitTrackedOrThrow (task : TrackedTask α) : PipelineM α := do
-  let result ← task.task.get
-  match result with
-  | .ok value => return value
-  | .error msg =>
-    throw (IO.userError s!"Background task '{task.description}' failed: {msg}")
-
 /-! ## Distributed Failure Coordination -/
-
-/-- Check if any stage has failed locally -/
-def hasLocalFailure : PipelineM Bool := do
-  let state ← get
-  return state.stages.any fun s =>
-    match s.status with
-    | .failed _ => true
-    | _ => false
-
-/-- Synchronize all ranks with a barrier -/
-def syncBarrier : PipelineM Unit := do
-  let state ← get
-  if state.worldSize > 1 then
-    dist.barrier
-
-/-- Check if all ranks are healthy (barrier with failure check).
-    Returns true if this rank has no failures.
-    Note: In distributed mode, each rank checks its own failure status. -/
-def checkAllRanksHealthy : PipelineM Bool := do
-  let state ← get
-  if state.worldSize == 1 then
-    return !(← hasLocalFailure)
-
-  -- Barrier to synchronize
-  dist.barrier
-  -- Check local failure status
-  let failed ← hasLocalFailure
-  if failed && state.isMaster then
-    state.logHandlers.onError "[DISTRIBUTED] This rank has failures"
-  return !failed
 
 /-- Record metrics for the current stage -/
 def recordMetrics (metrics : List (String × String)) : PipelineM Unit := do
@@ -747,10 +611,6 @@ def initPipeline (config : PipelineConfig) : IO PipelineState :=
 /-- Finalize pipeline and generate report. -/
 def finalizePipeline (state : PipelineState) : IO Unit := do
   if state.isMaster then
-    -- Wait for any remaining background tasks
-    for task in state.backgroundTasks do
-      let _ ← task.get
-
     -- Generate summary
     let completedStages := state.stages.filter (·.status == .completed)
     let failedStages := state.stages.filter fun s =>
@@ -793,10 +653,6 @@ def runPipelineWithHandlers (config : PipelineConfig) (logHandlers : LogHandlers
   finalizePipeline finalState
   return result
 
-/-- Run a pipeline action with silent logging. -/
-def runPipeline (config : PipelineConfig) (action : PipelineM α) : IO α :=
-  runPipelineWithHandlers config {} action
-
 /-! ## Distributed Execution Helpers -/
 
 /-- Run with torchrun-style distributed setup and explicit log handlers. -/
@@ -820,21 +676,5 @@ def withDistributedWithHandlers (config : PipelineConfig) (logHandlers : LogHand
     dist.destroyProcessGroup
 
   return result
-
-/-- Run with torchrun-style distributed setup and silent library logging. -/
-def withDistributed (config : PipelineConfig) (action : PipelineM α) : IO α :=
-  withDistributedWithHandlers config {} action
-
-/-! ## Pre-built Pipeline Stages -/
-
-/-- Standard pretraining stage template -/
-def pretrainStage (name : String) (trainFn : PipelineM Unit) (evalFn : PipelineM Unit) : PipelineM Unit := do
-  stage s!"{name}-training" trainFn
-  stage s!"{name}-eval" evalFn
-
-/-- Standard fine-tuning stage template -/
-def finetuneStage (name : String) (trainFn : PipelineM Unit) (evalFn : PipelineM Unit) : PipelineM Unit := do
-  stage s!"{name}-training" trainFn
-  stage s!"{name}-eval" evalFn
 
 end torch.Pipeline

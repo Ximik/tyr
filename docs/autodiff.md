@@ -21,7 +21,7 @@ and [optimization.md](optimization.md).
 
 ## Related guides
 
-- [core/tensors.md](core/tensors.md) — `torch.autograd` FFI bindings and the `differentiable` class
+- [core/tensors.md](core/tensors.md) — `torch.autograd` FFI bindings
 - [core/tensorstruct.md](core/tensorstruct.md) — parameter-tree traversal (`TensorStruct.grads`, `zeroGrads`)
 - [modules.md](modules.md) — layers and the `deriving Model` pipeline
 - [optimization.md](optimization.md) — optimizers and training loops built on the FFI path

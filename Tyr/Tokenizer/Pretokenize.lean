@@ -16,10 +16,6 @@ def isLetter (c : Char) : Bool :=
 def isDigit (c : Char) : Bool :=
   c >= '0' && c <= '9'
 
-/-- Check if a character is alphanumeric -/
-def isAlphanumeric (c : Char) : Bool :=
-  isLetter c || isDigit c
-
 /-- Check if a character is whitespace -/
 def isWhitespace (c : Char) : Bool :=
   c == ' ' || c == '\n' || c == '\t' || c == '\r'

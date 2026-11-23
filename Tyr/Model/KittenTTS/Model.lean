@@ -1594,18 +1594,6 @@ def forward {baseFrames : Nat}
 
 end Generator
 
-structure DecoderDebugOutput where
-  f0 : ShapePackedTensor .Float32 device
-  n : ShapePackedTensor .Float32 device
-  encode : ShapePackedTensor .Float32 device
-  asrRes : ShapePackedTensor .Float32 device
-  decode0 : ShapePackedTensor .Float32 device
-  decode1 : ShapePackedTensor .Float32 device
-  decode2 : ShapePackedTensor .Float32 device
-  decode3 : ShapePackedTensor .Float32 device
-  generator : (GeneratorDebugOutput (device := device))
-  deriving TensorStruct, Inhabited
-
 structure Decoder (cfg : KittenTTSConfig) where
   f0Conv : WNConv1dParams (device := device) 1 1 3 2 1 1
   nConv : WNConv1dParams (device := device) 1 1 3 2 1 1
@@ -1631,41 +1619,6 @@ def init (cfg : KittenTTSConfig) (device : Device := .CPU) : IO (Decoder (device
   let decode3 ← AdainResBlk1dUp.init (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) (KittenTTSConfig.decoderChannels cfg) cfg.styleDim
   let generator ← Generator.init (device := device) cfg
   pure { f0Conv, nConv, encode, asrRes, decode0, decode1, decode2, decode3, generator }
-
-def debugForward {frames : Nat}
-    (m : Decoder (device := device) cfg)
-    (asr : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device })
-    (f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device })
-    (nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device })
-    (style : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device })
-    (hf : 0 < frames)
-    : IO (DecoderDebugOutput (device := device)) := do
-  let f0 : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.f0Conv.forward f0Curve).reshape #[1, 1, frames] (by rw [convOutputSize_halve hf])
-  let n : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.nConv.forward nCurve).reshape #[1, 1, frames] (by rw [convOutputSize_halve hf])
-  let x0 : Tensor { shape := #[1, cfg.hiddenDim + 2, frames], dtype := .Float32, device := device } := (catTo asr (catTo f0 n 1) 1).reshape #[1, cfg.hiddenDim + 2, frames] (by simp)
-  let x1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.encode.forward x0 style hf
-  let asrRes : Tensor { shape := #[1, cfg.asrResDim, frames], dtype := .Float32, device := device } := (m.asrRes.forward asr).reshape #[1, cfg.asrResDim, frames] (by rw [convOutputSize_pointwise hf])
-
-  let d0In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo x1 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
-  let d0 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode0.forward d0In style hf
-  let d1In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d0 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
-  let d1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode1.forward d1In style hf
-  let d2In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d1 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
-  let d2 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode2.forward d2In style hf
-  let d3In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d2 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
-  let d3 : Tensor { shape := #[1, KittenTTSConfig.decoderChannels cfg, 2 * frames], dtype := .Float32, device := device } := m.decode3.forward d3In style hf
-  let generator ← m.generator.debugForward d3 style f0Curve (by omega)
-  pure {
-    f0 := Tensor.packShape f0
-    n := Tensor.packShape n
-    encode := Tensor.packShape x1
-    asrRes := Tensor.packShape asrRes
-    decode0 := Tensor.packShape d0
-    decode1 := Tensor.packShape d1
-    decode2 := Tensor.packShape d2
-    decode3 := Tensor.packShape d3
-    generator
-  }
 
 def forward {frames : Nat}
     (m : Decoder (device := device) cfg)

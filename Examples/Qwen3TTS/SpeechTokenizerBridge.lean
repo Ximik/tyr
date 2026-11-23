@@ -338,24 +338,6 @@ def encodeAudioToCodes
             rowsWritten := rowsWritten + rowsToWrite
           off := off + takeN
 
-/-- Build speaker-encoder mel tensor from reference audio with upstream mel settings.
-    Output tensor is stored as SafeTensors with key `mel` and shape `[1, frames, mel_dim]`. -/
-def prepareSpeakerMel
-    (_bridge : SpeechTokenizerBridgeConfig)
-    (audioPath melOutPath melFramesPath : String)
-    (sampleRate : Nat := 24000)
-    (melDim : Nat := 128)
-    : IO Unit := do
-  let audioPath ← expandHome audioPath
-  let melOutPath ← expandHome melOutPath
-  let melFramesPath ← expandHome melFramesPath
-  ensureParentDir melOutPath
-  ensureParentDir melFramesPath
-  let wave ← loadResampledMonoWav audioPath sampleRate
-  let ⟨frames, mel⟩ ← computeSpeakerMelFromWave wave sampleRate melDim 1024 256 1024 0.0 (some (sampleRate.toFloat / 2.0))
-  Tensor.saveSafeTensor mel melOutPath "mel"
-  IO.FS.writeFile melFramesPath s!"{frames}\n"
-
 /-- End-to-end speaker embedding from reference audio:
     audio -> mel (bridge) -> Lean speaker encoder forward. -/
 def extractSpeakerEmbeddingFromAudio {dtypes : DTypeLayout}

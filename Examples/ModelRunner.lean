@@ -72,13 +72,6 @@ def loadPrompts (promptFile : Option String) (defaultPrompt : String) : IO (Arra
   | none =>
     pure #[defaultPrompt]
 
-/-! ## Model device movement -/
-
-def moveSigmaTensorTo {d : Nat} {dtype : DType} {sourceDevice : Device} (device : Device)
-    (x : Sigma (fun n => Tensor { shape := #[n, d], dtype := dtype, device := sourceDevice })) : Sigma (fun n => Tensor { shape := #[n, d], dtype := dtype, device := device }) :=
-  match x with
-  | ⟨n, t⟩ => ⟨n, t.to device⟩
-
 /-! ## Tensor batching -/
 
 def buildBatchInputWithEncoder
@@ -229,12 +222,6 @@ def runGenerationBatches
         printGeneratedIds start generatedIds (singleOnly := singleOnly)
       printDecodedBatch start decoded (singleOnly := singleOnly)
     start := stop
-
-/-- Alias for text-only generation batches. -/
-abbrev runTextBatches := @runGenerationBatches
-
-/-- Alias for multimodal generation batches. -/
-abbrev runMultimodalBatches := @runGenerationBatches
 
 /-- Greedy generation without streaming support (for models that only expose generateGreedy). -/
 def runGreedyBatches

@@ -61,9 +61,7 @@ Constructors: `constant`, `cosine_decay`, `linear_decay`, `step_decay`, `one_cyc
 `warmup_plateau_cosine`, `exponential_decay`, `polynomial_decay`, `warmup`
 (`Scheduler.lean`). Combinators: `join`, `sequence`, `scale_schedule`, `multiply`,
 `add`, `clamp` (`Scheduler.lean`), plus weight-decay schedules
-`linear_weight_decay` / `cosine_weight_decay`. A legacy config-struct API
-(`ScheduleConfig`, `getLr`, `*.toSchedule`, `Scheduler.lean`) duplicates every
-modern constructor; prefer the function form.
+`linear_weight_decay` / `cosine_weight_decay`.
 
 ### The manifold layer (`Tyr/Manifolds/Basic.lean`, namespace `Tyr.Manifolds`)
 
@@ -166,8 +164,7 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
 scaled subtract. Distributed variants: `stepDistributedOwner` (one rank updates,
 then broadcast) and `stepDistributedGroup` (block-cyclic ownership, reduce-scatter +
 all-gather over homogeneous `Array (Tensor σ)` groups). `ParamLabel` classifies parameters
-(`attn`, `mlp`, `embed`, `lmHead`, `scalars`, …) with `shouldOrthogonalize`,
-`defaultLrMul` (embeddings 75×, scalars 5×), `defaultWdMul`, and `getMomentum` implements
+(`attn`, `mlp`, `embed`, `lmHead`, `scalars`, …), and `getMomentum` implements
 nanochat's 0.85→base momentum warmup.
 
 `DistAdam` (`Tyr/Optim/DistAdam.lean`) is AdamW for embeddings, heads, and scalars:
@@ -182,8 +179,7 @@ first dimension shards evenly, otherwise falls back to all-reduce + local step.
 parameters go to a Muon-family backend, embeddings/LM head/scalars to AdamW. The
 top-level `Config` (`DualOptimizer.lean`) carries per-group LRs (`matrixLr`,
 `embeddingLr`, `lmHeadLr`, `scalarLr`), Muon hyperparameters, scheduled momentum/weight
-decay (`getScheduledMomentum`, `getScheduledWeightDecay`), a `modelDim`/`refDim` LR scale
-(`dimLrScale = (modelDim/refDim)^(-0.5)`), and backend selection:
+decay (`getScheduledMomentum`, `getScheduledWeightDecay`), and backend selection:
 
 ```lean
 inductive MatrixOptimizerKind where | norMuon | manifoldMuon        -- DualOptimizer.lean
@@ -206,8 +202,7 @@ inductive MatrixParamState (m n : UInt64) where
 does Nesterov blending and then a `DualMapGeometry.dualMapStep` on the configured manifold
 family (`DualOptimizer.lean`). A state/config constructor mismatch throws
 `IO.userError` (it used to silently re-initialize the state, dropping momentum). Group variants `stepMatrixGroupLocal`/`stepMatrixGroupDistributed`
-and the closure bundle `MatrixBackendOps m n` (`matrixBackendOps`,
-`matrixBackendOpsForLabel`) cover batched and per-label use.
+and the closure bundle `MatrixBackendOps m n` (`matrixBackendOps`) cover batched use.
 
 ### ManifoldMuon: Stiefel-constrained Muon
 
@@ -267,7 +262,7 @@ Optim core (`torch.Optim`, `Tyr/Optim.lean`):
 | `step` | `opt → params → grads → state → IO (α × S)` |
 | `apply_updates` | `params → updates → IO params` (add, then create independent trainable leaves) |
 
-Schedules (`torch.Optim.Scheduler`): constructors and combinators as listed above; the legacy `ScheduleConfig` + `getLr` API mirrors them.
+Schedules (`torch.Optim.Scheduler`): constructors and combinators as listed above.
 
 Manifolds (`Tyr.Manifolds`): `DifferentiableManifold.gradientStep`, `DualMapGeometry.dualMapStep`,
 `dualMapStepWithDiagnostics`, `EmbeddedManifold.retractAmbientStep`; per-family
@@ -285,9 +280,9 @@ First-order / split optimizers (`torch.Optim.*`):
 | `NorMuon.getMomentum step totalSteps (baseMomentum := 0.95) (warmupSteps := 300)` | momentum warmup schedule |
 | `DistAdam.Config` | `lr := 0.008`, `beta1 := 0.65`, `beta2 := 0.95`, `eps := 1e-8`, `weightDecay := 0.005`, `distributed` |
 | `DistAdam.initParamState` / `stepSingle` / `stepDistributed` | AdamW steps, optionally ZeRO-style sharded |
-| `DualOptimizer.Config` | group LRs, Muon hyperparams, `matrixOptimizer`, `matrixManifold`, solver tolerances, `modelDim`/`refDim` |
+| `DualOptimizer.Config` | group LRs, Muon hyperparams, `matrixOptimizer`, `matrixManifold`, solver tolerances |
 | `DualOptimizer.initMatrixParamState cfg param` / `stepMatrixSingle … cfg step (lrMul := 1.0) (wdMul := 1.0)` | backend-dispatched matrix steps |
-| `DualOptimizer.matrixBackendOps` / `matrixBackendOpsForLabel` | `MatrixBackendOps m n` closure bundles |
+| `DualOptimizer.matrixBackendOps` | `MatrixBackendOps m n` closure bundle |
 | `ManifoldMuon.Config` / `initParamState` / `stepSingle` / `stepSingleWithDiagnostics` / `stepDistributedGroup` | Stiefel-constrained Muon |
 | `RiemannianSGD.stepMSE` / `stepWithFactor` / `stepSequentialMSE`; `RiemannianTreeSGD.stepCrossEntropy` / `stepCrossEntropySampledFisher` | whole-model Riemannian steps |
 

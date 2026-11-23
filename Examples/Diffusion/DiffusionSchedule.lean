@@ -75,13 +75,6 @@ def MaskedDiffusionSchedule.addMasks {num_timesteps batch seq : Nat}
 
   return x_t
 
-/-- Get a mask indicating which positions are masked in x_t -/
-def getMaskedPositions {batch seq : Nat}
-    (x_t : Tokens #[batch, seq])
-    (mask_token_id : UInt64)
-    : Mask #[batch, seq] :=
-  Tensor.eqScalar x_t mask_token_id.toInt64
-
 /-- Compute masked cross-entropy loss.
     Only computes loss on positions that were masked (x_t == mask_token_id).
     Returns the mean loss over masked positions.

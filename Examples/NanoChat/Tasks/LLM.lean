@@ -179,8 +179,6 @@ structure ARCTask where
   config : TaskConfig
   deriving Repr, Inhabited
 
-def ARCTask.evalType : EvalType := .categorical
-
 def ARCTask.size (task : ARCTask) : Nat :=
   let stop := task.config.stop.getD task.examples.size
   let span := stop - task.config.start
@@ -239,8 +237,6 @@ structure MMLUTask where
 
 def MMLUTask.letters : Array String := #["A", "B", "C", "D"]
 
-def MMLUTask.evalType : EvalType := .categorical
-
 def MMLUTask.size (task : MMLUTask) : Nat :=
   let stop := task.config.stop.getD task.examples.size
   let span := stop - task.config.start
@@ -290,8 +286,6 @@ structure SmolTalkTask where
   config : TaskConfig
   deriving Repr
 
-def SmolTalkTask.evalType : EvalType := .generative
-
 def SmolTalkTask.size (task : SmolTalkTask) : Nat :=
   let stop := task.config.stop.getD task.examples.size
   let span := stop - task.config.start
@@ -320,8 +314,6 @@ structure CustomJSONTask where
   examples : Array Conversation
   config : TaskConfig
   deriving Repr
-
-def CustomJSONTask.evalType : EvalType := .generative
 
 def CustomJSONTask.size (task : CustomJSONTask) : Nat :=
   let stop := task.config.stop.getD task.examples.size
@@ -399,8 +391,6 @@ structure GSM8KTask where
   config : TaskConfig
   deriving Repr
 
-def GSM8KTask.evalType : EvalType := .generative
-
 def GSM8KTask.size (task : GSM8KTask) : Nat :=
   let stop := task.config.stop.getD task.examples.size
   let span := stop - task.config.start
@@ -466,8 +456,6 @@ structure SpellingBeeTask where
   /-- Configuration -/
   config : TaskConfig
   deriving Repr
-
-def SpellingBeeTask.evalType : EvalType := .generative
 
 def SpellingBeeTask.getExample (task : SpellingBeeTask) (index : Nat) : Option Conversation := do
   let seed := if task.split == "test"
@@ -536,8 +524,6 @@ structure SimpleSpellingTask where
   config : TaskConfig
   deriving Repr
 
-def SimpleSpellingTask.evalType : EvalType := .generative
-
 def SimpleSpellingTask.getExample (task : SimpleSpellingTask) (index : Nat) : Option Conversation := do
   let seed := if task.split == "test"
     then 10000000 + index.toUInt64
@@ -555,58 +541,6 @@ def SimpleSpellingTask.getExample (task : SimpleSpellingTask) (index : Nat) : Op
   return { messages }
 
 /-! ## Task Loading from JSONL -/
-
-/-- Load ARC examples from JSONL file -/
-def loadARCFromJsonl (path : System.FilePath) : IO (Array ARCExample) := do
-  let content ← IO.FS.readFile path
-  let lines := content.splitOn "\n" |>.filter (!·.isEmpty)
-  let mut examples : Array ARCExample := #[]
-  for line in lines do
-    match Lean.Json.parse line with
-    | .ok json =>
-      if let some ex := ARCExample.fromJson? json then
-        examples := examples.push ex
-    | .error _ => pure ()
-  return examples
-
-/-- Load MMLU examples from JSONL file -/
-def loadMMLUFromJsonl (path : System.FilePath) : IO (Array MMLUExample) := do
-  let content ← IO.FS.readFile path
-  let lines := content.splitOn "\n" |>.filter (!·.isEmpty)
-  let mut examples : Array MMLUExample := #[]
-  for line in lines do
-    match Lean.Json.parse line with
-    | .ok json =>
-      if let some ex := MMLUExample.fromJson? json then
-        examples := examples.push ex
-    | .error _ => pure ()
-  return examples
-
-/-- Load GSM8K examples from JSONL file -/
-def loadGSM8KFromJsonl (path : System.FilePath) : IO (Array GSM8KExample) := do
-  let content ← IO.FS.readFile path
-  let lines := content.splitOn "\n" |>.filter (!·.isEmpty)
-  let mut examples : Array GSM8KExample := #[]
-  for line in lines do
-    match Lean.Json.parse line with
-    | .ok json =>
-      if let some ex := GSM8KExample.fromJson? json then
-        examples := examples.push ex
-    | .error _ => pure ()
-  return examples
-
-/-- Load SmolTalk examples from JSONL file. -/
-def loadSmolTalkFromJsonl (path : System.FilePath) : IO (Array SmolTalkExample) := do
-  let content ← IO.FS.readFile path
-  let lines := content.splitOn "\n" |>.filter (!·.isEmpty)
-  let mut examples : Array SmolTalkExample := #[]
-  for line in lines do
-    match Lean.Json.parse line with
-    | .ok json =>
-      if let some ex := SmolTalkExample.fromJson? json then
-        examples := examples.push ex
-    | .error _ => pure ()
-  return examples
 
 /-- Load conversations from CustomJSON JSONL format (one JSON array of messages per line). -/
 def loadCustomJSONConversations (path : System.FilePath) : IO (Array Conversation) := do
@@ -633,30 +567,6 @@ def loadWordList (path : System.FilePath) : IO (Array String) := do
 
 /-! ## Task Factory Functions -/
 
-/-- Create ARC task from JSONL file -/
-def createARCTask (path : System.FilePath) (subset : String) (split : String)
-    (config : TaskConfig := {}) : IO ARCTask := do
-  let examples ← loadARCFromJsonl path
-  return { subset, split, examples, config }
-
-/-- Create MMLU task from JSONL file -/
-def createMMLUTask (path : System.FilePath) (subset : String) (split : String)
-    (config : TaskConfig := {}) : IO MMLUTask := do
-  let examples ← loadMMLUFromJsonl path
-  return { subset, split, examples, config }
-
-/-- Create GSM8K task from JSONL file -/
-def createGSM8KTask (path : System.FilePath) (subset : String) (split : String)
-    (config : TaskConfig := {}) : IO GSM8KTask := do
-  let examples ← loadGSM8KFromJsonl path
-  return { subset, split, examples, config }
-
-/-- Create SmolTalk task from JSONL file. -/
-def createSmolTalkTask (path : System.FilePath) (split : String)
-    (config : TaskConfig := {}) : IO SmolTalkTask := do
-  let examples ← loadSmolTalkFromJsonl path
-  return { split, examples, config }
-
 /-- Create CustomJSON task from a local JSONL file. -/
 def createCustomJSONTask (path : System.FilePath)
     (config : TaskConfig := {}) : IO CustomJSONTask := do
@@ -674,110 +584,6 @@ def createSimpleSpellingTask (wordListPath : System.FilePath) (size : Nat) (spli
     (config : TaskConfig := {}) : IO SimpleSpellingTask := do
   let words ← loadWordList wordListPath
   return { words, size, split, config }
-
-/-! ## HumanEval Task (Code Generation) -/
-
-/-- HumanEval example from dataset -/
-structure HumanEvalExample where
-  /-- Task ID (e.g., "HumanEval/0") -/
-  taskId : String
-  /-- Function signature and docstring prompt -/
-  prompt : String
-  /-- Function entry point name -/
-  entryPoint : String
-  /-- Canonical solution -/
-  canonical : String
-  /-- Test code to verify correctness -/
-  test : String
-  deriving Repr, Inhabited
-
-def HumanEvalExample.fromJson? (json : Lean.Json) : Option HumanEvalExample := do
-  let taskId ← (json.getObjValAs? String "task_id").toOption
-  let prompt ← (json.getObjValAs? String "prompt").toOption
-  let entryPoint ← (json.getObjValAs? String "entry_point").toOption
-  let canonical ← (json.getObjValAs? String "canonical_solution").toOption
-  let test ← (json.getObjValAs? String "test").toOption
-  return { taskId, prompt, entryPoint, canonical, test }
-
-/-- HumanEval task implementation -/
-structure HumanEvalTask where
-  /-- Loaded examples -/
-  examples : Array HumanEvalExample
-  /-- Configuration -/
-  config : TaskConfig
-  deriving Repr, Inhabited
-
-def HumanEvalTask.evalType : EvalType := .generative
-
-def HumanEvalTask.size (task : HumanEvalTask) : Nat :=
-  let stop := task.config.stop.getD task.examples.size
-  let span := stop - task.config.start
-  (span + task.config.step - 1) / task.config.step
-
-def HumanEvalTask.getExample (task : HumanEvalTask) (index : Nat) : Option Conversation := do
-  let physicalIdx := task.config.start + index * task.config.step
-  let ex ← task.examples[physicalIdx]?
-  -- User provides the prompt, assistant generates the solution
-  let messages := #[
-    Message.user s!"Complete the following Python function:\n\n{ex.prompt}",
-    Message.assistant ex.canonical
-  ]
-  return {
-    messages
-    metadata := [
-      ("task_id", ex.taskId),
-      ("entry_point", ex.entryPoint)
-    ]
-  }
-
-/-- Get the prompt for generation (without solution) -/
-def HumanEvalTask.getPrompt (task : HumanEvalTask) (index : Nat) : Option String := do
-  let physicalIdx := task.config.start + index * task.config.step
-  let ex ← task.examples[physicalIdx]?
-  return ex.prompt
-
-/-- Get test code for an example -/
-def HumanEvalTask.getTest (task : HumanEvalTask) (index : Nat) : Option (String × String) := do
-  let physicalIdx := task.config.start + index * task.config.step
-  let ex ← task.examples[physicalIdx]?
-  return (ex.entryPoint, ex.test)
-
-/-- Evaluate generated code (checks if code executes correctly).
-    Note: Actual execution requires the Execution module.
-    This just checks format. -/
-def HumanEvalTask.evaluate (_task : HumanEvalTask) (_conv : Conversation) (response : String)
-    : EvalResult :=
-  -- For HumanEval, we can't really evaluate without execution
-  -- Just check that response contains code (use findSubstr from this file)
-  let hasDef := (findSubstr response "def ").isSome
-  let hasReturn := (findSubstr response "return").isSome
-  let hasCode := hasDef || hasReturn
-  let truncated := response.take 100
-  {
-    correct := hasCode
-    score := if hasCode then 0.5 else 0.0  -- Partial credit for having code
-    expected := ""
-    predicted := truncated.toString
-  }
-
-/-- Load HumanEval examples from JSONL file -/
-def loadHumanEvalFromJsonl (path : System.FilePath) : IO (Array HumanEvalExample) := do
-  let content ← IO.FS.readFile path
-  let lines := content.splitOn "\n" |>.filter (!·.isEmpty)
-  let mut examples : Array HumanEvalExample := #[]
-  for line in lines do
-    match Lean.Json.parse line with
-    | .ok json =>
-      if let some ex := HumanEvalExample.fromJson? json then
-        examples := examples.push ex
-    | .error _ => pure ()
-  return examples
-
-/-- Create HumanEval task from JSONL file -/
-def createHumanEvalTask (path : System.FilePath) (config : TaskConfig := {})
-    : IO HumanEvalTask := do
-  let examples ← loadHumanEvalFromJsonl path
-  return { examples, config }
 
 /-! ## Task Typeclass Instances -/
 
@@ -837,134 +643,5 @@ instance : EvalTask SimpleSpellingTask where
   size t := t.size
   getExample := SimpleSpellingTask.getExample
   evaluate _ _ response := { correct := true, score := 1.0, expected := "", predicted := response }
-
-/-- HumanEval task implements Task typeclass -/
-instance : EvalTask HumanEvalTask where
-  name := "humaneval"
-  evalType _ := .generative
-  size := HumanEvalTask.size
-  getExample := HumanEvalTask.getExample
-  evaluate := HumanEvalTask.evaluate
-
-/-! ## Unified Task Interface (Legacy)
-
-The AnyTask union is kept for backward compatibility.
-New code should prefer using the Task typeclass via BoxedTask.
--/
-
-/-- Generic task that wraps concrete implementations -/
-inductive AnyTask where
-  | arc : ARCTask → AnyTask
-  | mmlu : MMLUTask → AnyTask
-  | gsm8k : GSM8KTask → AnyTask
-  | smolTalk : SmolTalkTask → AnyTask
-  | customJSON : CustomJSONTask → AnyTask
-  | spellingBee : SpellingBeeTask → AnyTask
-  | simpleSpelling : SimpleSpellingTask → AnyTask
-  | humanEval : HumanEvalTask → AnyTask
-  deriving Repr, Inhabited
-
-def AnyTask.evalType : AnyTask → EvalType
-  | .arc _ => ARCTask.evalType
-  | .mmlu _ => MMLUTask.evalType
-  | .gsm8k _ => GSM8KTask.evalType
-  | .smolTalk _ => SmolTalkTask.evalType
-  | .customJSON _ => CustomJSONTask.evalType
-  | .spellingBee _ => SpellingBeeTask.evalType
-  | .simpleSpelling _ => SimpleSpellingTask.evalType
-  | .humanEval _ => HumanEvalTask.evalType
-
-def AnyTask.size : AnyTask → Nat
-  | .arc t => t.size
-  | .mmlu t => t.size
-  | .gsm8k t => t.size
-  | .smolTalk t => t.size
-  | .customJSON t => t.size
-  | .spellingBee t => t.size
-  | .simpleSpelling t => t.size
-  | .humanEval t => t.size
-
-def AnyTask.getExample (task : AnyTask) (index : Nat) : Option Conversation :=
-  match task with
-  | .arc t => t.getExample index
-  | .mmlu t => t.getExample index
-  | .gsm8k t => t.getExample index
-  | .smolTalk t => t.getExample index
-  | .customJSON t => t.getExample index
-  | .spellingBee t => t.getExample index
-  | .simpleSpelling t => t.getExample index
-  | .humanEval t => t.getExample index
-
-def AnyTask.evaluate (task : AnyTask) (conv : Conversation) (response : String) : EvalResult :=
-  match task with
-  | .arc t => t.evaluate conv response
-  | .mmlu t => t.evaluate conv response
-  | .gsm8k t => t.evaluate conv response
-  | .smolTalk t => t.evaluate conv response
-  | .customJSON t => t.evaluate conv response
-  | .spellingBee t => t.evaluate conv response
-  | .simpleSpelling _ =>
-    -- SimpleSpelling doesn't have formal evaluation
-    { correct := true, score := 1.0, expected := "", predicted := response }
-  | .humanEval t => t.evaluate conv response
-
-/-- Compute reward for RL (0.0 or 1.0 for most tasks) -/
-def AnyTask.reward (task : AnyTask) (conv : Conversation) (response : String) : Float :=
-  let result := task.evaluate conv response
-  result.score
-
-/-! ## Task Mixture for Training -/
-
-/-- Entry in a task mixture with sampling weight -/
-structure AnyMixtureEntry where
-  task : AnyTask
-  weight : Nat := 1
-  deriving Repr, Inhabited
-
-/-- Create unified task mixture from multiple tasks -/
-structure AnyTaskMixture where
-  entries : Array AnyMixtureEntry
-  /-- Shuffled index map: global idx → (task idx, local idx) -/
-  indexMap : Array (Nat × Nat)
-  seed : UInt64
-  deriving Repr
-
-def AnyTaskMixture.create (entries : Array AnyMixtureEntry) (seed : UInt64 := 42)
-    : AnyTaskMixture := Id.run do
-  -- Build index map
-  let mut indices : Array (Nat × Nat) := #[]
-  for taskIdx in [:entries.size] do
-    let entry := entries[taskIdx]!
-    let taskSize := entry.task.size
-    for _ in [:entry.weight] do
-      for localIdx in [:taskSize] do
-        indices := indices.push (taskIdx, localIdx)
-
-  -- Deterministic shuffle
-  let mut shuffled := indices
-  let mut state := seed
-  for i in [:(indices.size - 1)] do
-    state := lcgRandom state
-    let range := indices.size - i
-    let j := i + (state % range.toUInt64).toNat
-    let tmp := shuffled[i]!
-    shuffled := shuffled.set! i shuffled[j]!
-    shuffled := shuffled.set! j tmp
-
-  { entries, indexMap := shuffled, seed }
-
-def AnyTaskMixture.size (mix : AnyTaskMixture) : Nat := mix.indexMap.size
-
-def AnyTaskMixture.getExample (mix : AnyTaskMixture) (index : Nat) : Option Conversation := do
-  let (taskIdx, localIdx) ← mix.indexMap[index]?
-  let entry ← mix.entries[taskIdx]?
-  entry.task.getExample localIdx
-
-def AnyTaskMixture.evaluate (mix : AnyTaskMixture) (index : Nat) (response : String)
-    : Option EvalResult := do
-  let (taskIdx, localIdx) ← mix.indexMap[index]?
-  let entry ← mix.entries[taskIdx]?
-  let conv ← entry.task.getExample localIdx
-  return entry.task.evaluate conv response
 
 end torch.Tasks.LLM

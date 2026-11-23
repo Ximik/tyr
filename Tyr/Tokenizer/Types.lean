@@ -37,31 +37,6 @@ structure BPETokenizer where
   idToSpecial : Std.HashMap TokenId String
   deriving Inhabited
 
-/-- Result of tokenization -/
-structure TokenizeResult where
-  tokens : Array TokenId
-  specialPositions : Array (Nat × String)  -- (position, special token)
-  deriving Repr, Inhabited
-
-/-- Create an empty tokenizer -/
-def BPETokenizer.empty : BPETokenizer :=
-  { vocabSize := 0
-  , idToBytes := #[]
-  , bytesToId := {}
-  , merges := #[]
-  , mergeLookup := {}
-  , mergePriority := {}
-  , specialTokens := {}
-  , idToSpecial := {}
-  }
-
-/-- Get vocabulary size -/
-def BPETokenizer.getVocabSize (tok : BPETokenizer) : Nat := tok.vocabSize
-
-/-- Check if a token ID is valid -/
-def BPETokenizer.isValidToken (tok : BPETokenizer) (id : TokenId) : Bool :=
-  id.toNat < tok.idToBytes.size
-
 /-- Check if a token is a special token -/
 def BPETokenizer.isSpecialToken (tok : BPETokenizer) (id : TokenId) : Bool :=
   tok.idToSpecial.contains id
@@ -69,9 +44,5 @@ def BPETokenizer.isSpecialToken (tok : BPETokenizer) (id : TokenId) : Bool :=
 /-- Get bytes for a token (returns none if invalid) -/
 def BPETokenizer.getTokenBytes (tok : BPETokenizer) (id : TokenId) : Option ByteArray :=
   tok.idToBytes[id.toNat]?
-
-/-- Get special token string (returns none if not special) -/
-def BPETokenizer.getSpecialString (tok : BPETokenizer) (id : TokenId) : Option String :=
-  tok.idToSpecial.get? id
 
 end tokenizer

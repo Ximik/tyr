@@ -122,9 +122,8 @@ Shared infrastructure:
   (parses `auto`/`cpu`/`mps`/`cuda[:n]`, warns and falls back to CPU),
   `parseNatArg`, `loadPrompts`.
 - `Examples/GPT/GPT.lean` — the canonical dependently-typed model demo:
-  `torch.gpt.Config` with presets `Config.gpt2_small`, `gpt2_mini`,
-  `gpt2_micro`, `tiny_shakespeare`, `nanogpt_cpu_shakespeare`,
-  `nanogpt_gpu_shakespeare`, and shape-indexed parameters such as
+  `torch.gpt.Config` with presets `tiny_shakespeare` and
+  `nanogpt_cpu_shakespeare`, and shape-indexed parameters such as
   `BlockParams (n_embd : UInt64)` whose fields use `torch.Tensor` through
   `Activation shape` (Float32). `Tokens shape` carries Int64 inputs. The typed
   `forward` and `loss` APIs preserve these indices throughout the model;

@@ -1,6 +1,5 @@
 import Tests.Assertions
 import LeanTest
-import Tyr.Typed.Layers
 import Tyr.Module.RMSNorm
 import Tyr.Model.Utils
 import Tyr.Model.Flux.TypedOps
@@ -23,7 +22,6 @@ namespace Tests.TestFactoryRecovery
 @[test]
 def testInitializerShapeValidation : IO Unit := do
   let invalid : Nat := 18446744073709551615
-  Tests.assertThrows (Typed.RMSNorm.init invalid)
   Tests.assertThrows (RMSNorm.init invalid)
   Tests.assertThrows (Model.initBias #[invalid])
   Tests.assertThrows (IO.ofExcept (Shape.validateAllocation #[invalid, invalid]))

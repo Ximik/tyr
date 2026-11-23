@@ -101,8 +101,6 @@ instance : FloatingOrComplex .Complex128 := ⟨rfl⟩
 @[reducible] def isInexact (dtype : DType) : _root_.Bool :=
   dtype.isFloating || dtype.isComplex
 
-@[reducible] def isDifferentiable : DType → _root_.Bool := isInexact
-
 @[reducible] def isIndex : DType → _root_.Bool
   | .UInt8 | .Int32 | .Int64 => true
   | _ => false
@@ -295,10 +293,6 @@ rule says so. These equalities only rewrite indices; they never cast values. -/
 
 @[simp] theorem isInexact_of_realFloating {dtype : DType} [h : RealFloating dtype] :
     dtype.isInexact = true := by
-  cases dtype <;> first | rfl | cases h.valid
-
-@[simp] theorem isDifferentiable_of_realFloating {dtype : DType} [h : RealFloating dtype] :
-    dtype.isDifferentiable = true := by
   cases dtype <;> first | rfl | cases h.valid
 
 @[simp] theorem isComplex_of_realFloating {dtype : DType} [h : RealFloating dtype] :

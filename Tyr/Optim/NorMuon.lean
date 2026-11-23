@@ -33,18 +33,6 @@ inductive ParamLabel where
   | valueEmbed  : ParamLabel  -- Value embeddings
   deriving Repr, BEq, Hashable, Inhabited
 
-/-- Labeled parameter with metadata for optimization -/
-structure LabeledParam (σ : StaticSpec) where
-  /-- The parameter tensor -/
-  tensor : Tensor σ
-  /-- Parameter label for grouping -/
-  label : ParamLabel
-  /-- Learning rate multiplier (1.0 = base LR) -/
-  lrMul : Float := 1.0
-  /-- Weight decay multiplier (1.0 = base WD, 0.0 = no WD) -/
-  wdMul : Float := 1.0
-  deriving Repr
-
 /-- NorMuon configuration -/
 structure Config where
   /-- Base learning rate -/
@@ -116,77 +104,6 @@ instance {σ : StaticSpec} : TensorStruct (ParamState σ) where
       | none => acc
 
 derive_tensor_struct_for ParamState
-
-/-- Full NorMuon optimizer state -/
-structure State where
-  /-- Configuration -/
-  config : Config
-  /-- Per-parameter states, existentially packed over their specs -/
-  paramStates : Array (Sigma ParamState)
-  /-- Global step count -/
-  globalStep : Nat := 0
-  deriving Repr
-
-/-- Initialize NorMuon state from configuration -/
-def State.init (cfg : Config) : IO State := do
-  return {
-    config := cfg
-    paramStates := #[]
-    globalStep := 0
-  }
-
-/-- Apply variance reduction to orthogonalized gradient.
-
-    Uses low-rank second moment estimation (Adafactor-style):
-    v_t = beta2 * v_{t-1} + (1 - beta2) * mean(g^2)
-    g_normalized = g / sqrt(v_t + eps)
-
-    This reduces variance of the update while maintaining direction.
--/
-def applyVarianceReduction {σ : StaticSpec} [DType.RealFloating σ.dtype] (grad : Tensor σ)
-    (secondMoment : Option (Tensor σ.sumSpec))
-    (beta2 : Float) (step : Nat) : IO (Tensor σ × Tensor σ.sumSpec) := do
-  let eps : Float := 1e-8
-
-  -- Compute mean of squared gradients over all entries
-  let gradSquared := Tensor.mul grad grad
-  let numel := (TensorSpec.numelOfShape σ.shape).toFloat
-  let sumSquared : Tensor (σ.withShape #[]) := by simpa using Tensor.sumAll gradSquared
-  let newSecondMoment := Tensor.divScalar sumSquared numel
-
-  -- Update EMA of second moment
-  let updatedSecondMoment ← match secondMoment with
-    | some sm =>
-      let sm : Tensor (σ.withShape #[]) := by simpa using sm
-      let b2 := Tensor.mulScalar sm beta2
-      let g2 := Tensor.mulScalar newSecondMoment (1.0 - beta2)
-      pure (Tensor.add b2 g2)
-    | none => pure newSecondMoment
-
-  -- Bias correction
-  let biasCorrection := 1.0 - Float.pow beta2 (step + 1).toFloat
-  let correctedMoment := Tensor.divScalar updatedSecondMoment biasCorrection
-
-  -- Normalize gradient by sqrt(second moment)
-  let scale := 1.0 / Float.sqrt (Tensor.item correctedMoment + eps)
-  let normalizedGrad := Tensor.mulScalar grad scale
-
-  return (normalizedGrad, by simpa using updatedSecondMoment)
-
-/-- Apply cautious weight decay.
-
-    Only applies weight decay when gradient and parameter have the same sign:
-    mask = sign(grad) == sign(param)
-    update = grad + wd * mask * param
-
-    This prevents weight decay from fighting the gradient.
--/
-def applyCautiousWeightDecay {σ : StaticSpec} [DType.RealFloating σ.dtype] (param grad : Tensor σ) (wd : Float) :
-    IO (Tensor σ) := do
-  if wd == 0.0 then
-    return grad
-  else
-    dist.cautiousUpdate param grad 1.0 wd
 
 /-- Update momentum buffer with orthogonalized gradient.
 
@@ -461,48 +378,6 @@ def stepAdamLike {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor
   }
 
   return (newParam, newState)
-
-/-- Determine if a parameter should use orthogonalized updates.
-
-    Matrix parameters (attention, MLP weights) use orthogonalization.
-    Embeddings, scalars, and biases use standard momentum updates.
--/
-def shouldOrthogonalize (label : ParamLabel) : Bool :=
-  match label with
-  | .smearGate => true
-  | .attnGate => true
-  | .attn => true
-  | .mlp => true
-  | .embed => false
-  | .lmHead => false
-  | .scalars => false
-  | .valueEmbed => false
-
-/-- Get default learning rate multiplier for a parameter label.
-
-    Based on modded-nanogpt:
-    - Embeddings: 75x (need larger updates)
-    - Scalars: 5x
-    - Others: 1x
--/
-def defaultLrMul (label : ParamLabel) : Float :=
-  match label with
-  | .embed => 75.0
-  | .valueEmbed => 75.0
-  | .lmHead => 1.0
-  | .scalars => 5.0
-  | _ => 1.0
-
-/-- Get default weight decay multiplier for a parameter label.
-
-    Based on modded-nanogpt:
-    - Scalars: 0x (no weight decay)
-    - Others: 1x
--/
-def defaultWdMul (label : ParamLabel) : Float :=
-  match label with
-  | .scalars => 0.0
-  | _ => 1.0
 
 /-- Momentum schedule used by nanochat base/mid training.
 

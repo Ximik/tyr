@@ -159,7 +159,7 @@ defaults to CPU and indexes its result by the requested device.
 | `Cache.attendLayer` | Appends one token and returns the updated cache and indexed attention output in `IO` |
 | `Cache.appendLayer` | Appends without attending, in `IO` |
 | `Cache.incrementSeqLens` | Validates and advances positions in `IO`; call once per token after all layers |
-| `Cache.currentLen`, `Cache.hasRoom` | Inspect the current position and capacity |
+| `Cache.currentLen` | Inspect the current position |
 | `LayerCache.append` | Writes a token through the explicit inference copy boundary |
 | `LayerCache.attentionView` | Returns indexed K/V views with runtime-dependent `validLen`, in `IO` |
 

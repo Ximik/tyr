@@ -36,8 +36,6 @@ structure WorkHandle where
 def wait (handle : WorkHandle) : IO Unit :=
   waitImpl handle.id
 
-/-! ## Process Group Management -/
-
 /-! ## Collective Operations -/
 
 /-- All-reduce into an independent result, preserving the input tensor and its
@@ -116,11 +114,6 @@ def allGatherList {σ : StaticSpec} (outputs : Array (Tensor σ)) (input : Tenso
 
 /-! ## Async Operation Handling -/
 
-/-- Observe completion without releasing the handle. `wait` remains required
-    after successful polling; an unknown or already consumed handle is an error. -/
-def WorkHandle.isCompleted (handle : WorkHandle) : IO Bool :=
-  isCompletedImpl handle.id
-
 /-- Wait for every async operation, then rethrow the first error if any wait
     failed. Later work handles are drained even when an earlier operation fails. -/
 def waitAll (handles : Array WorkHandle) : IO Unit := do
@@ -187,11 +180,6 @@ def getRankAndWorldSize : IO (Nat × Nat) := do
   let rank ← getRank
   let worldSize ← getWorldSize
   return (rank, worldSize)
-
-/-- Check if this is the master process (rank 0) -/
-def isMaster : IO Bool := do
-  let rank ← getRank
-  return rank == 0
 
 /-- Broadcast model parameters from rank 0 to all processes -/
 def broadcastParams {α : Type} [TensorStruct α] (params : α) : IO α := do
@@ -333,21 +321,5 @@ def DistributedSampler.create (cfg : DistributedSamplerConfig) : DistributedSamp
   let indices := allIndices.extract startIdx (startIdx + numSamples)
 
   { config := cfg, indices := indices, epoch := 0 }
-
-/-- Create a new sampler for the next epoch (re-shuffles if shuffle=true) -/
-def DistributedSampler.nextEpoch (sampler : DistributedSampler) : DistributedSampler :=
-  let newEpoch := sampler.epoch + 1
-  let newSeed := sampler.config.seed + newEpoch.toUInt64
-  let newConfig := { sampler.config with seed := newSeed }
-  let newSampler := DistributedSampler.create newConfig
-  { newSampler with epoch := newEpoch }
-
-/-- Get the number of samples for this rank -/
-def DistributedSampler.size (sampler : DistributedSampler) : Nat :=
-  sampler.indices.size
-
-/-- Get index at position in this rank's shard -/
-def DistributedSampler.getIndex (sampler : DistributedSampler) (pos : Nat) : Option Nat :=
-  sampler.indices[pos]?
 
 end torch.dist

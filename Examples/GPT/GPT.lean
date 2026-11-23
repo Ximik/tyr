@@ -26,18 +26,6 @@ structure Config where
   dropout : Float := 0.0
   deriving Repr, Inhabited
 
-/-- GPT-2 small configuration (124M parameters) -/
-def Config.gpt2_small : Config :=
-  { vocab_size := 50257, block_size := 1024, n_embd := 768, n_head := 12, n_layer := 12 }
-
-/-- GPT-2 mini for testing (smaller) -/
-def Config.gpt2_mini : Config :=
-  { vocab_size := 50257, block_size := 256, n_embd := 384, n_head := 6, n_layer := 6 }
-
-/-- GPT-2 micro for quick iteration -/
-def Config.gpt2_micro : Config :=
-  { vocab_size := 50257, block_size := 128, n_embd := 128, n_head := 4, n_layer := 4 }
-
 /-- Tiny config for quick testing on Shakespeare (65 char vocab) -/
 def Config.tiny_shakespeare : Config :=
   { vocab_size := 65, block_size := 64, n_embd := 64, n_head := 4, n_layer := 2, dropout := 0.0 }
@@ -45,10 +33,6 @@ def Config.tiny_shakespeare : Config :=
 /-- nanoGPT CPU config for Shakespeare: 4 layers, 4 heads, 128 embd, no dropout -/
 def Config.nanogpt_cpu_shakespeare : Config :=
   { vocab_size := 65, block_size := 64, n_embd := 128, n_head := 4, n_layer := 4, dropout := 0.0 }
-
-/-- nanoGPT GPU config for Shakespeare: 6 layers, 6 heads, 384 embd, dropout 0.2 -/
-def Config.nanogpt_gpu_shakespeare : Config :=
-  { vocab_size := 65, block_size := 256, n_embd := 384, n_head := 6, n_layer := 6, dropout := 0.2 }
 
 /-- Parameters for a single transformer block -/
 structure BlockParams (n_embd : Nat) where
@@ -215,22 +199,6 @@ def loss {cfg : Config} {batch seq : Nat}
   let logits_flat := logits.reshape #[batch * seq, cfg.vocab_size]
   let targets_flat := targets.reshape #[batch * seq]
   pure (Tensor.crossEntropy! logits_flat targets_flat)
-
-/-- Training state using Optax-style optimizer -/
-structure TrainState (cfg : Config) where
-  params : GPTParams (device := device) cfg
-  optState : Optim.AdamWState (GPTParams (device := device) cfg)
-  step : Nat
-
-/-- Initialize training state -/
-def TrainState.init (cfg : Config) (device : Device := .CPU) : IO (TrainState (device := device) cfg) := do
-  let params ← GPTParams.init cfg device
-  let opt := Optim.adamw (lr := 1e-3)
-  return {
-    params := params
-    optState := opt.init params
-    step := 0
-  }
 
 /-- Generate tokens autoregressively from the model
     Takes initial context and generates maxNewTokens more tokens -/

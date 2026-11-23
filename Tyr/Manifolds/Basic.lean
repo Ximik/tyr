@@ -140,6 +140,4 @@ def gradientStep [DifferentiableManifold M]
 end DifferentiableManifold
 
 -- Backward compatibility alias
-abbrev Differentiable := DifferentiableManifold
-
 end Tyr.Manifolds

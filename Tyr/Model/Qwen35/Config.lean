@@ -27,11 +27,6 @@ def ofString? (s : String) : Option LayerType :=
   else
     none
 
-/-- Serialize to HuggingFace-style string. -/
-def toString : LayerType → String
-  | .linearAttention => "linear_attention"
-  | .fullAttention => "full_attention"
-
 end LayerType
 
 instance : TensorStruct LayerType where

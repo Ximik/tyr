@@ -49,23 +49,8 @@ every other axis. libtorch's legacy skipping of an empty 1-D operand is excluded
 @[simp] def catShape (s1 s2 : Shape) (dim : Nat) : Shape :=
   s1.set! dim (s1.getD dim 0 + s2.getD dim 0)
 
-def scalar (dtype : DType) : TensorSpec :=
-  { shape := #[], dtype }
-
-def rank (spec : TensorSpec) : Nat :=
-  spec.shape.size
-
 @[simp] def numelOfShape (shape : Shape) : Nat :=
   shape.foldl (fun acc dim => acc * dim) 1
-
-def numel (spec : TensorSpec) : Nat :=
-  numelOfShape spec.shape
-
-def withShape (spec : TensorSpec) (shape : Shape) : TensorSpec :=
-  { spec with shape }
-
-def withDType (spec : TensorSpec) (dtype : DType) : TensorSpec :=
-  { spec with dtype }
 
 @[simp] def dimFromRight (shape : Shape) (offset : Nat) : Nat :=
   if offset < shape.size then
@@ -182,15 +167,6 @@ def matmul? (lhs rhs : TensorSpec) : Option TensorSpec := do
   else
     let dtype ← DType.promote? lhs.dtype rhs.dtype
     pure { shape, dtype }
-
-def sum (spec : TensorSpec) : TensorSpec :=
-  { shape := #[], dtype := DType.sumResult spec.dtype }
-
-def mean (spec : TensorSpec) : TensorSpec :=
-  { shape := #[], dtype := DType.meanResult spec.dtype }
-
-def prod (spec : TensorSpec) : TensorSpec :=
-  { shape := #[], dtype := DType.prodResult spec.dtype }
 
 def checkShape (expected actual : Shape) : Except String Unit :=
   if actual == expected then

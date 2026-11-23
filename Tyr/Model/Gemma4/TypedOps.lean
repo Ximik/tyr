@@ -32,16 +32,6 @@ def maskedAttention {b h kh qs ks d : Nat} {dm : DType} [DType.RealFloating dtyp
     Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype } :=
   maskedAttention! q k v mask gqa
 
-def maskedAttentionIO {b h kh qs ks d : Nat} {dm : DType}
-    (q : Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype }) (k v : Tensor { device := device, shape := #[b, kh, ks, d], dtype := dtype })
-    (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm })
-    (dropout : Float) (training : Bool) (gqa : Bool := false) :
-    IO (Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype }) := do
-  let effective ← IO.ofExcept (Tensor.attentionDropout? dropout training)
-  let raw ← RawTensor.gemma4MaskedAttentionIO q.raw k.raw v.raw mask.raw
-    effective gqa
-  pure (Tensor.ofRaw! raw)
-
 def zerosDynamicOn {s : Shape} (device : Device) (dtype : DType := .Float32)
     [DType.ConstantSupported dtype device] : Tensor { device := device, shape := s, dtype := dtype } :=
   Tensor.zerosFor { shape := s, dtype, device }
