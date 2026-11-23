@@ -174,10 +174,7 @@ nanochat's 0.85→base momentum warmup.
 `ParamState s` holds `expAvg`/`expAvgSq`/`step`, `stepSingle` is textbook bias-corrected
 Adam with decoupled weight decay (`DistAdam.lean`), and `stepDistributed`
 (`DistAdam.lean`) reduce-scatters gradients and all-gathers updated shards when the
-first dimension shards evenly, otherwise falls back to all-reduce + local step. A sharded
-API (`ShardedParamState`, `stepSharded`, `ShardedEmbeddingAdam`) layered on
-`Tyr.Sharding.ShardedTensor` has no call sites outside its own file — treat as
-experimental.
+first dimension shards evenly, otherwise falls back to all-reduce + local step.
 
 ### DualOptimizer: the matrix/embedding split
 

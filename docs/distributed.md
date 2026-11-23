@@ -122,6 +122,10 @@ native declarations in `Tyr/RawTensor/Distributed.lean`) — orthogonalization m
 see [Optimization](optimization.md).
 
 ### Sharding: `torch.Sharding` (`Tyr/Sharding.lean`)
+`shardSize` and `shardOffset` give one shard's size and start when a dimension
+of `fullSize` is split across `numShards` ranks; the first
+`fullSize % numShards` shards take one extra element.
+
 
 Sharding is expressed at the type level: `shardedShape` projects a compile-time
 `Shape` to this rank's shard shape, so a `ShardedTensor`'s local data has a
@@ -365,7 +369,7 @@ at `config.matrixLr * getLrMultiplier ...` (`Tyr/RL/GRPO.lean`).
 | Sync parameters across ranks | `dist.broadcastParams` | `Tyr/Distributed.lean` |
 | Average gradients across ranks | `dist.allReduceGrads grads .avg` | `Tyr/Distributed.lean` |
 | Raw collectives | `dist.allReduce`, `dist.broadcast`, `dist.reduceScatter`, `dist.allGather` (+ `*Async`, `WorkHandle`) | `Tyr/Distributed.lean` |
-| ZeRO-style sharding | `Sharding.ShardedTensor` (`fromFull`/`gather`/`scatterGrad`/`updateShard`), `shardedShape`, `ValidShard` | `Tyr/Sharding.lean` |
+| Shard size and offset | `Sharding.shardSize`, `Sharding.shardOffset` | `Tyr/Sharding.lean` |
 | Run a staged pipeline | `Pipeline.withDistributedWithHandlers`, `stage`, `recordMetrics`, `log`, `PipelineConfig.resumeFromCheckpoint` | `Tyr/Pipeline.lean` |
 | Run artifacts | `RunLedger.RunArtifacts.ofBaseDir`, `prepare`, `appendMetricEvent`, `appendCheckpointEvent` | `Tyr/Train/RunLedger.lean` |
 | Chat SFT | `ChatSFT.trainLoop`, `SFTConfig`, `makeTaskDataGenerator`, `artifactCallbacks` | `Tyr/Train/ChatSFT.lean` |
