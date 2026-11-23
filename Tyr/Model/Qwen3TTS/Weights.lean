@@ -195,7 +195,7 @@ private def loadCodePredictorSharded (modelDir : String) (cast : Bool) (cfg : Ta
   let cp := cfg.codePredictorConfig
   let nCodebooks := cfg.numCodeGroups - 1
 
-  let codebooks : Vector nCodebooks Nat := ⟨Array.range nCodebooks, Array.size_range⟩
+  let codebooks : Vector Nat nCodebooks := Vector.range nCodebooks
   let inputEmbeddings ← codebooks.mapM fun i => do
     let emb ← loadTensorShardedTarget modelDir cast
       s!"talker.code_predictor.model.codec_embedding.{i}.weight"
@@ -261,7 +261,7 @@ private def loadSqueezeExcitationBlockSharded (modelDir : String) (cast : Bool) 
 private def loadRes2NetBlockSharded (modelDir : String) (cast : Bool) (namePrefix : String)
     (channels scale kernelSize dilation : Nat)
     : IO (Res2NetBlock (device := device) (dtype := dtype) channels scale kernelSize dilation) := do
-  let indices : Vector (scale - 1) Nat := ⟨Array.range (scale - 1), Array.size_range⟩
+  let indices : Vector Nat (scale - 1) := Vector.range (scale - 1)
   let blocks ← indices.mapM fun i =>
     loadTimeDelayNetBlockSharded modelDir cast
       s!"{namePrefix}.blocks.{i}"

@@ -151,12 +151,12 @@ end TalkerModel
 
 /-- Sub-talker model that predicts residual codec groups. -/
 structure TalkerCodePredictor (cfg : TalkerConfig) (dtype : RealFloatingDType := float32DType) where
-  inputEmbeddings : Vector (cfg.numCodeGroups - 1) (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device })
+  inputEmbeddings : Vector (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }) (cfg.numCodeGroups - 1)
   inputProjection : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], dtype := dtype.val, device := device }
   inputProjectionBias : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device }
   layers : Array (CodePredictorLayer (dtype := dtype) (device := device) cfg.codePredictorConfig)
   norm : RMSNorm (device := device) cfg.codePredictorConfig.hiddenSize dtype.val
-  lmHeads : Vector (cfg.numCodeGroups - 1) (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device })
+  lmHeads : Vector (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device }) (cfg.numCodeGroups - 1)
   deriving TensorStruct
 
 namespace TalkerCodePredictor
@@ -164,7 +164,7 @@ namespace TalkerCodePredictor
 def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : RealFloatingDType := float32DType) : IO (TalkerCodePredictor (dtype := dtype) (device := device) cfg) := do
   let numCodebooks := cfg.numCodeGroups - 1
 
-  let codebooks : Vector numCodebooks Nat := ⟨Array.range numCodebooks, Array.size_range⟩
+  let codebooks : Vector Nat numCodebooks := Vector.range numCodebooks
   let inputEmbeddings ← codebooks.mapM fun _ =>
     initWeight (device := device) #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize] cfg.hiddenSize
 

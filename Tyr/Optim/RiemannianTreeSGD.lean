@@ -50,22 +50,14 @@ private def weightedInvDot [TensorStruct α] [FloatingTensorStruct α] (mass : �
 
 /-- Tree-valued low-rank factor on parameter space. -/
 structure TreeMetricFactor (Params : Type) (rank : Nat) where
-  rows : Array Params
-  rows_size : rows.size = rank
+  rows : Vector Params rank
 
 namespace TreeMetricFactor
-
-private def rowAt {Params : Type} {rank : Nat}
-    (K : TreeMetricFactor Params rank) (i : Fin rank) : Params :=
-  K.rows[i.val]'(by simp [K.rows_size])
 
 def apply {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : Nat}
     (K : TreeMetricFactor Params rank)
     (x : Params) : Tensor { shape := #[rank], dtype := .Float32, device := .CPU } :=
-  let coeffs :=
-    ((List.finRange rank).toArray.map fun i =>
-      let row := K.rowAt i
-      treeDot row x)
+  let coeffs := K.rows.toArray.map (treeDot · x)
   Tensor.reshape (Tensor.fromFloatArray coeffs) #[rank]
 
 def applyTranspose {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : Nat}
@@ -77,7 +69,7 @@ def applyTranspose {Params : Type} [TensorStruct Params] [FloatingTensorStruct P
     for i in List.finRange rank do
       let coeff1 := Tensor.slice coeffs 0 i.val 1
       let coeff := Tensor.item (Tensor.sumAll coeff1)
-      let row := K.rowAt i
+      let row := K.rows[i]
       acc := TensorStruct.add acc (TensorStruct.scale row coeff)
     pure acc
 
@@ -88,7 +80,7 @@ def woodburyInner {Params : Type} [TensorStruct Params] [FloatingTensorStruct Pa
     have hRank : 0 < rank := Nat.pos_of_ne_zero (by rintro rfl; exact absurd k.isLt (by simp))
     let i : Fin rank := ⟨k.val / rank, Nat.div_lt_of_lt_mul k.isLt⟩
     let j : Fin rank := ⟨k.val % rank, Nat.mod_lt _ hRank⟩
-    let entry := weightedInvDot mass (K.rowAt j) (K.rowAt i)
+    let entry := weightedInvDot mass K.rows[j] K.rows[i]
     if i.val == j.val then entry + 1.0 else entry
   Tensor.fromFloatArrayShaped entries #[rank, rank] (by simp [entries])
 
@@ -125,27 +117,23 @@ private def paramVjpFromPrepared [TensorStruct Params] [FloatingTensorStruct Par
 private def buildTreeFactorFromCotangentRows [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape} {rank : Nat}
     (output : Tensor { shape := s, dtype := .Float32, device := device })
     (params : Params)
-    (rows : Array (Tensor { shape := s, dtype := .Float32, device := device }))
-    (rows_size : rows.size = rank) : IO (TreeMetricFactor Params rank) := do
-  let indices : torch.Vector rank (Fin rank) :=
-    ⟨(List.finRange rank).toArray, by simp⟩
-  let pulled ← indices.mapM fun i =>
-    let row := rows[i.val]'(by rw [rows_size]; exact i.isLt)
-    -- Each row shares the forward graph; the final pullback releases it.
-    paramVjpFromPrepared output params row (i.val + 1 < rank)
-  pure { rows := pulled.data, rows_size := pulled.size_eq }
+    (rows : Vector (Tensor { shape := s, dtype := .Float32, device := device }) rank) :
+    IO (TreeMetricFactor Params rank) := do
+  -- Each row shares the forward graph; the final pullback releases it.
+  let pulled ← rows.mapIdxM fun i row => paramVjpFromPrepared output params row (i + 1 < rank)
+  pure { rows := pulled }
 
 private def buildTreeFactorFromOutputFactor [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape} {rank : Nat}
     (output : Tensor { shape := s, dtype := .Float32, device := device })
     (params : Params)
     (outputFactor : MetricFactor rank (shapeNumel s) .Float32 device) : IO (TreeMetricFactor Params rank) := do
   let rows :=
-    Array.ofFn (n := rank) fun i =>
+    Vector.ofFn (n := rank) fun i =>
       let rowFlat : Tensor { shape := #[shapeNumel s], dtype := .Float32, device := device } :=
         Tensor.reshape (Tensor.slice outputFactor.matrix 0 i 1)
           #[shapeNumel s]
       Tensor.reshape rowFlat s (by simp)
-  buildTreeFactorFromCotangentRows output params rows (by simp [rows])
+  buildTreeFactorFromCotangentRows output params rows
 
 private def finalizePreparedStepWithTreeFactor
     {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
@@ -240,7 +228,7 @@ private def sampledFisherCotangentRows
     {batch seq vocab : Nat}
     (predictionReq : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
     (probeCount : Nat)
-    : IO { rows : Array (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }) // rows.size = probeCount } := do
+    : IO (Vector (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }) probeCount) := do
   if probeCount == 0 then
     throw <| IO.userError "RiemannianTreeSGD.stepCrossEntropySampledFisher requires probeCount > 0"
   let tokenCount := batch * seq
@@ -271,10 +259,9 @@ private def sampledFisherTreeFactor
     {batch seq vocab : Nat} {rank : Nat}
     (predictionReq : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
     (paramsReq : Params)
-    (rows : Array (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }))
-    (rows_size : rows.size = rank)
+    (rows : Vector (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }) rank)
     : IO (TreeMetricFactor Params rank) :=
-  buildTreeFactorFromCotangentRows predictionReq paramsReq rows rows_size
+  buildTreeFactorFromCotangentRows predictionReq paramsReq rows
 
 /-- Cross-entropy step for tensor-logit models with unit diagonal mass. -/
 def stepCrossEntropy
@@ -334,13 +321,13 @@ def stepCrossEntropySampledFisher
   let (paramsReq, predictionReq, lossT, outputCotangent) ←
     prepareCrossEntropyStep params forward targets
   let mass := TensorStruct.map Tensor.onesLike params
-  let ⟨rows, hRows⟩ ← sampledFisherCotangentRows predictionReq probeCount
+  let rows ← sampledFisherCotangentRows predictionReq probeCount
   let gradient0 ← paramVjpFromPrepared predictionReq paramsReq outputCotangent (probeCount != 0)
   let gradient := if gradClip > 0.0 then clipScale gradient0 gradClip else gradient0
   let factor ←
     sampledFisherTreeFactor
       (rank := probeCount)
-      predictionReq paramsReq rows hRows
+      predictionReq paramsReq rows
   let result ←
     finalizePreparedStepWithTreeFactor
       (rank := probeCount)

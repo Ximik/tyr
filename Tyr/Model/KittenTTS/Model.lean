@@ -571,14 +571,14 @@ end KittenAlbertLayerGroup
 
 structure KittenAlbertEncoder (cfg : AlbertConfig) where
   embeddingHiddenMappingIn : LinearNorm (device := device) cfg.embeddingSize cfg.hiddenSize
-  groups : torch.Vector cfg.numHiddenGroups (KittenAlbertLayerGroup (device := device) cfg)
+  groups : Vector (KittenAlbertLayerGroup (device := device) cfg) cfg.numHiddenGroups
   deriving TensorStruct
 
 namespace KittenAlbertEncoder
 
 def init (cfg : AlbertConfig) (device : Device := .CPU) : IO (KittenAlbertEncoder (device := device) cfg) := do
   let embeddingHiddenMappingIn ← LinearNorm.init (device := device) cfg.embeddingSize cfg.hiddenSize
-  let slots : torch.Vector cfg.numHiddenGroups Nat := ⟨Array.range cfg.numHiddenGroups, Array.size_range⟩
+  let slots : Vector Nat cfg.numHiddenGroups := Vector.range cfg.numHiddenGroups
   let groups ← slots.mapM fun _ => KittenAlbertLayerGroup.init (device := device) cfg
   pure { embeddingHiddenMappingIn, groups }
 
@@ -745,14 +745,14 @@ def forward {frames styleDim channels : Nat}
 end AdaIN1d
 
 structure DurationEncoder (cfg : KittenTTSConfig) where
-  lstms : torch.Vector cfg.nLayer (BiLSTM (device := device) (cfg.hiddenDim + cfg.styleDim) (cfg.hiddenDim / 2))
-  norms : torch.Vector cfg.nLayer (AdaLayerNorm (device := device) cfg.styleDim cfg.hiddenDim)
+  lstms : Vector (BiLSTM (device := device) (cfg.hiddenDim + cfg.styleDim) (cfg.hiddenDim / 2)) cfg.nLayer
+  norms : Vector (AdaLayerNorm (device := device) cfg.styleDim cfg.hiddenDim) cfg.nLayer
   deriving TensorStruct
 
 namespace DurationEncoder
 
 def init (cfg : KittenTTSConfig) (device : Device := .CPU) : IO (DurationEncoder (device := device) cfg) := do
-  let layers : torch.Vector cfg.nLayer Nat := ⟨Array.range cfg.nLayer, Array.size_range⟩
+  let layers : Vector Nat cfg.nLayer := Vector.range cfg.nLayer
   let lstms ← layers.mapM fun _ =>
     BiLSTM.init (device := device) (cfg.hiddenDim + cfg.styleDim) (cfg.hiddenDim / 2)
   let norms ← layers.mapM fun _ => AdaLayerNorm.init (device := device) cfg.styleDim cfg.hiddenDim

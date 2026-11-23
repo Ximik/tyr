@@ -126,13 +126,9 @@ instance [TensorTreeCast α β] : TensorTreeCast (Option α) (Option β) where
     | some value => pure (some (← castAt path value))
 
 instance {n : Nat} [TensorTreeCast α β] :
-    TensorTreeCast (Vector n α) (Vector n β) where
-  castAt path source := do
-    let (result, _) ← (Vector.mapM (m := StateT Nat IO) (fun value => do
-      let index ← get
-      set (index + 1)
-      liftM (castAt (indexPath path index) value)) source).run 0
-    pure result
+    TensorTreeCast (Vector α n) (Vector β n) where
+  castAt path source :=
+    source.mapIdxM fun index value => castAt (indexPath path index) value
 
 -- Explicit scalar identities keep metadata while avoiding an instance that
 -- could silently skip tensor fields in an arbitrary same-typed record.

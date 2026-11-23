@@ -49,7 +49,7 @@ private def textModel (c : Config) (dtype : DType := .Float32) : Gemma4ForCausal
       per_layer_input_gate := weight #[c.hidden_size_per_layer_input, c.hidden_size] 0.8 dtype
       per_layer_projection := weight #[c.hidden_size, c.hidden_size_per_layer_input] 0.9 dtype
       post_per_layer_input_norm := norm c.hidden_size dtype } }
-  let layers : Vector c.num_hidden_layers (Gemma4Layer c dtype) :=
+  let layers : Vector (Gemma4Layer c dtype) c.num_hidden_layers :=
     ⟨(Array.range c.num_hidden_layers).map layer, by simp⟩
   return {
     model := {

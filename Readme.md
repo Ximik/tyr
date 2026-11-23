@@ -223,7 +223,7 @@ class TensorStruct (α : Type) where
   fold {β : Type} : (∀ {σ}, Tensor σ → β → β) → β → α → β
 ```
 
-Use `Vector n α` instead of `Array α` for type-safe `zipWith` operations.
+Use core `Vector α n` instead of `Array α` for type-safe `zipWith` operations.
 
 ### Data Loading
 

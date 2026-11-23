@@ -100,18 +100,18 @@ abbrev TargetLeaves := Array (Option (Tensor { shape := #[2], dtype := .Float64,
   LeanTest.assertEqual pair.1.tensor.raw.dtype .BFloat16
   LeanTest.assertEqual pair.2.length 2
   LeanTest.assertEqual pair.2.head!.raw.dtype .Float64
-  let vector : torch.Vector 2 (Tensor { shape := #[2], dtype := .Float32, device := .CPU }) :=
+  let vector : Vector (Tensor { shape := #[2], dtype := .Float32, device := .CPU }) 2 :=
     ⟨#[Tensor.ones #[2], Tensor.full #[2] 3], rfl⟩
   let converted ← TensorStruct.castTo
-    (torch.Vector 2 (Tensor { shape := #[2], dtype := .Float64, device := .CPU })) vector
-  LeanTest.assertEqual converted.data.size 2
-  LeanTest.assertEqual converted.data[1]!.raw.dtype .Float64
+    (Vector (Tensor { shape := #[2], dtype := .Float64, device := .CPU }) 2) vector
+  LeanTest.assertEqual converted.size 2
+  LeanTest.assertEqual converted[1].raw.dtype .Float64
 
 example : True := by
   fail_if_success
     have _ : torch.TensorTreeCast
-      (torch.Vector 2 (Tensor { shape := #[2], dtype := .Float32, device := .CPU }))
-      (torch.Vector 3 (Tensor { shape := #[2], dtype := .Float64, device := .CPU })) := inferInstance
+      (Vector (Tensor { shape := #[2], dtype := .Float32, device := .CPU }) 2)
+      (Vector (Tensor { shape := #[2], dtype := .Float64, device := .CPU }) 3) := inferInstance
   fail_if_success
     have _ : torch.TensorTreeCast
       (Frozen { shape := #[2], dtype := .Float32, device := .CPU })

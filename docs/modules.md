@@ -46,7 +46,7 @@ structure RMSNorm (dim : UInt64) (dtype : DType := .Float32)
 
 `Tyr/Module/Derive.lean` registers two deriving handlers (`Derive.lean`):
 
-- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector n α`, `Static α`, and `Frozen σ`; `Derive.lean` adds the pair instance `α × β`. Parametric structures (shape or type parameters) are supported.
+- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector α n`, `Static α`, and `Frozen σ`; `Derive.lean` adds the pair instance `α × β`. Parametric structures (shape or type parameters) are supported.
 - `deriving Model` — one-shot derivation of `TensorStruct` + `ToTensorStructSchema` + `TensorStructFlatten` (`Derive.lean`; `Model` is a marker class at `Tyr/TensorStruct.lean`, the two schema handlers come from `Tyr/TensorStruct/Schema.lean`). Use it when the structure should also serialize/flatten, e.g. for checkpointing.
 
 ### Tyr/Modular: normed modules and budgets
@@ -71,7 +71,7 @@ Composition is recursive (`Tyr/Modular/Compose.lean`):
 
 - `structure Sequential (M₁ M₂ : Type) where first second` (`Compose.lean`) marks M₂-after-M₁ composition. Its norm is `max(ν₂·‖w₁‖, ‖w₂‖)`, sensitivities multiply (`ν = ν₁·ν₂`), and `μ = max(μ₁·ν₂, μ₂)` — the paper's formulas (`Compose.lean`). Build one with `compose m₁ m₂` or the `⊛` infix (`Compose.lean`).
 - The plain product `M₁ × M₂` is parallel composition with ℓ₂ norm combination and `max` sensitivity (`Compose.lean`).
-- `Array M` and `torch.Vector n M` aggregate norms by ℓ₂ but multiply `nu` across elements (`Compose.lean`) — sequential sensitivity with parallel norm, which the file header itself flags as a mixture.
+- `Array M` and `Vector M n` aggregate norms by ℓ₂ but multiply `nu` across elements (`Compose.lean`) — sequential sensitivity with parallel norm, which the file header itself flags as a mixture.
 
 The budget compiler (`Tyr/Modular/Budget.lean`) turns sensitivities into per-layer learning-rate multipliers:
 
@@ -180,7 +180,7 @@ Note: `RMSNorm.forward5d` (`RMSNorm.lean`) is misnamed — it is a 4D forward on
 | `Embedding v d` (in `Tyr.Modular`) | max row norm | Σ row norms | max row norm |
 | `Sequential M₁ M₂` | `max(ν₂·n₁, n₂)` | `ν₂·d₁ + d₂` | `ν₁ · ν₂` |
 | `M₁ × M₂` | `√(n₁² + n₂²)` | `√(d₁² + d₂²)` | `max(ν₁, ν₂)` |
-| `Array M`, `Vector n M` | ℓ₂ over elements | ℓ₂ over elements | `Π νᵢ` |
+| `Array M`, `Vector M n` | ℓ₂ over elements | ℓ₂ over elements | `Π νᵢ` |
 
 Caveat: `normalizeDual` for `Linear` and `ManifoldLinear` uses Frobenius normalization as an approximation of the true nuclear-norm dual projection — the code says so only in a comment (`Atomic.lean`, `Manifold.lean`).
 
