@@ -214,7 +214,7 @@ def synthesizePhonemes (bundle : PretrainedBundle) (phonemes : String) (voice : 
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size
   let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshape (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
-  let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length
+  let refStyle ← bundle.loadVoiceStyle voice phonemes.length
   bundle.model.synthesizeIds inputIds refStyle speed
 
 def synthesizePhonemesToFile

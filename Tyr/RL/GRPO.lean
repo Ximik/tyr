@@ -245,14 +245,9 @@ structure StepResult where
 
 /-! ## Sequence Padding Utilities -/
 
-/-- Pad a single sequence to a target length -/
-def padSequence (seq : Array UInt64) (targetLen : Nat) (padValue : UInt64) : Array UInt64 :=
-  if seq.size >= targetLen then seq
-  else seq ++ (List.replicate (targetLen - seq.size) padValue).toArray
-
 /-- Create mask for valid tokens (1.0 for valid, 0.0 for padding) -/
 def createValidMask (seqLen : Nat) (paddedLen : Nat) : Array Float :=
-  (List.replicate seqLen 1.0).toArray ++ (List.replicate (paddedLen - seqLen) 0.0).toArray
+  Array.replicate seqLen 1.0 ++ Array.replicate (paddedLen - seqLen) 0.0
 
 /-! ## Evaluation -/
 
@@ -278,7 +273,7 @@ def computePassK (rollouts : Array RolloutBatch) (k : Nat) : PassKResult := Id.r
       numCorrectFirst := numCorrectFirst + 1
 
     -- Check if any of first k samples is correct (pass@k)
-    let kSamples := batch.samples.extract 0 (min k batch.samples.size)
+    let kSamples := batch.samples.extract 0 k
     let anyCorrect := kSamples.any (·.reward > 0.5)
     if anyCorrect then
       numCorrectAtLeast1 := numCorrectAtLeast1 + 1
@@ -475,7 +470,7 @@ def grpoStepWithModelUpdate (b t : Nat) [TensorStruct P] [FloatingTensorStruct P
         if fullSeqRaw.size >= tNat + 1 then
           fullSeqRaw.extract 0 (tNat + 1)
         else
-          padSequence fullSeqRaw (tNat + 1) padToken
+          fullSeqRaw.rightpad (tNat + 1) padToken
 
       let validTargets :=
         if fullSeqRaw.isEmpty then

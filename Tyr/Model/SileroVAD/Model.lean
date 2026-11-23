@@ -277,12 +277,6 @@ def reset (rt : (SileroVADRuntime (device := device))) : (SileroVADRuntime (devi
   lastSamplingRate := sampleRate16k
 }
 
-private def appendRightZeroPad (xs : Array Float) (target : Nat) : Array Float :=
-  if xs.size >= target then
-    xs
-  else
-    xs ++ Array.replicate (target - xs.size) 0.0
-
 private def splitEvery (xs : Array Float) (n : Nat) : Array (Array Float) :=
   if n == 0 then
     #[xs]
@@ -354,7 +348,7 @@ def audioForward (rt : (SileroVADRuntime (device := device))) (audio : Array Flo
       if audio.size % chunkSizeSamples == 0 then
         audio
       else
-        appendRightZeroPad audio (audio.size + (chunkSizeSamples - (audio.size % chunkSizeSamples)))
+        audio.rightpad (audio.size + (chunkSizeSamples - (audio.size % chunkSizeSamples))) 0.0
     let chunks := splitEvery padded chunkSizeSamples
     let mut cur := rt.reset
     let mut probs : Array Float := #[]

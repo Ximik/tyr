@@ -7,13 +7,13 @@ open torch
 open torch.Data.Task
 
 private def byteEncode (s : String) : Array UInt64 :=
-  s.toUTF8.toList.toArray.map (fun b => b.toUInt64)
+  s.toUTF8.data.map (fun b => b.toUInt64)
 
 private def zerosMask (n : Nat) : Array UInt8 :=
-  Array.mk (List.replicate n (0 : UInt8))
+  Array.replicate n (0 : UInt8)
 
 private def onesMask (n : Nat) : Array UInt8 :=
-  Array.mk (List.replicate n (1 : UInt8))
+  Array.replicate n (1 : UInt8)
 
 @[test]
 def testDefaultChatSpecialTokensOrdering : IO Unit := do
@@ -168,7 +168,7 @@ private def toyChatTokens : ChatTokens := {
 }
 
 private def toyEncode (s : String) : Array UInt64 :=
-  s.toUTF8.toList.toArray.map (fun b => 1000 + b.toUInt64)
+  s.toUTF8.data.map (fun b => 1000 + b.toUInt64)
 
 @[test]
 def testTaskTokenStreamWindowShift : IO Unit := do

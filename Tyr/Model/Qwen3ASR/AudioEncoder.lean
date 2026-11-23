@@ -329,17 +329,6 @@ def buildCuChunkLensCumsum
       out := out.push csum
     out
 
-private def maxOr (xs : Array Nat) (fallback : Nat := 0) : Nat :=
-  xs.foldl (fun acc x => if x > acc then x else acc) fallback
-
-private theorem fallback_le_maxOr (xs : Array Nat) (fallback : Nat) : fallback ≤ maxOr xs fallback := by
-  unfold maxOr
-  exact Array.foldl_induction (motive := fun _ acc => fallback ≤ acc) (Nat.le_refl _)
-    (fun _ acc h => by split <;> omega)
-
-private def sumU64 (xs : Array Nat) : Nat :=
-  xs.foldl (· + ·) 0
-
 private def chunkLensFromCumsum (cs : Array Nat) : Array Nat :=
   Id.run do
     let mut out : Array Nat := #[]
@@ -436,16 +425,18 @@ private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Na
     (featureLen : Nat)
     : M (Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength frames, cfg.outputDim] }) := do
   let outSeq := AudioEncoderConfig.featExtractOutputLength frames
-  let featureLen := if featureLen <= frames then featureLen else frames
+  let featureLen := min featureLen frames
   if featureLen == 0 then
     return Tensor.castLike sample ((Tensor.zeros #[1, outSeq, cfg.outputDim] false sample.device))
   else
     let chunkLens := buildChunkLengths cfg #[featureLen]
-    let maxChunkLen := maxOr chunkLens 1
-    have hT : 0 < maxChunkLen := Nat.lt_of_lt_of_le Nat.one_pos (fallback_le_maxOr chunkLens 1)
+    let maxChunkLen := chunkLens.foldl max 1
+    have hT : 0 < maxChunkLen := Nat.lt_of_lt_of_le Nat.one_pos <|
+      Array.foldl_induction (motive := fun _ acc => 1 ≤ acc) (Nat.le_refl _)
+        (fun _ _ h => Nat.le_trans h (Nat.le_max_left _ _))
     let tChunk := AudioEncoderConfig.framesAfterConv3 cfg maxChunkLen
     let chunkLensAfterCnn := chunkLengthsAfterCnn cfg chunkLens
-    let maxChunkAfterCnn := maxOr chunkLensAfterCnn tChunk
+    let maxChunkAfterCnn := chunkLensAfterCnn.foldl max tChunk
     let pos : Tensor { dtype := .Float32, device := device, shape := #[tChunk, cfg.dModel] } :=
       sinusoidPosition (seq := tChunk) (dim := cfg.dModel) cfg.dModelEven (device := sample.device)
     let posBatch : Tensor { dtype := .Float32, device := device, shape := #[1, tChunk, cfg.dModel] } := Tensor.reshape pos #[1, tChunk, cfg.dModel]
@@ -479,7 +470,7 @@ private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Na
           start := start + len
       out
 
-    let totalValid := sumU64 chunkLensAfterCnn
+    let totalValid := chunkLensAfterCnn.sum
     let hiddenValid : Tensor { dtype := dtype, device := device, shape := #[1, totalValid, cfg.dModel] } :=
       if hiddenParts.isEmpty then
         Tensor.castLike sample ((Tensor.zeros #[1, totalValid, cfg.dModel] false sample.device))

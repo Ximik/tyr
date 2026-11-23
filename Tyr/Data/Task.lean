@@ -242,7 +242,7 @@ def renderConversation
       mask := mask.push 0
       let contentTokens := encode msg.content
       allTokens := allTokens ++ contentTokens
-      mask := mask ++ Array.mk (List.replicate contentTokens.size 0)
+      mask := mask ++ Array.replicate contentTokens.size 0
       allTokens := allTokens.push tokens.userEnd
       mask := mask.push 0
 
@@ -252,7 +252,7 @@ def renderConversation
       mask := mask.push 0
       let contentTokens := encode msg.content
       allTokens := allTokens ++ contentTokens
-      mask := mask ++ Array.mk (List.replicate contentTokens.size 0)
+      mask := mask ++ Array.replicate contentTokens.size 0
       allTokens := allTokens.push tokens.userEnd
       mask := mask.push 0
 
@@ -263,33 +263,33 @@ def renderConversation
       if msg.parts.isEmpty then
         let contentTokens := encode msg.content
         allTokens := allTokens ++ contentTokens
-        mask := mask ++ Array.mk (List.replicate contentTokens.size 1)
+        mask := mask ++ Array.replicate contentTokens.size 1
       else
         for part in msg.parts do
           match part.type with
           | .text =>
             let valueTokens := encode part.content
             allTokens := allTokens ++ valueTokens
-            mask := mask ++ Array.mk (List.replicate valueTokens.size 1)
+            mask := mask ++ Array.replicate valueTokens.size 1
           | .code lang =>
             if lang == "python" then
               allTokens := allTokens.push tokens.pythonStart
               mask := mask.push 1
               let valueTokens := encode part.content
               allTokens := allTokens ++ valueTokens
-              mask := mask ++ Array.mk (List.replicate valueTokens.size 1)
+              mask := mask ++ Array.replicate valueTokens.size 1
               allTokens := allTokens.push tokens.pythonEnd
               mask := mask.push 1
             else
               let valueTokens := encode part.content
               allTokens := allTokens ++ valueTokens
-              mask := mask ++ Array.mk (List.replicate valueTokens.size 1)
+              mask := mask ++ Array.replicate valueTokens.size 1
           | .toolCall _ =>
             allTokens := allTokens.push tokens.pythonStart
             mask := mask.push 1
             let valueTokens := encode part.content
             allTokens := allTokens ++ valueTokens
-            mask := mask ++ Array.mk (List.replicate valueTokens.size 1)
+            mask := mask ++ Array.replicate valueTokens.size 1
             allTokens := allTokens.push tokens.pythonEnd
             mask := mask.push 1
           | .toolResult =>
@@ -297,7 +297,7 @@ def renderConversation
             mask := mask.push 0
             let valueTokens := encode part.content
             allTokens := allTokens ++ valueTokens
-            mask := mask ++ Array.mk (List.replicate valueTokens.size 0)
+            mask := mask ++ Array.replicate valueTokens.size 0
             allTokens := allTokens.push tokens.outputEnd
             mask := mask.push 0
       allTokens := allTokens.push tokens.assistantEnd
@@ -309,7 +309,7 @@ def renderConversation
       mask := mask.push 0
       let contentTokens := encode msg.content
       allTokens := allTokens ++ contentTokens
-      mask := mask ++ Array.mk (List.replicate contentTokens.size 0)
+      mask := mask ++ Array.replicate contentTokens.size 0
       allTokens := allTokens.push tokens.outputEnd
       mask := mask.push 0
 
@@ -331,19 +331,6 @@ structure ConversationBatch where
   lengths : Array Nat
   deriving Repr
 
-/-- Pad a sequence to target length -/
-private def padSequence (seq : Array UInt64) (targetLen : Nat) (padValue : UInt64) : Array UInt64 :=
-  if seq.size >= targetLen then
-    seq.extract 0 targetLen
-  else
-    seq ++ Array.mk (List.replicate (targetLen - seq.size) padValue)
-
-private def padMask (seq : Array UInt8) (targetLen : Nat) : Array UInt8 :=
-  if seq.size >= targetLen then
-    seq.extract 0 targetLen
-  else
-    seq ++ Array.mk (List.replicate (targetLen - seq.size) 0)
-
 /-- Collate tokenized conversations into a batch -/
 def collate (convs : Array TokenizedConversation) (maxLen : Nat) (padToken : UInt64 := 0)
     : IO ConversationBatch := do
@@ -363,8 +350,8 @@ def collate (convs : Array TokenizedConversation) (maxLen : Nat) (padToken : UIn
   let mut lengths : Array Nat := #[]
 
   for conv in convs do
-    let paddedTokens := padSequence conv.tokens actualMaxLen padToken
-    let paddedMask := padMask conv.mask actualMaxLen
+    let paddedTokens := (conv.tokens.take actualMaxLen).rightpad actualMaxLen padToken
+    let paddedMask := (conv.mask.take actualMaxLen).rightpad actualMaxLen 0
     allTokens := allTokens ++ paddedTokens
     allMasks := allMasks ++ paddedMask
     lengths := lengths.push (min conv.tokens.size actualMaxLen)

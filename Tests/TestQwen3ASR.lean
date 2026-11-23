@@ -487,7 +487,7 @@ def testQwen3ASRStreamingTranscribeAndFinish : IO Unit := do
 
   let expectedPrefix2 :=
     let ids := tokenizer.qwen3.encodeText tok "abc"
-    let endIdx := if ids.size > 1 then ids.size - 1 else 0
+    let endIdx := ids.size - 1
     if endIdx > 0 then tokenizer.qwen3.decodeText tok (ids.extract 0 endIdx) else ""
   LeanTest.assertEqual (prompts1.getD 0 "") st0.promptRaw "first chunk prompt should be raw base prompt"
   LeanTest.assertEqual (prompts1.getD 1 "") (st0.promptRaw ++ expectedPrefix2)
@@ -1102,8 +1102,8 @@ def testQwen3ASRBFloat16VariableLengthGeneration : IO Unit := do
     (Tensor.sin (Tensor.toFloat32 (Tensor.arange (2 * cfg.thinkerConfig.audioConfig.numMelBins * 32))))
     #[2, cfg.thinkerConfig.audioConfig.numMelBins, 32] (by simp [Nat.mul_assoc])
   let mask : Tensor { shape := #[2, 32], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array
-    ((List.range 32).toArray.map (fun i => if i < 25 then (1 : Int64) else 0) ++
-     (List.range 32).toArray.map (fun i => if i < 13 then (1 : Int64) else 0))) #[2, 32]
+    ((Array.range 32).map (fun i => if i < 25 then (1 : Int64) else 0) ++
+     (Array.range 32).map (fun i => if i < 13 then (1 : Int64) else 0))) #[2, 32]
   let logits ← model.forward ids (some mel) (some mask) none
   LeanTest.assertEqual logits.actualSpec.dtype DType.BFloat16 "Audio insertion and full decoder retain BF16"
   LeanTest.assertTrue (Float.isFinite (Tensor.item (Tensor.sumAll (Tensor.toFloat32 logits)))) "BF16 ASR logits are finite"

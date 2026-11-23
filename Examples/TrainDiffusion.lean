@@ -218,7 +218,7 @@ def sampleAnimatedMultiple {cfg : Config}
     results := results.push text
 
     -- Extract last `overlap` tokens for next block's context
-    let overlapStart := if genArr.size > overlap then genArr.size - overlap else 0
+    let overlapStart := genArr.size - overlap
     carryoverTokens := genArr.extract overlapStart genArr.size
 
     -- Show final result for this block
@@ -227,10 +227,6 @@ def sampleAnimatedMultiple {cfg : Config}
     IO.println text
 
   return results
-
-/-- Concatenate all blocks into a single continuous string -/
-def joinBlocks (blocks : Array String) : String :=
-  blocks.foldl (· ++ ·) ""
 
 /-- Train diffusion model with validation -/
 def runTrainingWithVal {nTrain nVal : Nat}
@@ -362,7 +358,7 @@ def runGeneration (modelCfg : Config) (params : DiffusionParams modelCfg)
   IO.println ""
   IO.println "=== Complete Continuous Text ==="
   IO.println "---"
-  IO.println (joinBlocks blocks)
+  IO.println (String.join blocks.toList)
   IO.println "---"
   IO.println ""
   IO.println "Done!"

@@ -216,7 +216,7 @@ private def fisherYatesShuffle (arr : Array Nat) (seed : UInt64) : Array Nat := 
 
 def BOSFinder.shuffle {n : Nat} (finder : BOSFinder n) (seed : UInt64) : BOSFinder n :=
   Id.run do
-    let order := fisherYatesShuffle (List.range finder.bosPositions.size).toArray seed
+    let order := fisherYatesShuffle (Array.range finder.bosPositions.size) seed
     let mut docs := #[]
     let mut ends := #[]
     let mut total := 0

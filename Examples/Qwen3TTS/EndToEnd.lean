@@ -323,12 +323,8 @@ private def formatCodesMatrix (rows : Array (Array UInt64)) : String := Id.run d
     out := out ++ String.intercalate " " (row.toList.map toString) ++ "\n"
   out
 
-private def lowerAsciiString (s : String) : String :=
-  String.ofList <| s.toList.map (fun c =>
-    if c >= 'A' && c <= 'Z' then Char.ofNat (c.toNat + 32) else c)
-
 private def parseThinkMode (s : String) : ThinkMode :=
-  match lowerAsciiString s with
+  match s.toLower with
   | "think" => .think
   | "no-think" => .noThink
   | "nothink" => .noThink
@@ -336,9 +332,9 @@ private def parseThinkMode (s : String) : ThinkMode :=
   | _ => .auto
 
 private def lookupLanguageId? (cfg : Qwen3TTSConfig) (language : String) : Option tokenizer.TokenId := Id.run do
-  let q := lowerAsciiString language
+  let q := language.toLower
   for (k, v) in cfg.talkerConfig.codecLanguageId do
-    if lowerAsciiString k == q then
+    if k.toLower == q then
       return some v
   none
 
@@ -593,7 +589,7 @@ def runEndToEnd (args : Args) : IO Unit := do
   IO.println s!"Saved token IDs to {tokenIdsPath}"
 
   let languageId ←
-    if lowerAsciiString args.language == "auto" then
+    if args.language.toLower == "auto" then
       pure none
     else
       match lookupLanguageId? cfg args.language with

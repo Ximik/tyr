@@ -58,7 +58,7 @@ private def writeIndexDir (name indexJson : String) : IO String := do
   pure dir
 
 private def tensorValues (t : RawTensor) : Array Float :=
-  t.getValues 1024 |>.toList.toArray
+  (t.getValues 1024).data
 
 private def headerPrefix (size : UInt64) : ByteArray := Id.run do
   let mut result := ByteArray.empty

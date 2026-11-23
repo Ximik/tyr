@@ -46,12 +46,6 @@ def findSubstr (haystack : String) (needle : String) : Option Nat := Id.run do
     if found then return some i
   return none
 
-private def getObjArr? (json : Lean.Json) (field : String) : Option (Array Lean.Json) := do
-  let value ← (json.getObjVal? field).toOption
-  match value with
-  | .arr xs => some xs
-  | _ => none
-
 private def parseRole? (role : String) : Option Role :=
   match role.trimAscii.toString.toLower with
   | "system" => some .system
@@ -270,7 +264,7 @@ structure SmolTalkExample where
   deriving Repr
 
 def SmolTalkExample.fromJson? (json : Lean.Json) : Option SmolTalkExample := do
-  let rawMsgs ← getObjArr? json "messages"
+  let rawMsgs ← (json.getObjVal? "messages" >>= (·.getArr?)).toOption
   let msgs := rawMsgs.filterMap parseMessageJson?
   if msgs.size != rawMsgs.size then
     none

@@ -426,13 +426,6 @@ private def loadNanoChatEnvState : IO NanoChatEnvState := do
     }
   }
 
-private def capArray {α : Type} (xs : Array α) (cap? : Option Nat) : Array α :=
-  match cap? with
-  | some n =>
-    let m := min n xs.size
-    xs.extract 0 m
-  | none => xs
-
 private def runOnMaster (action : PipelineM Unit) : PipelineM Unit := do
   let isDistributed ← dist.isInitialized
   let (rank, _) ← if isDistributed then dist.getRankAndWorldSize else pure (0, 1)
@@ -600,11 +593,6 @@ def downloadSingleFile (url : String) (filepath : String) (maxAttempts : Nat := 
   IO.println s!"  Failed to download after {maxAttempts} attempts: {filepath}"
   return false
 
-/-- Left-pad a string with zeros -/
-def leftPadZeros (s : String) (width : Nat) : String :=
-  let padding := String.ofList (List.replicate (width - s.length) '0')
-  padding ++ s
-
 /-- Download data shards with progress tracking -/
 def downloadDataShards (cfg : NanoChatConfig) (numShards : Nat) : IO Unit := do
   let dataDir ← cfg.getDataDir
@@ -616,7 +604,7 @@ def downloadDataShards (cfg : NanoChatConfig) (numShards : Nat) : IO Unit := do
   let mut failed := 0
 
   for i in [:numShards] do
-    let filename := s!"shard_{leftPadZeros (toString i) 5}.parquet"
+    let filename := s!"shard_{"".pushn '0' (5 - (toString i).length)}{i}.parquet"
     let filepath := s!"{dataDir}/{filename}"
     let url := s!"{cfg.dataUrl}/{filename}"
 
@@ -1190,7 +1178,7 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
       let examplesRaw ← match coreTaskMetaToConfig taskMeta coreConfigs with
         | some tc => loadCORETaskData evalBundleDir tc
         | none => pure #[]
-      let examples := capArray examplesRaw evalCap
+      let examples := evalCap.elim examplesRaw examplesRaw.take
       let score ← evaluateTask examples taskMeta tokenizeFn runModel modelCfg.vocabPos evalConfig
       taskResults := taskResults.push (taskMeta.taskName, score)
 
@@ -1568,7 +1556,7 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
       let examplesRaw ← match coreTaskMetaToConfig taskMeta coreConfigs with
         | some tc => loadCORETaskData evalBundleDir tc
         | none => pure #[]
-      let examples := capArray examplesRaw evalCap
+      let examples := evalCap.elim examplesRaw examplesRaw.take
       let score ← evaluateTask examples taskMeta tokenizeFn runModel modelCfg.vocabPos evalConfig
       results := results.push (taskMeta.taskName, score)
 

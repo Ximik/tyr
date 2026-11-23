@@ -67,10 +67,6 @@ structure RunStats where
   stepsPerSec : Float
   deriving Repr
 
-/-- Float finite check helper for callers/tests. -/
-def isFiniteFloat (x : Float) : Bool :=
-  !x.isNaN && !x.isInf
-
 /-- Random character-token stream in Shakespeare-sized vocab (65) by default. -/
 def mkShakespeareLikeStream (cfg : PrototypeConfig) : IO (Tokens (device := .CPU) #[cfg.streamTokens]) := do
   Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[cfg.streamTokens]

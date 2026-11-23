@@ -225,7 +225,7 @@ def trainBPE (docs : Array String) (config : TrainConfig) (log : Handlers := {})
   for doc in docs do
     totalChars := totalChars + doc.length
     let bytes := doc.toUTF8
-    let tokenIds : Array TokenId := bytes.toList.toArray.map (·.toUInt32)
+    let tokenIds : Array TokenId := bytes.data.map (·.toUInt32)
     tokenizedDocs := tokenizedDocs.push tokenIds
 
   log.onInfo s!"Processed {docs.size} documents, {totalChars} characters"

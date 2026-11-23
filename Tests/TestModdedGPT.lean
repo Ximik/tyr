@@ -33,10 +33,6 @@ open torch.Optim
 
 /-! ## Test Utilities -/
 
-/-- Check that a Float is finite and non-NaN -/
-def isFiniteFloat (x : Float) : Bool :=
-  !x.isNaN && !x.isInf
-
 /-! ## 1. C++ FFI Smoke Tests -/
 
 @[test]
@@ -254,7 +250,7 @@ def testModdedGPTForward : IO Unit := do
 
   -- Verify softcapping (values should be bounded)
   LeanTest.assertTrue (logitsMax < 35.0) s!"Logits should be softcapped below 35, got {logitsMax}"
-  LeanTest.assertTrue (isFiniteFloat logitsMean) "Logits mean should be finite"
+  LeanTest.assertTrue (logitsMean.isFinite) "Logits mean should be finite"
 
 /-! ## 6. Loss and Training Tests -/
 
@@ -284,7 +280,7 @@ def testLoss : IO Unit := do
   let lossT ← moddedGpt.loss params yarn input targets (by decide)
   let lossVal := Tensor.item lossT
 
-  LeanTest.assertTrue (isFiniteFloat lossVal) "Loss should be finite"
+  LeanTest.assertTrue (lossVal.isFinite) "Loss should be finite"
   LeanTest.assertTrue (lossVal > 0) "Loss should be positive"
 
 /-! ## 7. Data Loader Tests -/

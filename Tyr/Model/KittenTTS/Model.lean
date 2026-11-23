@@ -136,7 +136,7 @@ private def buildAlignment {seq frames : Nat}
     Tensor.reshape (Tensor.zeros #[1, seq, frames] false device) #[1, seq, frames]
   else
     -- Token `i` covers frames `[starts[i], starts[i] + dur_i)`, clipped to `frames`.
-    let starts : Array Nat := (List.range seq).toArray.map fun i =>
+    let starts : Array Nat := (Array.range seq).map fun i =>
       (List.range i).foldl (fun acc j => acc + durations.getD j 1) 0
     let flat : Array Float := Array.ofFn (n := seq * frames) fun idx =>
       let i := idx.val / frames
@@ -1732,7 +1732,7 @@ def predictDurations {seq : Nat}
     let durSum : Tensor { shape := #[1, seq], dtype := .Float32, device := device } := Tensor.reshape (Tensor.sumDim durSig 2 false) #[1, seq]
     let durVals ← Tensor.toFloatArray durSum
     let predDurations := durationToFrames durVals speed
-    let frames := predDurations.foldl (fun acc x => acc + x) 0
+    let frames := predDurations.sum
     pure {
       durVals
       predDurations

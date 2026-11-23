@@ -5,11 +5,6 @@ namespace Tests.OperationContracts
 
 open torch
 
-private def expectOk {α : Type} (result : Except String α) : IO α :=
-  match result with
-  | .ok value => pure value
-  | .error message => throw (IO.userError message)
-
 private def expectError {α : Type} (result : Except String α) (fragment : String) : IO Unit :=
   match result with
   | .ok _ => LeanTest.fail s!"Expected rejection containing {fragment}"
@@ -57,7 +52,7 @@ example (_empty : Tensor ⟨#[0], .Float32, .CPU⟩) (_complex : Tensor ⟨#[2],
   let x := Tensor.ones #[2]
   expectError (Tensor.catMany? #[x.packShape, x.packShape] 9 #[4]) "axis"
   expectError (Tensor.catMany? (d := .Float32) (dev := .CPU) #[] 0 #[0]) "at least one"
-  let concatenated ← expectOk (Tensor.catMany? #[x.packShape, x.packShape] 0 #[4])
+  let concatenated ← IO.ofExcept (Tensor.catMany? #[x.packShape, x.packShape] 0 #[4])
   LeanTest.assertEqual (← concatenated.toFloatArray) #[1, 1, 1, 1]
   let summed := Tensor.sumDim x 0
   LeanTest.assertEqual (← summed.toFloatArray) #[2]

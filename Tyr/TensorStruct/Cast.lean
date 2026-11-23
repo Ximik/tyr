@@ -6,7 +6,7 @@ import Tyr.TensorStruct
 `TensorStruct.castTo Target source` uses the destination Lean type as a tree of
 tensor specifications. Each leaf can request a different dtype and placement;
 no destination tensor template is allocated. Shapes and container structure are
-preserved. Tensor leaves are converted natively and checked against their complete
+preserved. Tensor leaves are converted natively and IO.ofExcept against their complete
 destination index; static fields retain their values.
 -/
 
@@ -32,16 +32,11 @@ def indexPath (path : String) (index : Nat) : String :=
 private def renderPath (path : String) : String :=
   if path.isEmpty then "<root>" else path
 
-private def checked {α : Type} (result : Except String α) : IO α :=
-  match result with
-  | .ok value => pure value
-  | .error message => throw (IO.userError message)
-
 private def castTensorAt {σ τ : StaticSpec} (path : String)
     (tensor : Tensor σ) : IO (Tensor τ) := do
   try
     -- A type-directed cast never reshapes data, even for equal element counts.
-    checked (TensorSpec.checkShape τ.shape σ.shape)
+    IO.ofExcept (TensorSpec.checkShape τ.shape σ.shape)
     let sourceDType := tensor.raw.dtype
     let targetDType := τ.dtype
     let requestedDType := if targetDType == sourceDType then none else some targetDType

@@ -902,8 +902,8 @@ def forwardWithCache {batch seq cap layerIdx : Nat}
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap seq :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
-  let conv := (cache.convStates[layerIdx]?).bind id
-  let recurrent := (cache.recurrentStates[layerIdx]?).bind id
+  let conv := cache.convStates[layerIdx]?.join
+  let recurrent := cache.recurrentStates[layerIdx]?.join
 
   let (mixed, update) : _ × LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap seq :=
     match cfg.isFullAttentionLayer layerIdx, layer.mixer with
@@ -935,8 +935,8 @@ def forwardStep {batch cap len layerIdx : Nat}
     : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
-  let conv := cache.convStates[layerIdx]?.getD none
-  let recurrent := cache.recurrentStates[layerIdx]?.getD none
+  let conv := cache.convStates[layerIdx]?.join
+  let recurrent := cache.recurrentStates[layerIdx]?.join
 
   let (mixed, update) : _ × LayerCacheUpdate (dtype := dtype) (device := device) cfg batch cap (len + 1) :=
     match cfg.isFullAttentionLayer layerIdx, layer.mixer with

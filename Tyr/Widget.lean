@@ -782,9 +782,9 @@ def tensorToProps {σ : StaticSpec} (t : Tensor σ) : IO TensorDisplayProps := d
     if requiresGrad then
       pure (some (← Tensor.gradOf t))
     else pure none
-  let gradValues := gradient.map fun g => (g.raw.getValues 10000).toList.toArray
+  let gradValues := gradient.map fun g => (g.raw.getValues 10000).data
   let gradStats := gradient.map fun g => g.raw.stats
-  pure { shape, dtype, device, requiresGrad, numel, stats, values := values.toList.toArray, gradValues, gradStats }
+  pure { shape, dtype, device, requiresGrad, numel, stats, values := values.data, gradValues, gradStats }
 
 /-- Convert a tensor with name and axis labels -/
 def tensorToPropsNamed {σ : StaticSpec} (t : Tensor σ) (name : String) (axisNames : Array String := #[]) : IO TensorDisplayProps := do

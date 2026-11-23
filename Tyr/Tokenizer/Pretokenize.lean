@@ -8,18 +8,6 @@ import Tyr.Tokenizer.Types
 
 namespace tokenizer
 
-/-- Check if a character is a letter -/
-def isLetter (c : Char) : Bool :=
-  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-
-/-- Check if a character is a digit -/
-def isDigit (c : Char) : Bool :=
-  c >= '0' && c <= '9'
-
-/-- Check if a character is whitespace -/
-def isWhitespace (c : Char) : Bool :=
-  c == ' ' || c == '\n' || c == '\t' || c == '\r'
-
 /-- Check if a character is punctuation -/
 def isPunctuation (c : Char) : Bool :=
   c == '.' || c == ',' || c == '!' || c == '?' ||
@@ -42,9 +30,9 @@ inductive TokenType
 
 /-- Classify a character -/
 def classifyChar (c : Char) : TokenType :=
-  if isLetter c then .Word
-  else if isDigit c then .Number
-  else if isWhitespace c then .Whitespace
+  if c.isAlpha then .Word
+  else if c.isDigit then .Number
+  else if c.isWhitespace then .Whitespace
   else if isPunctuation c then .Punct
   else .Other
 

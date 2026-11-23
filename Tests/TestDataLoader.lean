@@ -19,7 +19,7 @@ private def readTokens {s : Shape} (tokens : Tensor { shape := s, dtype := .Int6
 private def withSmallFixture (action : String → IO Unit) : IO Unit :=
   IO.FS.withTempDir fun dir => do
     let path := dir / "tokens.bin"
-    writeTokens path ((List.range 8192).toArray.map fun n => (n % 127 + 1).toUInt64)
+    writeTokens path ((Array.range 8192).map fun n => (n % 127 + 1).toUInt64)
     action path.toString
 
 private def assertRejected (action : IO Unit) (label : String) : IO Unit := do

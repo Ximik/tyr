@@ -366,7 +366,7 @@ def stackAndPad (tokens : Array (Array UInt64)) (padToken : UInt64) : Array UInt
   let maxLen := tokens.foldl (fun acc seq => max acc seq.size) 0
   let mut result : Array UInt64 := #[]
   for seq in tokens do
-    let padded := seq ++ Array.mk (List.replicate (maxLen - seq.size) padToken)
+    let padded := seq ++ Array.replicate (maxLen - seq.size) padToken
     result := result ++ padded
   return result
 
