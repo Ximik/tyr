@@ -286,7 +286,7 @@ instance [MatrixManifoldCarrier M device] (in_dim out_dim : Nat) :
   norm lin :=
     let weightNorm := Tensor.spectralNorm! (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
     match lin.bias with
-    | some b => floatMax weightNorm (Tensor.l2Norm b)
+    | some b => max weightNorm (Tensor.l2Norm b)
     | none => weightNorm
   dualNorm lin :=
     let weightDual := Tensor.nuclearNorm (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)

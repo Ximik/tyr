@@ -45,11 +45,9 @@ def init (cfg : QwenConfig) (dtype : DType := .Float32) (device : Device := .CPU
   let embed_tokens ← Tensor.parameter (Tensor.mulScalar emb std)
 
   -- Initialize layers
-  let mut layers := #[]
-  for _ in [:cfg.num_hidden_layers] do
-    let layer ← QwenLayer.init (device := device) cfg.hidden_size cfg.num_attention_heads
-        cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size cfg.rms_norm_eps dtype
-    layers := layers.push layer
+  let layers ← Array.ofFnM (n := cfg.num_hidden_layers) fun _ =>
+    QwenLayer.init (device := device) cfg.hidden_size cfg.num_attention_heads
+      cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size cfg.rms_norm_eps dtype
 
   -- Final norm
   let norm ← RMSNorm.init (device := device) cfg.hidden_size cfg.rms_norm_eps dtype

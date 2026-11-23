@@ -53,7 +53,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 : Bool)
   for (name, shape) in weights do
     let entryBf16 := if name == mismatchedDType then !bf16 else bf16
     let start := data.size
-    for _ in [:shape.foldl (· * ·) 1] do
+    for _ in [:TensorSpec.numelOfShape shape] do
       data := data ++ (if entryBf16 then ByteArray.mk #[0, 62] else ByteArray.mk #[0, 0, 0, 62])
     fields := fields ++ [(name, Lean.Json.mkObj [
       ("dtype", Lean.toJson (if entryBf16 then "BF16" else "F32")),

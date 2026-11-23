@@ -2181,15 +2181,6 @@ lean_object* lean_torch_load_tensor_exact(lean_obj_arg shape, b_lean_obj_arg pat
   });
 }
 
-// Check if a file exists
-lean_object* lean_torch_file_exists(b_lean_obj_arg path_obj) {
-  return tyr::ioCall("file_exists", [&] {
-  const char* path = lean_string_cstr(path_obj);
-  std::ifstream file(path);
-  return lean_io_result_mk_ok(lean_box(file.good() ? 1 : 0));
-  });
-}
-
 // Save image tensor as PPM file
 // Expects tensor of shape [batch, 3, height, width] with values in [-1, 1]
 lean_object* lean_torch_save_ppm(

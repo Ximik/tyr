@@ -42,14 +42,12 @@ private def countMask2d {batch seq : Nat} (mask : Tensor { device := device, sha
   pure (counts.foldl (· + ·.toNat) 0)
 
 /-- Row and column of each patch of an `h × w` grid, in `merge × merge` block order. -/
-private def blockOrderRowsCols (h w merge : Nat) : Array (Nat × Nat) := Id.run do
+private def blockOrderRowsCols (h w merge : Nat) : Array (Nat × Nat) :=
   let blocksW := w / merge
-  let mut out := Array.mkEmpty (h * w)
-  for i in [:h * w] do
+  Array.ofFn (n := h * w) fun ⟨i, _⟩ =>
     let blockRow := i / (merge * merge * blocksW)
     let blockCol := (i / (merge * merge)) % blocksW
-    out := out.push (blockRow * merge + (i / merge) % merge, blockCol * merge + i % merge)
-  out
+    (blockRow * merge + (i / merge) % merge, blockCol * merge + i % merge)
 
 private def floatTable (values : Array Float32) (rows cols : Nat) (device : Device) :
     IO (Tensor { device := device, shape := #[rows, cols], dtype := .Float32 }) := do

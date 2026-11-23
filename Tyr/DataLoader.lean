@@ -330,7 +330,7 @@ def DataShard.loadFromFile (path : String) (shardIdx numShards : Nat)
 
 def DataShard.load (path : String) (shardIdx numShards : Nat)
     (bosToken : UInt64) : IO (Σ n, DataShard n) := do
-  let fileExists ← data.fileExists path
+  let fileExists ← System.FilePath.pathExists path
   if fileExists then
     DataShard.loadFromFile path shardIdx numShards bosToken
   else

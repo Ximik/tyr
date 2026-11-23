@@ -31,9 +31,6 @@ private def commonPrefixLenIds (a b : Array UInt32) : Nat :=
       i := i + 1
     i
 
-private def trimHistory (hist : Array (Array UInt32)) (maxKeep : Nat) : Array (Array UInt32) :=
-  if hist.size <= maxKeep then hist else hist.extract (hist.size - maxKeep) hist.size
-
 private def consensusPrefixLastK (hist : Array (Array UInt32)) (k : Nat) : Nat :=
   if k == 0 || hist.size < k then
     0
@@ -74,7 +71,8 @@ def updateWithSignals
     (boundary : Bool := false)
     (decode : Array UInt32 → String)
     : ConsensusState × TextDelta :=
-  let hist0 := trimHistory (st.history.push ids) st.cfg.historyWindows
+  let hist := st.history.push ids
+  let hist0 := hist.extract (hist.size - st.cfg.historyWindows) hist.size
   let lcpPrev := commonPrefixLenIds st.lastIds ids
   let cPrev := lcpPrev - st.cfg.rollbackTokens
   let cHistRaw := consensusPrefixLastK hist0 st.cfg.confirmWindows

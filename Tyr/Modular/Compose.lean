@@ -66,7 +66,7 @@ instance [NormedModule M₁] [NormedModule M₂] : NormedModule (Sequential M₁
     let n₁ := NormedModule.norm s.first
     let n₂ := NormedModule.norm s.second
     let ν₂ := NormedModule.nu s.second
-    floatMax (ν₂ * n₁) n₂
+    max (ν₂ * n₁) n₂
 
   dualNorm s :=
     let d₁ := NormedModule.dualNorm s.first
@@ -81,7 +81,7 @@ instance [NormedModule M₁] [NormedModule M₂] : NormedModule (Sequential M₁
     let μ₁ := NormedModule.mu s.first
     let μ₂ := NormedModule.mu s.second
     let ν₂ := NormedModule.nu s.second
-    floatMax (μ₁ * ν₂) μ₂
+    max (μ₁ * ν₂) μ₂
 
   normalize s :=
     -- Normalize both components to "saturate" the max
@@ -116,7 +116,7 @@ instance [NormedModule M₁] [NormedModule M₂] : NormedModule (M₁ × M₂) w
     Float.sqrt (d₁ * d₁ + d₂ * d₂)
 
   -- For parallel, take max sensitivity
-  nu p := floatMax (NormedModule.nu p.1) (NormedModule.nu p.2)
+  nu p := max (NormedModule.nu p.1) (NormedModule.nu p.2)
 
   mu p :=
     let μ₁ := NormedModule.mu p.1

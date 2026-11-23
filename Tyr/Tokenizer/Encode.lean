@@ -9,23 +9,6 @@ import Tyr.Tokenizer.Pretokenize
 
 namespace tokenizer
 
-/-- Insert a special token into an array sorted by decreasing token length. -/
-private def insertSpecialByLength (sorted : Array String) (s : String) : Array String := Id.run do
-  let mut out : Array String := #[]
-  let mut inserted := false
-  for existing in sorted do
-    if !inserted && s.length > existing.length then
-      out := out.push s
-      inserted := true
-    out := out.push existing
-  if !inserted then
-    out := out.push s
-  out
-
-/-- Sort special tokens by decreasing length so longest match wins. -/
-private def sortSpecialsByLength (specials : Array String) : Array String :=
-  specials.foldl insertSpecialByLength #[]
-
 /-- Match a special token at position `i` in `chars`, preferring earlier entries.
     Call with specials sorted by decreasing length for longest-match behavior. -/
 private def matchSpecialAt (chars : Array Char) (i : Nat) (specials : Array String)
@@ -157,7 +140,7 @@ def encodeWithSpecials (tok : BPETokenizer) (text : String) : Array TokenId := I
   if tok.specialTokens.isEmpty then
     return encode tok text
 
-  let specialList := sortSpecialsByLength <| tok.specialTokens.toList.map Prod.fst |>.toArray
+  let specialList := (tok.specialTokens.toList.map Prod.fst).toArray.insertionSort (·.length > ·.length)
   let segments := splitWithSpecials text specialList
 
   let mut out : Array TokenId := #[]

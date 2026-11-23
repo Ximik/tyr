@@ -141,7 +141,7 @@ private def maxErrors {s : Shape} {d e : DType}
     Used to synthesize benchmark-sized banks from the fixture bank bytes;
     the values don't need to be meaningful, only the shapes/dtypes do. -/
 private def tileToShape {s : Shape} {source : Device} (src : SomeDTypeTensor s source) (shape : Shape) (device : Device) : IO (SomeDTypeTensor shape device) := do
-  let numel := shape.foldl (· * ·) 1
+  let numel := TensorSpec.numelOfShape shape
   let srcD := src.2.to device
   let n0 := TensorSpec.numelOfShape s
   let ⟨hn0⟩ ← if h : 0 < n0 then pure (PLift.up h) else throw <| IO.userError "tileToShape: empty source tensor"

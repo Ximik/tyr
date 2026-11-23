@@ -100,12 +100,7 @@ def splitContraction (word : String) : Array String := Id.run do
   return #[word]
 
 /-- Full pretokenization with contraction handling -/
-def pretokenizeFull (text : String) : Array String := Id.run do
-  let tokens := pretokenize text
-  let mut result : Array String := #[]
-  for tok in tokens do
-    for part in splitContraction tok do
-      result := result.push part
-  return result
+def pretokenizeFull (text : String) : Array String :=
+  (pretokenize text).flatMap splitContraction
 
 end tokenizer

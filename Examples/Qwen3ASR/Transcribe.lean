@@ -109,7 +109,7 @@ private def parseArgs (xs : List String) : IO Args :=
   parseArgsLoop xs {}
 
 private def toSamples (sec : Float) : Nat :=
-  let n := ((sec * 16000.0) + 0.5).toUInt64.toNat
+  let n := (sec * 16000.0).round.toUInt64.toNat
   if n == 0 then 1 else n
 
 private def uiPrintInline (s : String) : IO Unit := do

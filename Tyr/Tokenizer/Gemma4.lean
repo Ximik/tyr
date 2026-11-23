@@ -5,6 +5,7 @@
   Matches the public Hugging Face `tokenizer.json` format used by Gemma 4:
   SentencePiece-style BPE with `▁` whitespace marker and byte fallback tokens.
 -/
+import Tyr.Model.ConfigJson
 import Tyr.Tokenizer.Types
 import Lean.Data.Json
 import Lean.Data.Json.FromToJson.Basic
@@ -12,12 +13,6 @@ import Lean.Data.Json.FromToJson.Basic
 namespace tokenizer.gemma4
 
 open Lean
-
-private def parseJsonFile (path : String) : IO Json := do
-  let contents ← IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
 
 structure GemmaTokenizer where
   vocabSize : Nat
@@ -34,21 +29,6 @@ structure GemmaTokenizer where
   bosToken : Option TokenId
   eosToken : Option TokenId
 
-private def sortSpecials (specials : Array String) : Array String := Id.run do
-  let mut out : Array String := #[]
-  for s in specials do
-    let mut inserted := false
-    let mut next : Array String := #[]
-    for existing in out do
-      if !inserted && s.length > existing.length then
-        next := next.push s
-        inserted := true
-      next := next.push existing
-    if !inserted then
-      next := next.push s
-    out := next
-  out
-
 private def byteFallbackToken (b : UInt8) : String :=
   let digits := "0123456789ABCDEF".toList.toArray
   let hi := digits[(b.toNat / 16)]!
@@ -56,8 +36,8 @@ private def byteFallbackToken (b : UInt8) : String :=
   String.ofList ['<', '0', 'x', hi, lo, '>']
 
 def loadTokenizer (dir : String) : IO GemmaTokenizer := do
-  let cfgJson ← parseJsonFile s!"{dir}/tokenizer_config.json"
-  let tokJson ← parseJsonFile s!"{dir}/tokenizer.json"
+  let cfgJson ← torch.ConfigJson.parseFile s!"{dir}/tokenizer_config.json"
+  let tokJson ← torch.ConfigJson.parseFile s!"{dir}/tokenizer.json"
   let modelJson ←
     match (tokJson.getObjVal? "model").toOption with
     | some v => pure v
@@ -129,7 +109,7 @@ def loadTokenizer (dir : String) : IO GemmaTokenizer := do
       | _, _ => pure ()
   | _ => pure ()
 
-  let specialList := sortSpecials (List.toArray (specialTokens.toList.map Prod.fst))
+  let specialList := (specialTokens.toList.map Prod.fst).toArray.insertionSort (·.length > ·.length)
 
   let unkToken : Option TokenId :=
     match unkTokenName with

@@ -18,9 +18,6 @@ namespace Tyr.Modular
 
 open torch (TensorStruct)
 
-/-- Maximum of two floats -/
-def floatMax (a b : Float) : Float := if a > b then a else b
-
 /-! ## Modular Norm Typeclass
 
 The modular norm provides a principled way to measure and normalize weight updates.

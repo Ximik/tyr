@@ -145,7 +145,7 @@ def loadCheckpointMeta (path : String) : IO DiffusionCheckpointMeta := do
 
 /-- Check if a checkpoint exists -/
 def checkpointExists (dir : String) : IO Bool := do
-  data.fileExists (dir ++ "/meta.txt")
+  System.FilePath.pathExists (dir ++ "/meta.txt")
 
 /-! ## Optimizer State Checkpointing -/
 

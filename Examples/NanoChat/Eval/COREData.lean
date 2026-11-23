@@ -220,7 +220,7 @@ def parseLAMBADAItem (json : Lean.Json) : Option LMItem := do
 def loadCOREConfig (bundleDir : String) : IO (Array CORETaskConfig) := do
   -- Check if a config file exists
   let configPath := s!"{bundleDir}/core_config.json"
-  if ← fileExists configPath then
+  if ← System.FilePath.pathExists configPath then
     -- Parse config file
     let content ← IO.FS.readFile ⟨configPath⟩
     match Lean.Json.parse content with
@@ -238,7 +238,7 @@ def loadCORETaskData (bundleDir : String) (taskConfig : CORETaskConfig)
   let dataPath := s!"{bundleDir}/{taskConfig.datasetPath}"
 
   -- Check if file exists
-  if !(← fileExists dataPath) then
+  if !(← System.FilePath.pathExists dataPath) then
     IO.eprintln s!"Warning: CORE data file not found: {dataPath}"
     return #[]
 

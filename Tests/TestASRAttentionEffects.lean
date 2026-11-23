@@ -96,7 +96,7 @@ private def expectDropoutError (action : IO α) : IO Unit := do
   catch e => pure (some e.toString)
   match message with
   | none => throw <| IO.userError "expected invalid training dropout to fail"
-  | some message => LeanTest.assertTrue ((message.splitOn "dropout").length > 1) message
+  | some message => LeanTest.assertTrue (message.contains "dropout") message
 
 @[test] def testASRParentFeatureTrainingPropagatesDropout : IO Unit := do
   -- Invalid configuration must reach an IO attention boundary instead of pure inference.

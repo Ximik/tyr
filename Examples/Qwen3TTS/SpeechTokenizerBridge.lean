@@ -72,9 +72,6 @@ private def isTokenizer25Hz (speechTokenizerDir : String) : IO Bool := do
   let cfgText ← IO.FS.readFile cfgPath
   pure (cfgText.contains "\"qwen3_tts_tokenizer_25hz\"")
 
-private def fmax (a b : Float) : Float := if a > b then a else b
-private def fmin (a b : Float) : Float := if a < b then a else b
-
 private partial def reflectIndex (n : Int) (i : Int) : Int :=
   if n <= 1 then
     0
@@ -146,8 +143,8 @@ private def buildSlaneyMelFilterBankFlat
     #[]
   else
     let nyquist : Float := (samplingRate / 2).toFloat
-    let lo := fmax 0.0 minHz
-    let hi := fmin nyquist (fmax lo maxHz)
+    let lo := max 0.0 minHz
+    let hi := min nyquist (max lo maxHz)
     let melMin := hertzToMelSlaney lo
     let melMax := hertzToMelSlaney hi
     let melFreqs := linspace melMin melMax (numMelFilters + 2)
@@ -165,7 +162,7 @@ private def buildSlaneyMelFilterBankFlat
           let upDen := f2 - f1
           let down := if downDen == 0.0 then 0.0 else (fft - f0) / downDen
           let up := if upDen == 0.0 then 0.0 else (f2 - fft) / upDen
-          let tri := fmax 0.0 (fmin down up)
+          let tri := max 0.0 (min down up)
           let normDen := f2 - f0
           let norm := if normDen == 0.0 then 0.0 else 2.0 / normDen
           out := out.push (tri * norm)

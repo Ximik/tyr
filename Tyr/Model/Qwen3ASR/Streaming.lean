@@ -126,13 +126,6 @@ private def detachDecodeCache (cache : StreamingDecodeCache (device := device) (
       { frontend with inputFeaturesDyn := frontend.inputFeaturesDyn.detach
                       inputFeaturesDevDyn := frontend.inputFeaturesDevDyn.map Tensor.detach } }
 
-private def appendRepeatedTokenId (ids : Array UInt32) (tokId : UInt32) (n : Nat) : Array UInt32 :=
-  Id.run do
-    let mut out := ids
-    for _ in [:n] do
-      out := out.push tokId
-    out
-
 private def mkStreamingPromptTokenCache
     (tok : tokenizer.qwen3.QwenTokenizer)
     (processor : Qwen3ASRProcessor)
@@ -176,7 +169,7 @@ private def encodePromptIdsWithCache
         else
           tokenizer.qwen3.encodeText tok suffix
       let mut ids := c.beforeAudioIds
-      ids := appendRepeatedTokenId ids audioTokenId audioLen
+      ids := ids ++ Array.replicate audioLen audioTokenId
       ids := ids ++ c.afterAudioIds
       ids := ids ++ suffixIds
       pure (ids, some { c with lastSuffix := suffix, lastSuffixIds := suffixIds })
@@ -437,12 +430,6 @@ private def buildStreamingFrontendPackWithCache
               featureAttentionMaskDyn := mergedOut.featureAttentionMask
             }, some prefixFrames)
 
-private def containsSubstr (s pat : String) : Bool :=
-  if pat.isEmpty then
-    false
-  else
-    (s.splitOn pat).length > 1
-
 private def splitFirst (s sep : String) : Option (String × String) :=
   match s.splitOn sep with
   | [] => none
@@ -454,10 +441,7 @@ def normalizeLanguageName (language : String) : Except String String := do
   let s := language.trimAscii.toString
   if s.isEmpty then
     throw "language is empty"
-  match s.toList with
-  | [] => throw "language is empty"
-  | c :: cs =>
-    pure <| String.ofList (Char.toUpper c :: cs.map Char.toLower)
+  pure s.toLower.capitalize
 
 /-- Validate language against configured support list. -/
 def validateLanguage (supported : Array String) (language : String) : Except String Unit := do
@@ -569,7 +553,7 @@ def parseAsrOutput (raw : String) (userLanguage : Option String := none) : Strin
       | none => ("", stripSpecialTokens s)
       | some (metaPart, textPart) =>
         let metaLower := metaPart.toLower
-        if containsSubstr metaLower "language none" then
+        if metaLower.contains "language none" then
           let t := stripSpecialTokens textPart
           if t.isEmpty then
             ("", "")
@@ -619,11 +603,8 @@ def buildTextPrompt
   processor.buildAsrPrompt context forceLanguage
 
 private def chunkSizeSamplesFromSec (chunkSizeSec : Float) : Nat :=
-  let rounded := ((chunkSizeSec * sampleRate16k) + 0.5).toUInt64.toNat
+  let rounded := (chunkSizeSec * sampleRate16k).round.toUInt64.toNat
   if rounded == 0 then 1 else rounded
-
-private def tailSlice (xs : Array Float) (n : Nat) : Array Float :=
-  if xs.size <= n then xs else xs.extract (xs.size - n) xs.size
 
 /-- Initialize streaming state (single stream, 16k PCM). -/
 def initStreamingState
@@ -676,9 +657,6 @@ def initStreamingState
     rawDecoded := ""
   }
 
-private def containsReplacementChar (s : String) : Bool :=
-  s.toList.any (fun c => c == Char.ofNat 0xFFFD)
-
 private def rollbackPrefixForChunk
     (tok : tokenizer.qwen3.QwenTokenizer)
     (rawDecoded : String)
@@ -703,7 +681,7 @@ private def rollbackPrefixForChunk
         tokenizer.qwen3.decodeText tok (curIds.extract startIdx endIdx)
       else
         ""
-    if !containsReplacementChar pref then
+    if !pref.contains '\uFFFD' then
       done := true
     else if endIdx == 0 then
       pref := ""
@@ -749,7 +727,9 @@ def streamingTranscribe
     let rest := st.buffer.extract st.stepSizeSamples st.buffer.size
     let audioAccum :=
       match st.decodeMode with
-      | .rollingWindow => tailSlice (st.audioAccum ++ stepChunk) st.chunkSizeSamples
+      | .rollingWindow =>
+        let joined := st.audioAccum ++ stepChunk
+        joined.extract (joined.size - st.chunkSizeSamples) joined.size
       | .fullAccumulation => st.audioAccum ++ stepChunk
     st := { st with buffer := rest, audioAccum := audioAccum }
 
@@ -783,7 +763,9 @@ def finishStreamingTranscribe
     let tail := state.buffer
     let audioAccum :=
       match state.decodeMode with
-      | .rollingWindow => tailSlice (state.audioAccum ++ tail) state.chunkSizeSamples
+      | .rollingWindow =>
+        let joined := state.audioAccum ++ tail
+        joined.extract (joined.size - state.chunkSizeSamples) joined.size
       | .fullAccumulation => state.audioAccum ++ tail
     let mut st := { state with buffer := #[], audioAccum := audioAccum }
     let pref :=

@@ -70,9 +70,6 @@ opaque wavBegin (path : @& String) (sampleRate : Nat := 24000) : IO Unit
 @[extern "lean_torch_wav_finalize"]
 opaque wavFinalize (path : @& String) : IO Unit
 
-@[extern "lean_torch_file_exists"]
-opaque fileExists (path : @& String) : IO Bool
-
 end data
 
 @[extern "lean_torch_get_live_tensors"]

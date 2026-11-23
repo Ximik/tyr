@@ -31,7 +31,7 @@ private def findRawModelFile? (modelDir : String) : IO (Option String) := do
       s!"{modelDir}/kokoro-v1_1-zh.pth"
     ]
   for path in candidates do
-    if ← fileExists path then
+    if ← System.FilePath.pathExists path then
       return some path
   let dir : System.FilePath := ⟨modelDir⟩
   if !(← dir.pathExists) then
@@ -65,24 +65,18 @@ private def converterScriptPath : IO String := do
   | none =>
     throw <| IO.userError "Could not locate Tyr repo root from current working directory."
 
-private def runProcess (cmd : String) (args : Array String) : IO Unit := do
-  let out ← IO.Process.output { cmd, args }
-  if out.exitCode != 0 then
-    throw <| IO.userError s!"Command failed: {cmd} {String.intercalate " " args.toList}\n{out.stderr}"
-
 private def ensureConvertedCheckpoint (modelDir rawPath : String) : IO Unit := do
   let safetensorsPath := s!"{modelDir}/model.safetensors"
-  if ← fileExists safetensorsPath then
+  if ← System.FilePath.pathExists safetensorsPath then
     pure ()
   else
     let script ← converterScriptPath
-    runProcess "uv"
-      #[
+    discard <| IO.Process.run { cmd := "uv", args := #[
         "run", "--with", "torch", "--with", "safetensors",
         "python", script,
         "--checkpoint", rawPath,
         "--checkpoint-out", safetensorsPath
-      ]
+      ] }
 
 private def ensureConvertedVoice (voicePtPath : String) : IO String := do
   let voiceStPath :=
@@ -90,26 +84,25 @@ private def ensureConvertedVoice (voicePtPath : String) : IO String := do
       (voicePtPath.dropEnd 3).toString ++ ".safetensors"
     else
       voicePtPath ++ ".safetensors"
-  if ← fileExists voiceStPath then
+  if ← System.FilePath.pathExists voiceStPath then
     pure voiceStPath
   else
     let script ← converterScriptPath
-    runProcess "uv"
-      #[
+    discard <| IO.Process.run { cmd := "uv", args := #[
         "run", "--with", "torch", "--with", "safetensors",
         "python", script,
         "--voice", voicePtPath,
         "--voice-out", voiceStPath
-      ]
+      ] }
     pure voiceStPath
 
 /-- Resolve a source into a local model directory and ensure `model.safetensors` exists. -/
 def resolvePretrainedDir (source : String) (opts : Hub.DownloadOptions := {}) : IO String := do
   let sourceExpanded ← expandHome source
-  if ← dirExists sourceExpanded then
-    if !(← fileExists s!"{sourceExpanded}/config.json") then
+  if ← System.FilePath.isDir sourceExpanded then
+    if !(← System.FilePath.pathExists s!"{sourceExpanded}/config.json") then
       throw <| IO.userError s!"Missing config.json in {sourceExpanded}"
-    if !(← fileExists s!"{sourceExpanded}/model.safetensors") then
+    if !(← System.FilePath.pathExists s!"{sourceExpanded}/model.safetensors") then
       if let some rawModel ← findRawModelFile? sourceExpanded then
         ensureConvertedCheckpoint sourceExpanded rawModel
       else
@@ -121,9 +114,9 @@ def resolvePretrainedDir (source : String) (opts : Hub.DownloadOptions := {}) : 
     catch _ =>
       let modelDir ← modelDirForRepo opts.cacheDir source opts.revision
       IO.FS.createDirAll ⟨modelDir⟩
-      if !(← fileExists s!"{modelDir}/config.json") then
+      if !(← System.FilePath.pathExists s!"{modelDir}/config.json") then
         ensureRemoteFile source opts.revision "config.json" s!"{modelDir}/config.json"
-      if !(← fileExists s!"{modelDir}/model.safetensors") then
+      if !(← System.FilePath.pathExists s!"{modelDir}/model.safetensors") then
         if let some rawModel ← findRawModelFile? modelDir then
           ensureConvertedCheckpoint modelDir rawModel
         else
@@ -142,7 +135,7 @@ def ensureVoiceSafetensors (source revision modelDir voice : String) : IO String
       let stRel := s!"voices/{voice}.safetensors"
       let ptRel := s!"voices/{voice}.pt"
       let stLocal := s!"{modelDir}/{stRel}"
-      pure <| if (← fileExists stLocal) then stRel else ptRel
+      pure <| if (← System.FilePath.pathExists stLocal) then stRel else ptRel
   let localPath :=
     if normalized.startsWith "/" || normalized.startsWith "~" then
       normalized
@@ -150,12 +143,12 @@ def ensureVoiceSafetensors (source revision modelDir voice : String) : IO String
       s!"{modelDir}/{normalized}"
   let localPath ← expandHome localPath
   if normalized.endsWith ".safetensors" then
-    if ← fileExists localPath then
+    if ← System.FilePath.pathExists localPath then
       pure localPath
     else
       throw <| IO.userError s!"Missing voice safetensors file at {localPath}"
   else
-    if !(← fileExists localPath) then
+    if !(← System.FilePath.pathExists localPath) then
       if source == modelDir then
         throw <| IO.userError s!"Missing voicepack file at {localPath}"
       else

@@ -37,17 +37,6 @@ def ensureParentDir (path : String) : IO Unit := do
   | some parent => IO.FS.createDirAll parent
   | none => pure ()
 
-def fileExists (path : String) : IO Bool := do
-  let p : System.FilePath := ⟨path⟩
-  p.pathExists
-
-def dirExists (path : String) : IO Bool := do
-  let p : System.FilePath := ⟨path⟩
-  if !(← p.pathExists) then
-    pure false
-  else
-    p.isDir
-
 /-! ## Shard parsing -/
 
 /-- The unique shard files named by a `model.safetensors.index.json`. -/
@@ -61,13 +50,13 @@ def shardFilesFromIndexFile (indexPath : String) : IO (Array String) := do
 /-! ## Download -/
 
 private def downloadFile (url : String) (dest : String) : IO Bool := do
-  if ← fileExists dest then
+  if ← System.FilePath.pathExists dest then
     return true
 
   ensureParentDir dest
   let tmp := s!"{dest}.tmp"
   let resumeArgs :=
-    if ← fileExists tmp then
+    if ← System.FilePath.pathExists tmp then
       #["-C", "-"]
     else
       #[]
@@ -92,7 +81,7 @@ private def downloadFile (url : String) (dest : String) : IO Bool := do
     pure false
 
 def ensureRemoteFile (repoId revision relPath dest : String) : IO Unit := do
-  if ← fileExists dest then
+  if ← System.FilePath.pathExists dest then
     pure ()
   else
     let url := s!"https://huggingface.co/{repoId}/resolve/{revision}/{relPath}"
@@ -101,7 +90,7 @@ def ensureRemoteFile (repoId revision relPath dest : String) : IO Unit := do
       throw <| IO.userError s!"Failed to download {repoId}:{revision}:{relPath}"
 
 def tryRemoteFile (repoId revision relPath dest : String) : IO Bool := do
-  if ← fileExists dest then
+  if ← System.FilePath.pathExists dest then
     pure true
   else
     let url := s!"https://huggingface.co/{repoId}/resolve/{revision}/{relPath}"
@@ -136,7 +125,7 @@ def hfRepoDirName (repoId : String) : String :=
 def hasWeightFiles (dir : String) : IO Bool := do
   let sharded := s!"{dir}/model.safetensors.index.json"
   let single := s!"{dir}/model.safetensors"
-  pure ((← fileExists sharded) || (← fileExists single))
+  pure ((← System.FilePath.pathExists sharded) || (← System.FilePath.pathExists single))
 
 /-- Try resolving a repo id against existing HuggingFace cache snapshots. -/
 def findCachedSnapshot? (repoId : String) (revision : String := "main") : IO (Option String) := do
@@ -166,7 +155,7 @@ def findCachedSnapshot? (repoId : String) (revision : String := "main") : IO (Op
 
   for c in candidates do
     let cStr := c.toString
-    if (← fileExists s!"{cStr}/config.json") && (← hasWeightFiles cStr) then
+    if (← System.FilePath.pathExists s!"{cStr}/config.json") && (← hasWeightFiles cStr) then
       return some cStr
   pure none
 
@@ -183,11 +172,11 @@ def ensureModelWeights (repoId revision modelDir : String) : IO Unit := do
   let indexPath := s!"{modelDir}/model.safetensors.index.json"
   let singlePath := s!"{modelDir}/model.safetensors"
 
-  if ← fileExists indexPath then
+  if ← System.FilePath.pathExists indexPath then
     let shardFiles ← shardFilesFromIndexFile indexPath
     for shard in shardFiles do
       ensureRemoteFile repoId revision shard s!"{modelDir}/{shard}"
-  else if ← fileExists singlePath then
+  else if ← System.FilePath.pathExists singlePath then
     pure ()
   else
     let gotIndex ← tryRemoteFile repoId revision "model.safetensors.index.json" indexPath
@@ -203,7 +192,7 @@ def ensureModelWeights (repoId revision modelDir : String) : IO Unit := do
     - Otherwise treat it as HF `repo_id` and resolve/download locally. -/
 def resolvePretrainedDir (source : String) (opts : DownloadOptions := {}) (tokenizerFiles : Array String := #[]) : IO String := do
   let sourceExpanded ← expandHome source
-  if ← dirExists sourceExpanded then
+  if ← System.FilePath.isDir sourceExpanded then
     return sourceExpanded
 
   if let some snap ← findCachedSnapshot? source opts.revision then

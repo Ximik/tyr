@@ -78,7 +78,7 @@ private def parseArgs (xs : List String) : IO Args :=
   parseArgsLoop xs {}
 
 private def toSamples (sec : Float) : Nat :=
-  let n := ((sec * 16000.0) + 0.5).toUInt64.toNat
+  let n := (sec * 16000.0).round.toUInt64.toNat
   if n == 0 then 1 else n
 
 def runMain (argv : List String) : IO UInt32 := do
@@ -101,7 +101,7 @@ def runMain (argv : List String) : IO UInt32 := do
     (sileroVADPath := sileroPath)
 
   let hopSamples := toSamples args.hopSec
-  let steps := Nat.max 1 (((args.runSec / args.hopSec) + 0.5).toUInt64.toNat)
+  let steps := Nat.max 1 ((args.runSec / args.hopSec).round.toUInt64.toNat)
 
   IO.println s!"true-stream session: chunk_sec={args.chunkSec} hop_sec={args.hopSec} run_sec={args.runSec}"
   Tyr.Audio.AppleInput.start 16000 1 100

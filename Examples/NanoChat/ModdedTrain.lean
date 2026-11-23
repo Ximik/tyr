@@ -464,7 +464,7 @@ private def checkpointMetadataFile (path : String) : System.FilePath :=
   ⟨s!"{path}/training_meta.json"⟩
 
 private def checkpointExistsAt (path : String) : IO Bool := do
-  data.fileExists s!"{path}/step.pt"
+  System.FilePath.pathExists s!"{path}/step.pt"
 
 /-- Resolve once, retaining whether strict snapshot metadata is required. -/
 private def resolveCheckpointPath (path : String) : IO (String × Bool) := do
@@ -715,7 +715,7 @@ def saveCheckpoint {cfg : moddedGpt.Config} (ckpt : Checkpoint (device := device
 
   IO.println s!"Saving checkpoint to {path} at step {ckpt.step}"
 
-  let numParams := TensorStruct.fold (fun {s} _t acc => acc + s.shape.foldl (· * ·) 1) 0 ckpt.params
+  let numParams := TensorStruct.fold (fun {s} _t acc => acc + TensorSpec.numelOfShape s.shape) 0 ckpt.params
   let numTensors := TensorStruct.fold (fun {_s} _t acc => acc + 1) 0 ckpt.params
 
   IO.println s!"  Parameters: {numTensors} tensors, {numParams} elements"

@@ -95,11 +95,11 @@ private def splitAudioIntoChunks
       #[(wav, 0.0)]
     else
       Id.run do
-        let maxLenRaw := ((maxChunkSec * srNat.toFloat) + 0.5).toUInt64.toNat
+        let maxLenRaw := (maxChunkSec * srNat.toFloat).round.toUInt64.toNat
         let maxLen := if maxLenRaw == 0 then 1 else maxLenRaw
-        let expandRaw := ((searchExpandSec * srNat.toFloat) + 0.5).toUInt64.toNat
+        let expandRaw := (searchExpandSec * srNat.toFloat).round.toUInt64.toNat
         let expand := expandRaw
-        let winRaw := (((minWindowMs / 1000.0) * srNat.toFloat) + 0.5).toUInt64.toNat
+        let winRaw := ((minWindowMs / 1000.0) * srNat.toFloat).round.toUInt64.toNat
         let win := Nat.max 4 winRaw
 
         let mut chunks : Array (Array Float × Float) := #[]
@@ -132,7 +132,7 @@ private def splitAudioIntoChunks
         let tail := wav.extract start totalLen
         chunks := chunks.push (tail, offsetSec)
 
-        let minLenRaw := ((minAsrInputSeconds * srNat.toFloat) + 0.5).toUInt64.toNat
+        let minLenRaw := (minAsrInputSeconds * srNat.toFloat).round.toUInt64.toNat
         if minLenRaw == 0 then
           chunks
         else
