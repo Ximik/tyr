@@ -383,10 +383,22 @@ private def parseByteFallbackToken? (s : String) : Option UInt8 :=
   else
     none
 
-private def flushDecodedBytes (bytes : ByteArray) : String :=
-  match String.fromUTF8? bytes with
-  | some out => out
-  | none => String.fromUTF8! bytes
+/-- Decode UTF-8, replacing each byte that does not start a valid sequence with
+    U+FFFD. -/
+private def flushDecodedBytes (bytes : ByteArray) : String := Id.run do
+  if let some out := String.fromUTF8? bytes then
+    return out
+  let mut out := ""
+  let mut i := 0
+  while i < bytes.size do
+    match bytes.utf8DecodeChar? i with
+    | some c =>
+      out := out.push c
+      i := i + c.utf8Size
+    | none =>
+      out := out.push '\uFFFD'
+      i := i + 1
+  return out
 
 def decodeText (tok : GemmaTokenizer) (ids : Array TokenId) : String := Id.run do
   let mut out := ""
