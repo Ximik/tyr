@@ -9,6 +9,7 @@ import numpy as np
 from lib import probe
 
 VERDICTS = ("PASS", "TIE", "FAIL", "ERROR")
+CPU_LOGITS_ATOL = 1e-3
 
 
 def worst(verdicts) -> str:
@@ -17,10 +18,11 @@ def worst(verdicts) -> str:
 
 @dataclass(frozen=True)
 class LmTokens:
-    """Greedy tokens must match. Where they first differ, the case is a TIE if
-    the reference's top-1/top-2 logit gap there is below `margin` and the
-    forced run's logits are within `logits_atol` of the reference at every
-    step; on CPU there are no ties.
+    """Greedy tokens must match and the forced run's logits must be within
+    `logits_atol` of the reference at every step; on CPU, which runs in fp32,
+    within `CPU_LOGITS_ATOL` instead. Where the tokens first differ, the case is
+    a TIE if the reference's top-1/top-2 logit gap there is below `margin` and
+    the logits are within `logits_atol`; on CPU there are no ties.
 
     Reads `tokens` from both `result.json` files, `logits` (`[batch, steps,
     vocab]`) from both tensor files and `margin` (`[batch, steps]`) from the
@@ -44,12 +46,13 @@ class LmTokens:
 
         step_diff = np.abs(ref_logits.astype(np.float64) - tyr_logits).max(axis=-1)
         max_diff = float(step_diff.max())
+        limit = CPU_LOGITS_ATOL if device == "cpu" else self.logits_atol
         rows = []
         for row in range(ref_tokens.shape[0]):
             differ = np.flatnonzero(ref_tokens[row] != tyr_tokens[row])
             entry = {"max_logit_diff": float(step_diff[row].max())}
             if differ.size == 0:
-                entry["verdict"] = "PASS"
+                entry["verdict"] = "PASS" if entry["max_logit_diff"] <= limit else "FAIL"
             else:
                 step = int(differ[0])
                 margin = float(ref_tensors["margin"][row, step])
@@ -149,7 +152,7 @@ class IntsTiedWhereUnstable:
 
     key: str
     unstable: str
-    name: str = "ints"
+    name: str = "ints_tied"
 
     def __call__(self, case_dir: Path, device: str) -> dict:
         ref, _ = probe.read(case_dir / "reference")
