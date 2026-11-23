@@ -85,10 +85,10 @@ class DifferentiableManifold (M : Type) where
 
 Three ways in:
 
-- `EuclideanSpace M` (`zero`/`add`/`smul`/`inner`, `Basic.lean`) gets a free
+- `EuclideanSpace M` (`zeroAt`/`add`/`smul`/`inner`, `Basic.lean`) gets a free
   `DifferentiableManifold` instance with `sharp`/`flat := id` and `exp x v := x + v`.
   Instances exist for `Float`, `Static α` (0-dimensional), and any
-  `[TensorStruct α] [Inhabited α]` as a product manifold (`Basic.lean`).
+  `[TensorStruct α] [FloatingTensorStruct α]` as a product manifold (`Basic.lean`).
 - `DifferentiableManifold.gradientStep x grad lr` (`Basic.lean`) is the generic
   Riemannian gradient step: `retract x (-lr • sharp grad)`.
 - Concrete manifold families are structures wrapping one shape-typed tensor with a

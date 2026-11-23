@@ -65,7 +65,7 @@ structure RunStats where
   avgLoss : Float
   finalLoss : Float
   stepsPerSec : Float
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Float finite check helper for callers/tests. -/
 def isFiniteFloat (x : Float) : Bool :=

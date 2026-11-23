@@ -13,7 +13,6 @@ open torch
 example : True := by
   fail_if_success have _ := Tensor.onesFor ⟨#[2], .QInt8, .CPU⟩
   fail_if_success have _ := Tensor.eyeFor (n := 2) .Float8E8M0FNU .CPU
-  fail_if_success have _ : Tensor ⟨#[2], .QInt8, .CPU⟩ := default
   trivial
 
 namespace Tests.TestFactoryRecovery

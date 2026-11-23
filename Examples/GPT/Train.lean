@@ -29,7 +29,7 @@ structure TrainConfig where
   gradAccumSteps : Nat := 1
   /-- Device to train on (CPU, CUDA, or MPS) -/
   device : Device := Device.CPU
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Cosine learning rate schedule with warmup -/
 def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=

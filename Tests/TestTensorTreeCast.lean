@@ -1,3 +1,4 @@
+import Tests.Assertions
 import LeanTest
 import Tyr.TensorStruct.DeriveCast
 
@@ -99,7 +100,7 @@ abbrev TargetLeaves := Array (Option (Tensor { shape := #[2], dtype := .Float64,
     ((Frozen.mk (Tensor.ones #[2])), [Tensor.ones #[2], Tensor.full #[2] 3])
   LeanTest.assertEqual pair.1.tensor.raw.dtype .BFloat16
   LeanTest.assertEqual pair.2.length 2
-  LeanTest.assertEqual pair.2.head!.raw.dtype .Float64
+  LeanTest.assertEqual (pair.2.head?.map (·.raw.dtype)) (some .Float64)
   let vector : Vector (Tensor { shape := #[2], dtype := .Float32, device := .CPU }) 2 :=
     ⟨#[Tensor.ones #[2], Tensor.full #[2] 3], rfl⟩
   let converted ← TensorStruct.castTo
@@ -169,7 +170,7 @@ derive_tensor_tree_cast SourceModel => WrongShapeModel
       "Native conversion errors must retain the tensor's structural path"
     pure true
   LeanTest.assertTrue rejected "An unsupported quantized conversion must return an IO error"
-  LeanTest.assertEqual input[0]!.raw.dtype .Float32
-  LeanTest.assertEqual (← input[0]!.toFloatArray) #[1, 1]
+  LeanTest.assertEqual (← Tests.get input 0).raw.dtype .Float32
+  LeanTest.assertEqual (← (← Tests.get input 0).toFloatArray) #[1, 1]
 
 end Tests.TensorTreeCast

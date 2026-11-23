@@ -23,7 +23,7 @@ open torch.Data.Task
 inductive EvalType where
   | categorical  -- Multiple choice, model picks a letter
   | generative   -- Free-form generation, extract answer
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 /-- Result of evaluating a response -/
 structure EvalResult where
@@ -84,16 +84,6 @@ structure TaskOps where
   evaluate : Conversation → String → EvalResult
   reward : Conversation → String → Float
 
-instance : Inhabited TaskOps where
-  default := {
-    name := ""
-    evalType := .categorical
-    size := 0
-    getExample := fun _ => none
-    evaluate := fun _ _ => { correct := false, score := 0, expected := "", predicted := "" }
-    reward := fun _ _ => 0.0
-  }
-
 /-- Create TaskOps from a concrete task -/
 def TaskOps.ofTask [EvalTask α] (task : α) : TaskOps where
   name := EvalTask.name (α := α)
@@ -112,9 +102,6 @@ structure BoxedTask where
   /-- Operations on the task -/
   ops : TaskOps
 
-instance : Inhabited BoxedTask where
-  default := { ops := default }
-
 /-- Box a concrete task into a BoxedTask -/
 def boxTask [EvalTask α] (task : α) : BoxedTask :=
   { ops := TaskOps.ofTask task }
@@ -132,9 +119,6 @@ end BoxedTask
 structure MixtureEntry where
   task : BoxedTask
   weight : Nat := 1
-
-instance : Inhabited MixtureEntry where
-  default := { task := default, weight := 1 }
 
 /-- LCG random number generator for deterministic shuffling -/
 private def lcgNext (state : UInt64) : UInt64 :=
@@ -166,8 +150,8 @@ def GenericTaskMixture.create (entries : Array MixtureEntry) (seed : UInt64 := 4
     : GenericTaskMixture := Id.run do
   -- Build index map
   let mut indices : Array (Nat × Nat) := #[]
-  for taskIdx in [:entries.size] do
-    let entry := entries[taskIdx]!
+  for h : taskIdx in [:entries.size] do
+    let entry := entries[taskIdx]
     let taskSize := entry.task.size
     for _ in [:entry.weight] do
       for localIdx in [:taskSize] do

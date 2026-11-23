@@ -17,7 +17,7 @@ def testTypedDefaultsAndPlacement : IO Unit := do
     let support ← dtype.acquireConstantSupport .CPU
     let _ := support.down
     let spec : StaticSpec := { shape := #[2, 3], dtype, device := .CPU }
-    let tensor : Tensor spec := default
+    let tensor : Tensor spec := Tensor.zerosFor spec
     let moved := tensor.to .CPU
     LeanTest.assertTrue (!moved.requiresGrad) "Defaults should not track gradients."
   let scalar ← (Tensor.full #[] 2.5).setRequiresGrad true
@@ -432,7 +432,7 @@ def testTypedStackArrayOwnership : IO Unit := do
     -- Allocate additional shape arrays and reuse the original tensor handles.
     let reshaped := stacked.reshape #[3, 2]
     LeanTest.assertEqual reshaped.runtimeShape #[3, 2]
-    LeanTest.assertEqual (← vectors[0]!.toFloatArray) #[i.toFloat, 2, 3]
+    LeanTest.assertEqual (← a.toFloatArray) #[i.toFloat, 2, 3]
     LeanTest.assertEqual (← (Tensor.stack1d vectors).toFloatArray)
       #[i.toFloat, 2, 3, 4, 5, 6]
 

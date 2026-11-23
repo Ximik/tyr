@@ -68,8 +68,7 @@ The erased class `DType.ConstantSupported dtype device` establishes that the
 constant factory paths support this exact pair and represent zero and one.
 Common supported combinations have static instances. For a runtime-selected
 pair, acquire evidence once with `dtype.acquireConstantSupport device` and
-install `support.down` as a local instance. `Inhabited (Tensor spec)` requires
-the same evidence; `default` cannot allocate an unsupported specification.
+install `support.down` as a local instance.
 This capability does not imply support for arbitrary arithmetic kernels.
 
 ## Arithmetic, transforms, and reductions

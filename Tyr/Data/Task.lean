@@ -29,7 +29,7 @@ inductive Role where
   | user
   | assistant
   | tool
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 /-- Content part types for structured messages -/
 inductive ContentType where
@@ -97,14 +97,14 @@ structure TaskConfig where
   seed : UInt64 := 42
   /-- Whether this is a validation set -/
   isValidation : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- A loaded task with its data -/
 structure LoadedTask where
   name : String
   conversations : Array Conversation
   config : TaskConfig
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-! ## Task Mixture -/
 
@@ -113,7 +113,7 @@ structure MixtureEntry where
   task : LoadedTask
   /-- Number of times to repeat this task in the mixture -/
   weight : Nat := 1
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- A mixture of multiple tasks with deterministic interleaving -/
 structure TaskMixture where
@@ -148,8 +148,8 @@ def TaskMixture.create (entries : Array MixtureEntry) (seed : UInt64 := 42) : Ta
   -- Build index map: for each task, add (taskIdx, exampleIdx) pairs weighted times
   let indexMap := Id.run do
     let mut indices : Array (Nat × Nat) := #[]
-    for taskIdx in [:entries.size] do
-      let entry := entries[taskIdx]!
+    for h : taskIdx in [:entries.size] do
+      let entry := entries[taskIdx]
       for _ in [:entry.weight] do
         for exampleIdx in [:entry.task.conversations.size] do
           indices := indices.push (taskIdx, exampleIdx)
@@ -163,11 +163,9 @@ def TaskMixture.size (mix : TaskMixture) : Nat := mix.indexMap.size
 
 /-- Get a conversation from the mixture by index -/
 def TaskMixture.get (mix : TaskMixture) (idx : Nat) : IO Conversation := do
-  if idx >= mix.indexMap.size then
-    return Conversation.empty
-  let (taskIdx, exampleIdx) := mix.indexMap[idx]!
-  let task := mix.entries[taskIdx]!.task
-  return task.conversations[exampleIdx]?.getD Conversation.empty
+  let some (taskIdx, exampleIdx) := mix.indexMap[idx]? | return Conversation.empty
+  let some entry := mix.entries[taskIdx]? | return Conversation.empty
+  return entry.task.conversations[exampleIdx]?.getD Conversation.empty
 
 /-- Shared conversation mixture surface used by SFT and streaming token pipelines. -/
 structure ConversationMixture where
@@ -209,7 +207,7 @@ structure ChatTokens where
   toolEnd : UInt64
   outputStart : UInt64
   outputEnd : UInt64
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Merge a leading system message into the first user message (nanochat behavior). -/
 private def mergeLeadingSystemMessage (msgs : Array Message) : Array Message :=

@@ -73,7 +73,7 @@ structure Hyperparameters where
   logInterval : StepInterval := 10
   /-- Checkpoint interval -/
   checkpointInterval : StepInterval := 100
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 /-- Default hyperparameters -/
 def Hyperparameters.default : Hyperparameters := {}
@@ -442,7 +442,7 @@ structure DataCursor where
   /-- Versioned full-partition document-stream cursor. Legacy offsets cannot
       identify the new shuffled stream and are rejected on exact resume. -/
   streamCursor? : Option StreamCursor := none
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 /-- Training metadata stored alongside tensor checkpoints. -/
 structure CheckpointMetadata where
@@ -458,7 +458,7 @@ structure CheckpointMetadata where
   totalTokens : Nat := 0
   /-- Optional parquet-loader cursor state. -/
   dataCursor? : Option DataCursor := none
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  deriving Repr, Lean.ToJson, Lean.FromJson
 
 private def checkpointMetadataFile (path : String) : System.FilePath :=
   ⟨s!"{path}/training_meta.json"⟩
@@ -970,9 +970,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
 
   let mut newValueEmbeds : Array (Tensor { shape := #[cfg.vocabSize, cfg.modelDim], dtype := .Float32, device := device }) := #[]
   let mut newValueEmbedStates : Array (DistAdam.ParamState ⟨#[cfg.vocabSize, cfg.modelDim], .Float32, device⟩) := #[]
-  for i in [:params.valueEmbeds.size] do
-    let ve := params.valueEmbeds[i]!
-    let veGrad := grads.valueEmbeds[i]!
+  for ve in params.valueEmbeds, veGrad in grads.valueEmbeds, i in [:params.valueEmbeds.size] do
     let veState := optState.dualState.valueEmbeds[i]?.getD (DistAdam.initParamState ve)
     let (ve', veState') ← runAdamStep ve veGrad veState lrEmbed
     newValueEmbeds := newValueEmbeds.push ve'
@@ -1012,9 +1010,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let mut oGrads : Array (Tensor { shape := #[cfg.modelDim, cfg.nHead * cfg.headDim], dtype := .Float32, device := device }) := #[]
   let mut oStates : Array (NorMuon.ParamState ⟨#[cfg.modelDim, cfg.nHead * cfg.headDim], .Float32, device⟩) := #[]
 
-  for i in [:params.blocks.size] do
-    let block := params.blocks[i]!
-    let blockGrad := grads.blocks[i]!
+  for block in params.blocks, blockGrad in grads.blocks, i in [:params.blocks.size] do
     let defaultBlockState : MuonBlockState (device := device) cfg := {
       attn := block.attn.map fun attn =>
         {
@@ -1068,9 +1064,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let mut newBlocks : Array (Block (device := device) cfg.modelDim cfg.headDim cfg.nHead) := #[]
   let mut newBlockStates : Array (MuonBlockState (device := device) cfg) := #[]
   let mut attnCursor : Nat := 0
-  for i in [:params.blocks.size] do
-    let block := params.blocks[i]!
-    let blockGrad := grads.blocks[i]!
+  for block in params.blocks, blockGrad in grads.blocks, i in [:params.blocks.size] do
     let defaultBlockState : MuonBlockState (device := device) cfg := {
       attn := block.attn.map fun attn =>
         {

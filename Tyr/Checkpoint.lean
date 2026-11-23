@@ -37,7 +37,7 @@ structure CheckpointMeta where
   bestValLoss : Float
   trainLoss : Float
   optimCount : Nat := 0
-  deriving Repr, Inhabited
+  deriving Repr
 
 private structure MetadataV2 where
   version : Nat

@@ -12,7 +12,7 @@ structure BudgetConfig where
   maxMultiplier : Float := 1e3
   /-- Global factor applied to all multipliers. -/
   globalScale : Float := 1.0
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 private def clamp (lo hi x : Float) : Float :=
   if x < lo then lo else if x > hi then hi else x
@@ -61,7 +61,7 @@ structure GroupBudget where
   embedding : Float := 1.0
   lmHead : Float := 1.0
   scalar : Float := 1.0
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 namespace GroupBudget
 

@@ -62,7 +62,7 @@ structure Gemma4ImageProcessorConfig where
   patch_size : Nat := 16
   pooling_kernel_size : Nat := 3
   rescale_factor : Float := 1.0 / 255.0
-  deriving Repr, Inhabited
+  deriving Repr
 
 namespace Gemma4ImageProcessorConfig
 

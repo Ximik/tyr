@@ -1,3 +1,4 @@
+import Tests.Assertions
 import Tyr
 import Tyr.Model.Qwen3ASR
 import LeanTest
@@ -1175,8 +1176,8 @@ def testQwen3ASRForcedAlignFromOutputIds : IO Unit := do
   let results ← alignFromOutputIds inputIds outputIds wordLists timestampTokenId 10.0
   let r := results.getD 0 { items := #[] }
   LeanTest.assertEqual r.items.size 2 "forced aligner should return one span per word"
-  let i0 := r.items.getD 0 default
-  let i1 := r.items.getD 1 default
+  let i0 ← Tests.get r.items 0
+  let i1 ← Tests.get r.items 1
   LeanTest.assertTrue (Float.abs (i0.startTime - 0.1) < 1e-6) "first start_time should match converted timestamp"
   LeanTest.assertTrue (Float.abs (i0.endTime - 0.2) < 1e-6) "first end_time should match converted timestamp"
   LeanTest.assertTrue (Float.abs (i1.startTime - 0.3) < 1e-6) "second start_time should match converted timestamp"

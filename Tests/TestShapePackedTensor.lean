@@ -1,3 +1,4 @@
+import Tests.Assertions
 import Tyr.TensorStruct.Schema
 import Tyr.Checkpoint
 import Tyr.Typed.Neural
@@ -15,13 +16,13 @@ open torch
   let shapes := TensorStruct.fold (fun t acc => acc.push t.runtimeShape) #[] moved
   LeanTest.assertEqual shapes #[#[2], #[2, 2]]
   let summed := FloatingTensorStruct.zipWith Tensor.add values moved
-  LeanTest.assertEqual (← summed[0]!.2.toFloatArray) #[3, 5]
-  LeanTest.assertEqual (← summed[1]!.2.toFloatArray) #[7, 9, 11, 13]
+  LeanTest.assertEqual (← (← Tests.get summed 0).2.toFloatArray) #[3, 5]
+  LeanTest.assertEqual (← (← Tests.get summed 1).2.toFloatArray) #[7, 9, 11, 13]
   checkpoint.saveParams summed dir.toString
   let loaded ← checkpoint.loadParams values dir.toString
   for i in [:loaded.size] do
-    LeanTest.assertEqual loaded[i]!.1 values[i]!.1
-    LeanTest.assertEqual (← loaded[i]!.2.toFloatArray) (← summed[i]!.2.toFloatArray)
+    LeanTest.assertEqual (← Tests.get loaded i).1 (← Tests.get values i).1
+    LeanTest.assertEqual (← (← Tests.get loaded i).2.toFloatArray) (← (← Tests.get summed i).2.toFloatArray)
 
 @[test] def testKittenCumsumBoundary : IO Unit := do
   let input := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[2, 3]

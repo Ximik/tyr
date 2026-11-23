@@ -356,18 +356,6 @@ structure Block (dim headDim numHeads : Nat) where
   mlp : MLP (device := device) dim
   deriving Repr, TensorStruct
 
-instance {inDim outDim : Nat} : Inhabited (CastedLinear (device := device) inDim outDim) where
-  default := { weight := Tensor.zeros (device := device) _ }
-
-instance {dim : Nat} : Inhabited (MLP (device := device) dim) where
-  default := { cFc := Tensor.zeros (device := device) _, cProj := Tensor.zeros (device := device) _ }
-
-instance {dim headDim numHeads : Nat} : Inhabited (CausalSelfAttention (device := device) dim headDim numHeads) where
-  default := { wQ := Tensor.zeros (device := device) _, wK := Tensor.zeros (device := device) _, wV := Tensor.zeros (device := device) _, wO := Tensor.zeros (device := device) _ }
-
-instance {dim headDim numHeads : Nat} : Inhabited (Block (device := device) dim headDim numHeads) where
-  default := { attn := none, mlp := default }
-
 /-- Initialize Block -/
 def Block.init (dim headDim numHeads : Nat) (skipAttn : Bool := false) (device : Device := .CPU)
     : IO (Block (device := device) dim headDim numHeads) := do
@@ -531,7 +519,8 @@ def forward {cfg : Config} {batch seq : Nat}
 
   for hL : i in [:cfg.nLayer] do
     have hi : i < cfg.nLayer := by have := hL.upper; simpa using this
-    let block : Block (device := device) cfg.modelDim cfg.headDim cfg.nHead := params.blocks[i]!
+    let some block := params.blocks[i]?
+      | throw <| IO.userError s!"ModdedGPT has {params.blocks.size} blocks, config has {cfg.nLayer}"
     let lamX := scalarSigmoidAt params.scalars.values (i * 4)
     let lamX0 := scalarSigmoidAt params.scalars.values (i * 4 + 1)
     let lamAttn := scalarSigmoidAt params.scalars.values (i * 4 + 2)

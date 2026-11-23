@@ -106,8 +106,7 @@ the actual conversion paths with small temporary tensors. It verifies exact
 zero and one values: recognizing a dtype is insufficient, and Float8E8M0FNU
 cannot represent zero. This witness covers constant creation, not arbitrary
 operators. Constant construction returns tensors directly; validation errors
-belong to capability acquisition. `Inhabited (Tensor spec)` requires the same
-support, so `default` provides no bypass for unsupported dtypes.
+belong to capability acquisition.
 
 Qwen3-TTS now loads the whole model under a `DTypeLayout` witness:
 `loadSharded` returns `Σ dtypes, Qwen3TTSForConditionalGeneration cfg dtypes`.

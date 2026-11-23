@@ -133,7 +133,7 @@ structure Sample where
   responseText : String
   /-- Reward received -/
   reward : Float
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Batch of samples for one prompt -/
 structure RolloutBatch where
@@ -222,7 +222,7 @@ structure GRPOState where
   bestPass1 : Float := 0.0
   /-- Total examples processed -/
   examplesProcessed : Nat := 0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Update learning rate based on linear decay schedule -/
 def GRPOState.getLr (state : GRPOState) (baseLr : Float) (initLrFrac : Float := 0.05) : Float :=
@@ -274,7 +274,7 @@ def computePassK (rollouts : Array RolloutBatch) (k : Nat) : PassKResult := Id.r
 
   for batch in rollouts do
     -- Check if first sample is correct (pass@1)
-    if batch.samples.size > 0 && batch.samples[0]!.reward > 0.5 then
+    if batch.samples[0]?.any (·.reward > 0.5) then
       numCorrectFirst := numCorrectFirst + 1
 
     -- Check if any of first k samples is correct (pass@k)
@@ -368,7 +368,7 @@ structure GenerationConfig where
   eosToken : UInt64 := 2
   /-- Pad token -/
   padToken : UInt64 := 0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Generate a single sample from a prompt.
     Returns generated tokens (excluding prompt). -/

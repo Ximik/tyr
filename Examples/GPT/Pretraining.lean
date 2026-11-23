@@ -53,7 +53,7 @@ structure TrainState where
   totalTokens : Nat := 0
   /-- Running loss (exponential moving average) -/
   runningLoss : Float := 0.0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-! ## Training Loop -/
 

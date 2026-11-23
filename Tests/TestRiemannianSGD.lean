@@ -34,7 +34,7 @@ def testLinearRiemannianMSEStepProducesFiniteDiagnostics : IO Unit := do
   let target ← Tensor.randn #[3]
   let result ← torch.Optim.RiemannianSGD.stepMSE layer x target 0.02
   LeanTest.assertEqual result.diagnostics.size 1
-  let stats := result.diagnostics[0]!
+  let stats ← Tests.get result.diagnostics 0
   LeanTest.assertTrue (Float.isFinite result.loss && result.loss >= 0.0)
     s!"Expected finite non-negative loss, got {result.loss}"
   LeanTest.assertTrue (Float.isFinite stats.gradientNorm && Float.isFinite stats.updateNorm)

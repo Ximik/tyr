@@ -66,7 +66,7 @@ structure Args where
   decodeLeftContext : Nat := 25
   tokenIdsPath : String := "output/qwen3tts_text_ids.txt"
   help : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def parseFloatLit? (s : String) : Option Float :=
   match s.splitOn "." with
@@ -106,7 +106,7 @@ private inductive ThinkMode where
   | auto
   | think
   | noThink
-  deriving Repr, Inhabited, BEq
+  deriving Repr, BEq
 
 private partial def parseArgsLoop : List String → Args → Args
   | [], acc => acc

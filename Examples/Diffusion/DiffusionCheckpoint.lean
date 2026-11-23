@@ -20,7 +20,7 @@ structure DiffusionCheckpointMeta where
   bestValLoss : Float
   trainLoss : Float
   optimCount : Nat := 0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Save NanoProof-style AttentionParams -/
 def saveAttentionParams {n_head half n_kv_head : Nat}

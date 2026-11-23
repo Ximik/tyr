@@ -132,7 +132,7 @@ def testNorMuon : IO Unit := do
 
   -- Initialize state
   let state := NorMuon.initParamState param
-  let cfg : NorMuon.Config := default
+  let cfg : NorMuon.Config := {}
 
   -- Single step (using Adam-like update since orthogonalization may be slow)
   let (newParam, newState) ← NorMuon.stepAdamLike param grad state cfg 1.0 1.0
@@ -153,7 +153,7 @@ def testDistAdam : IO Unit := do
 
   -- Initialize state
   let state := DistAdam.initParamState param
-  let cfg : DistAdam.Config := default
+  let cfg : DistAdam.Config := {}
 
   -- Single step
   let (newParam, newState) ← DistAdam.stepSingle param grad state cfg 1.0 1.0

@@ -24,7 +24,7 @@ structure Config where
   n_head : Nat      -- number of attention heads
   n_layer : Nat     -- number of transformer blocks
   dropout : Float := 0.0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Tiny config for quick testing on Shakespeare (65 char vocab) -/
 def Config.tiny_shakespeare : Config :=

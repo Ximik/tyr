@@ -144,8 +144,10 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
     weight := zerosFor #[8], bias := (Tensor.ones #[8]) }
   let projection := Tensor.sliceScatter (zerosFor #[16, 8]) 0 0 ((Tensor.ones #[1, 8]))
   let model := { model with model := { model.model with decoderLayerNorm := norm }, projOut := projection }
-  let tok : tokenizer.qwen3.QwenTokenizer := { (default : tokenizer.qwen3.QwenTokenizer) with
-    vocabSize := 16, idToToken := Array.replicate 16 "a" }
+  let tok : tokenizer.qwen3.QwenTokenizer := {
+    vocabSize := 16, idToToken := Array.replicate 16 "a", tokenToId := {}, charToId := {},
+    merges := #[], mergeLookup := {}, mergePriority := {}, specialTokens := {},
+    idToSpecial := {}, specialList := #[], unkToken := none, padToken := 0, nfc := false }
   let pre : qwen3asr.PreprocessorConfig := {
     featureSize := 4, hopLength := 64, nFft := 64,
     nSamples := 2048, nbMaxFrames := 32, chunkLength := 0 }

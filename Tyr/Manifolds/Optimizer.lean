@@ -71,7 +71,7 @@ def dualMapStep [DifferentiableManifold M] [DualMapGeometry M]
 structure StepDiagnostics where
   tangentNorm : Float
   cotangentNorm : Float
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Apply a dual-map step and return basic norm diagnostics. -/
 def dualMapStepWithDiagnostics [DifferentiableManifold M] [DualMapGeometry M]

@@ -26,7 +26,7 @@ inductive ExistingRunPolicy where
   | resume
   | overwrite
   | failIfExists
-  deriving Repr, Inhabited, BEq, Lean.ToJson, Lean.FromJson
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
 /-- Filesystem layout for a single training run. -/
 structure RunArtifacts where
@@ -36,7 +36,7 @@ structure RunArtifacts where
   checkpointsPath : System.FilePath
   checkpointsDir : System.FilePath
   reportPath : System.FilePath
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Construct the standard artifact layout for a base run directory. -/
 def RunArtifacts.ofBaseDir (baseDir : String) : RunArtifacts :=
@@ -108,7 +108,6 @@ structure MetricEvent where
   step : Option Nat := none
   metrics : MetricFields := []
   timestampMs : Nat := 0
-  deriving Inhabited
 
 instance : Lean.ToJson MetricEvent where
   toJson ev := .mkObj [
@@ -126,7 +125,6 @@ structure CheckpointEvent where
   step : Option Nat := none
   metadata : MetricFields := []
   timestampMs : Nat := 0
-  deriving Inhabited
 
 instance : Lean.ToJson CheckpointEvent where
   toJson ev := .mkObj [
@@ -153,7 +151,7 @@ structure EvalSchedule where
   every : Nat := 0
   runAtStart : Bool := false
   runAtEnd : Bool := true
-  deriving Repr, Inhabited, BEq, Lean.ToJson, Lean.FromJson
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
 /-- Determine whether an evaluator should run at this step. -/
 def EvalSchedule.shouldRun (schedule : EvalSchedule) (step : Nat) (isLastStep : Bool := false) : Bool :=

@@ -19,12 +19,12 @@ def testBoxedIndexAndUnbind : IO Unit := do
   LeanTest.assertEqual (← values (x.getOp 1)) #[3.0, 4.0, 5.0]
   let rows := Tensor.unbind x 0
   LeanTest.assertEqual rows.size 2
-  LeanTest.assertEqual rows[0]!.runtimeShape #[3]
-  LeanTest.assertEqual (← values rows[1]!) #[3.0, 4.0, 5.0]
+  LeanTest.assertEqual (← Tests.get rows 0).runtimeShape #[3]
+  LeanTest.assertEqual (← values (← Tests.get rows 1)) #[3.0, 4.0, 5.0]
   let columns := Tensor.unbind x 1
   LeanTest.assertEqual columns.size 3
-  LeanTest.assertEqual columns[0]!.runtimeShape #[2]
-  LeanTest.assertEqual (← values columns[2]!) #[2.0, 5.0]
+  LeanTest.assertEqual (← Tests.get columns 0).runtimeShape #[2]
+  LeanTest.assertEqual (← values (← Tests.get columns 2)) #[2.0, 5.0]
 
 @[test]
 def testArangeLengthAndScalarWidths : IO Unit := do

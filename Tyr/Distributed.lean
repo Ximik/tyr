@@ -31,7 +31,7 @@ open torch.dist.Native
 /-- Handle for async distributed operations -/
 structure WorkHandle where
   id : UInt64
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 def wait (handle : WorkHandle) : IO Unit :=
   waitImpl handle.id
@@ -244,7 +244,7 @@ structure DistributedSamplerConfig where
   shuffle : Bool := true
   /-- Whether to drop the last incomplete batch -/
   dropLast : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Distributed sampler for sharding data across ranks.
 

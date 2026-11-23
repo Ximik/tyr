@@ -30,7 +30,7 @@ structure TrainConfig where
   weightDecay : Float := 0.01
   checkpointInterval : Nat := 1000  -- Save checkpoint every N iterations
   checkpointDir : Option String := none  -- Directory for checkpoints
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Cosine learning rate schedule with warmup -/
 def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=

@@ -22,12 +22,12 @@ open torch.checkpoint
 inductive PullbackMetricMode where
   | exact
   | sampledFisher
-  deriving Repr, Inhabited, BEq
+  deriving Repr, BEq
 
 structure PullbackMetricConfig where
   mode : PullbackMetricMode := .exact
   fisherProbeCount : Nat := 8
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Experimental config for the Riemannian GPT prototype. -/
 structure PrototypeConfig where
@@ -70,7 +70,7 @@ structure RunStats where
   finalLoss : Float
   stepsPerSec : Float
   finalDiagnostics : torch.Optim.RiemannianTreeSGD.StepDiagnostics := {}
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Shakespeare character vocabulary (65 chars).
     This must match the `TrainGPT` preparation encoding. -/

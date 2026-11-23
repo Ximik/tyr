@@ -14,7 +14,7 @@ namespace torch.qwen35
 inductive LayerType where
   | linearAttention
   | fullAttention
-  deriving Repr, Inhabited, BEq
+  deriving Repr, BEq
 
 namespace LayerType
 

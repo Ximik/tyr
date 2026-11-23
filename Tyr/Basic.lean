@@ -150,9 +150,6 @@ This boundary accepts a specification, never an unchecked foreign handle. -/
 opaque zerosFor (σ : StaticSpec) [DType.ConstantSupported σ.dtype σ.device] :
     Tensor σ := Classical.choice inferInstance
 
-instance {σ : StaticSpec} [DType.ConstantSupported σ.dtype σ.device] :
-    Inhabited (Tensor σ) := ⟨zerosFor σ⟩
-
 /-- Package placement as an existential index without weakening its identity. -/
 def packDevice {σ : StaticSpec} (tensor : Tensor σ) :
     Sigma fun device : Device => Tensor { σ with device } :=

@@ -25,7 +25,7 @@ structure WhisperTranscription where
   language : String
   text : String
   tokenIds : Array UInt32 := #[]
-  deriving Repr, Inhabited
+  deriving Repr
 
 structure WhisperBundle where
   cfg : WhisperConfig
@@ -70,7 +70,6 @@ private structure DecodeState where
   tokenCount : Nat := 0
   noSpeechProb : Float := 0.0
   measuredNoSpeech : Bool := false
-  deriving Inhabited
 
 private structure BeamState (cfg : WhisperConfig) (dtype : DType := .Float32) where
   allIds : Array UInt32
@@ -87,9 +86,6 @@ private structure BeamState (cfg : WhisperConfig) (dtype : DType := .Float32) wh
   budget : Nat := 0
   fits : nextPos + budget ≤ cfg.maxTargetPositions := by omega
 
-private instance {cfg : WhisperConfig} {dtype : DType} :
-    Inhabited (BeamState (device := device) (dtype := dtype) cfg) := ⟨{ allIds := #[] }⟩
-
 private structure WhisperDecodeCandidate where
   generated : Array UInt32 := #[]
   text : String := ""
@@ -98,20 +94,17 @@ private structure WhisperDecodeCandidate where
   compressionRatio : Float := 0.0
   repetitionLoop : Bool := false
   temperature : Float := 0.0
-  deriving Inhabited
 
 private structure DecodeTokenRules where
   forbidden : Array UInt32 := #[]
   beginSuppress : Array UInt32 := #[]
   timestampBeginId : Option UInt32 := none
   maxInitialTimestampTokens : Nat := 0
-  deriving Inhabited
 
 private structure AudioChunk where
   start : Nat
   stop : Nat
   wav : Array Float
-  deriving Inhabited
 
 private def normalizeLanguageCode (language : String) : String :=
   let l := language.trimAscii.toString.toLower
@@ -951,12 +944,10 @@ private def decodeBeamCached
       beamWidth
       remaining
       #[initBeam]
-  if beams.isEmpty then
-    pure { allIds := promptIds }
-  else
-    let mut best := beams[0]!
-    for beam in beams do
-      best := chooseBetterBeam best beam
+  match beams[0]? with
+  | none => pure { allIds := promptIds }
+  | some first =>
+    let best := beams.foldl chooseBetterBeam first
     pure {
       allIds := best.allIds
       generated := best.generated
@@ -1072,7 +1063,9 @@ private def decodeAtTemperature
         match best? with
         | none => some cand
         | some cur => some (chooseBetterCandidate cur cand)
-    pure ((best?).getD (default : WhisperDecodeCandidate))
+    match best? with
+    | some best => pure best
+    | none => throw <| IO.userError "Whisper sampling needs bestOf > 0"
 
 private partial def decodeWithFallbackLoop
     {cfg : WhisperConfig}

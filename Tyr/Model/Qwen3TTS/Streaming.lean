@@ -44,7 +44,7 @@ structure StreamingCallbacks where
 structure StreamingResult where
   codeRows : Array (Array UInt64)
   lengths : Array Nat
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Stream from prepared talker inputs (`[1, seq, hidden]`) with optional
     in-process streaming decode.

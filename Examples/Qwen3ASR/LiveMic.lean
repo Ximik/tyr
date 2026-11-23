@@ -10,7 +10,7 @@ inductive UseCase where
   | generic
   | tv
   | conversation
-  deriving Inhabited, Repr, BEq
+  deriving Repr, BEq
 
 private def UseCase.toString : UseCase → String
   | .generic => "generic"
@@ -38,7 +38,6 @@ structure Args where
   emitPartials : Bool := false
   prettyUI : Bool := true
   simpleOutput : Bool := false
-  deriving Inhabited
 
 private def parseNatArg (name : String) (v : String) : IO Nat :=
   match v.toNat? with
@@ -158,7 +157,6 @@ private structure AudioRing where
   head : Nat
   size : Nat
   cap : Nat
-  deriving Inhabited
 
 private def mkAudioRing (cap : Nat) : AudioRing :=
   if cap == 0 then

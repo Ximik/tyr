@@ -44,10 +44,6 @@ structure Config where
   distributed : Bool := false
   deriving Repr
 
-instance : Inhabited Config where
-  default := { lr := 0.008, beta1 := 0.65, beta2 := 0.95, eps := 1e-8,
-               weightDecay := 0.005, distributed := false }
-
 /-- State for a single parameter in DistAdam -/
 structure ParamState (σ : StaticSpec) where
   /-- First moment (mean of gradients) -/

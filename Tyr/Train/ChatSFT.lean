@@ -94,7 +94,7 @@ structure SFTState where
   runningLoss : Float := 0.0
   /-- Number of tokens trained on -/
   totalTokens : Nat := 0
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-! ## SFT Batch -/
 

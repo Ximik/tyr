@@ -26,7 +26,7 @@ variable {d : DType} {dev : Device} [DType.RealFloating d]
 inductive SolverKind where
   | dualAscent
   | fixedPoint
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 /-- Manifold-Muon configuration (experimental). -/
 structure Config where
@@ -52,7 +52,7 @@ structure Config where
   fixedPointDamping : Float := 0.5
   /-- Whether to run distributed gradient averaging before local step. -/
   distributed : Bool := false
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Diagnostics for the inner tangent-constrained solve. -/
 structure SolveDiagnostics where
@@ -62,7 +62,7 @@ structure SolveDiagnostics where
   dualObjective : Float := 0.0
   converged : Bool := false
   solver : SolverKind := .dualAscent
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Result of solving for a constrained manifold update direction. -/
 structure SolveResult (m n : Nat) (dtype : DType := .Float32)

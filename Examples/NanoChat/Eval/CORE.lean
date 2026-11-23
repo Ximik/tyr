@@ -37,7 +37,7 @@ inductive TaskType where
   | multipleChoice   : TaskType
   | schema           : TaskType
   | languageModeling : TaskType
-  deriving Repr, BEq, Inhabited
+  deriving Repr, BEq
 
 /-- Task metadata for evaluation -/
 structure TaskMeta where
@@ -49,7 +49,7 @@ structure TaskMeta where
   continuationDelimiter : String := ""
   /-- Task name for logging -/
   taskName : String := "unknown"
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-! ## Data Items -/
 
@@ -61,7 +61,7 @@ structure MCItem where
   choices : Array String
   /-- Index of correct answer (0-indexed) -/
   gold : Nat
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Schema item (varying context, same continuation) -/
 structure SchemaItem where
@@ -71,7 +71,7 @@ structure SchemaItem where
   continuation : String
   /-- Index of correct context (0-indexed) -/
   gold : Nat
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Language modeling item -/
 structure LMItem where
@@ -79,14 +79,14 @@ structure LMItem where
   context : String
   /-- Continuation to predict -/
   continuation : String
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Generic evaluation item (union type) -/
 inductive EvalItem where
   | mc : MCItem → EvalItem
   | schema : SchemaItem → EvalItem
   | lm : LMItem → EvalItem
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-! ## Prompt Rendering -/
 
@@ -358,7 +358,7 @@ structure EvalConfig where
   device : Device := Device.CPU
   /-- When true, shard evaluation examples across distributed ranks. -/
   parallelAcrossRanks : Bool := true
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Stack and pad token sequences to create input tensor -/
 def stackAndPad (tokens : Array (Array UInt64)) (padToken : UInt64) : Array UInt64 := Id.run do
@@ -456,10 +456,10 @@ def evaluateTask {vocab : Nat}
   let mut numTotal : Nat := 0
 
   -- Evaluate examples strided by rank
-  for idx in [:examples.size] do
+  for h : idx in [:examples.size] do
     -- Skip if not assigned to this rank
     if idx % worldSize == rank then
-      let item := examples[idx]!
+      let item := examples[idx]
       let maybeCorrect ← evaluateSingleExample item taskMeta tokenize runModel hVocab config
       match maybeCorrect with
       | none => pure ()  -- Skip invalid examples

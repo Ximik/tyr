@@ -14,7 +14,7 @@ structure ParquetMetadata where
   numRows : Nat
   /-- Column names -/
   columns : Array String
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Row group data -/
 structure RowGroupData where

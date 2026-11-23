@@ -15,12 +15,12 @@ variable {device : Device}
 structure SpeechTimestamp where
   start : Nat
   endPos : Nat
-  deriving Repr, Inhabited, BEq
+  deriving Repr, BEq
 
 structure SpeechTimestampSeconds where
   start : Float
   endPos : Float
-  deriving Repr, Inhabited
+  deriving Repr
 
 structure TimestampConfig where
   threshold : Float := 0.5
@@ -32,7 +32,7 @@ structure TimestampConfig where
   negThreshold : Option Float := none
   minSilenceAtMaxSpeechMs : Nat := 98
   useMaxPossibleSilenceAtMaxSpeech : Bool := true
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def msToSamples (samplingRate ms : Nat) : Nat :=
   (samplingRate * ms) / 1000
@@ -162,15 +162,14 @@ def timestampsFromProbabilities
   let adjusted := Id.run do
     let mut out := speeches
     for i in [:out.size] do
-      let cur := out[i]!
+      let some cur := out[i]? | continue
       let mut curStart := cur.start
       let mut curEnd := cur.endPos
 
       if i == 0 then
         curStart := safeSub curStart speechPadSamples
 
-      if i + 1 < out.size then
-        let nxt := out[i + 1]!
+      if let some nxt := out[i + 1]? then
         let silenceDuration := safeSub nxt.start curEnd
         if silenceDuration < 2 * speechPadSamples then
           curEnd := curEnd + silenceDuration / 2
@@ -224,7 +223,7 @@ def getSpeechTimestampsSeconds
 inductive VADBoundary where
   | start (sample : Nat)
   | stop (sample : Nat)
-  deriving Repr, Inhabited, BEq
+  deriving Repr, BEq
 
 /-- Streaming speech-boundary iterator mirroring Silero `VADIterator`. -/
 structure VADIterator where

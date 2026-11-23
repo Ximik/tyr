@@ -20,8 +20,6 @@ example : True := by
     have _ : DType.ConstantSupported .QInt8 .CPU := ⟨by trivial⟩
   fail_if_success
     have _ : DType.ConstantSupported .Float8E8M0FNU .CPU := inferInstance
-  fail_if_success
-    have _ : Inhabited (Tensor ⟨#[2], .QInt8, .CPU⟩) := inferInstance
   trivial
 
 namespace Tests.TestConstantSupport

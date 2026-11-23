@@ -59,7 +59,6 @@ structure GemmaTokenizer where
   padToken : TokenId
   bosToken : Option TokenId
   eosToken : Option TokenId
-  deriving Inhabited
 
 private def sortSpecials (specials : Array String) : Array String := Id.run do
   let mut out : Array String := #[]

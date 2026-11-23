@@ -15,7 +15,7 @@ namespace torch.laguna
 inductive LayerType where
   | fullAttention
   | slidingAttention
-  deriving Repr, Inhabited, BEq
+  deriving Repr, BEq
 
 namespace LayerType
 

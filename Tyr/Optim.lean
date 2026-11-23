@@ -215,7 +215,7 @@ abbrev Schedule := Nat → Float
 /-- State for schedule-based scaling (tracks step count). -/
 structure ScaleByScheduleState where
   count : Nat
-  deriving Inhabited, TensorStruct
+  deriving TensorStruct
 
 /-- Scale updates by a step-dependent schedule.
 
