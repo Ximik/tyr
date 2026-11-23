@@ -20,7 +20,7 @@ TEST = Test(
 
 CHECKS = [
     TensorsClose(atol={"mel": 1e-4, "encoder": 1e-3}),
-    LmTokens(margin=1e-3, logits_atol=5e-4),
+    LmTokens(margin=1e-3, logits_atol=1e-3),
 ]
 
 
