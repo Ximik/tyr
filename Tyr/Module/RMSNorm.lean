@@ -59,21 +59,6 @@ def forward4d {batch seq n_head head_dim : Nat} {d : DType} {dev : Device}
     Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩ :=
   Tensor.rmsNormPreserving x rn.weight rn.eps.val
 
-/-- Forward pass for 4D input in attention format [batch, n_head, seq, head_dim]
-    Normalizes over the last dimension (head_dim). -/
-def forward5d {batch n_head seq head_dim : Nat} {d : DType} {dev : Device}
-    (rn : RMSNorm head_dim d dev)
-    (x : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩)
-    :
-    Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
-  Tensor.rmsNormPreserving x rn.weight rn.eps.val
-
-/-- HF-style normalization: accumulate in Float32, return the input dtype. -/
-def forward3dPreserving {dim batch seq : Nat} {d : DType} {dev : Device}
-    (rn : RMSNorm dim d dev) (x : Tensor ⟨#[batch, seq, dim], d, dev⟩) :
-    Tensor ⟨#[batch, seq, dim], d, dev⟩ :=
-  Tensor.rmsNormPreserving x rn.weight rn.eps.val
-
 end RMSNorm
 
 /-- Module instance for 2D forward pass (Float32 layers; other dtypes can call

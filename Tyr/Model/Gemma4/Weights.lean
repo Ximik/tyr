@@ -17,7 +17,6 @@ namespace torch.gemma4
 variable {device : Device} {dtype : DType}
 
 open torch.Log
-open torch.Model (reqGradFalse)
 open torch.safetensors (pushUnique Source)
 
 private def tensorNameCandidates (name : String) : Array String :=
@@ -175,10 +174,10 @@ private def loadAttention (src : Source) (cfg : Config) (layerIdx : Nat) (cast :
   let kNorm ← loadRMSNorm src s!"{p}.k_norm" headDim (Config.maxHeadDim cfg) cfg.rms_norm_eps
 
   pure {
-    q_proj := reqGradFalse (← admitDType cast dtype qProj)
-    k_proj := reqGradFalse (← admitDType cast dtype kProj)
-    v_proj := reqGradFalse (← admitDType cast dtype vProj)
-    o_proj := reqGradFalse (← admitDType cast dtype oProj)
+    q_proj := Tensor.detach (← admitDType cast dtype qProj)
+    k_proj := Tensor.detach (← admitDType cast dtype kProj)
+    v_proj := Tensor.detach (← admitDType cast dtype vProj)
+    o_proj := Tensor.detach (← admitDType cast dtype oProj)
     q_norm := qNorm
     k_norm := kNorm
   }
@@ -207,9 +206,9 @@ private def loadDenseMLP (src : Source) (cfg : Config) (layerIdx : Nat) (cast : 
       cfg.hidden_size inter
       cfg.hidden_size targetInter
   pure {
-    gate_proj := reqGradFalse (← admitDType cast dtype gate)
-    up_proj := reqGradFalse (← admitDType cast dtype up)
-    down_proj := reqGradFalse (← admitDType cast dtype down)
+    gate_proj := Tensor.detach (← admitDType cast dtype gate)
+    up_proj := Tensor.detach (← admitDType cast dtype up)
+    down_proj := Tensor.detach (← admitDType cast dtype down)
   }
 
 private def loadPerLayerInputBlock (src : Source) (cfg : Config) (layerIdx : Nat) (cast : Bool)
@@ -219,8 +218,8 @@ private def loadPerLayerInputBlock (src : Source) (cfg : Config) (layerIdx : Nat
   let proj ← loadParameter src s!"{p}.per_layer_projection" #[cfg.hidden_size, cfg.hidden_size_per_layer_input]
   let norm ← loadRMSNorm src s!"{p}.post_per_layer_input_norm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
   pure {
-    per_layer_input_gate := reqGradFalse (← admitDType cast dtype gate)
-    per_layer_projection := reqGradFalse (← admitDType cast dtype proj)
+    per_layer_input_gate := Tensor.detach (← admitDType cast dtype gate)
+    per_layer_projection := Tensor.detach (← admitDType cast dtype proj)
     post_per_layer_input_norm := norm
   }
 
@@ -245,13 +244,13 @@ private def loadMoeBranch (src : Source) (cfg : Config) (layerIdx : Nat) (cast :
   let pre2 ← loadRMSNorm src s!"{p}.pre_feedforward_layernorm_2" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
   pure {
     router := {
-      proj := reqGradFalse routerProj.2.toFloat32
-      scale := reqGradFalse routerScale.2.toFloat32
-      per_expert_scale := reqGradFalse perExpertScale.2.toFloat32
+      proj := Tensor.detach routerProj.2.toFloat32
+      scale := Tensor.detach routerScale.2.toFloat32
+      per_expert_scale := Tensor.detach perExpertScale.2.toFloat32
     }
     experts := {
-      gate_up_proj := reqGradFalse (← admitDType cast dtype gateUp)
-      down_proj := reqGradFalse (← admitDType cast dtype down)
+      gate_up_proj := Tensor.detach (← admitDType cast dtype gateUp)
+      down_proj := Tensor.detach (← admitDType cast dtype down)
     }
     post_feedforward_layernorm_1 := post1
     post_feedforward_layernorm_2 := post2
@@ -290,7 +289,7 @@ private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat) (cast : Boo
     post_feedforward_layernorm := postFfnNorm
     per_layer_input := perLayerInput
     moe := moe
-    layer_scalar := reqGradFalse (← admitDType cast dtype layerScalar)
+    layer_scalar := Tensor.detach (← admitDType cast dtype layerScalar)
   }
 
 namespace Gemma4ForCausalLM
@@ -354,9 +353,9 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
   let norm ← loadRMSNorm src "model.language_model.norm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
 
   let model : Gemma4Model (dtype := dtype) (device := device) cfg := {
-    embed_tokens := reqGradFalse (← admitDType cast dtype embedTokens)
-    embed_tokens_per_layer := (← embedTokensPerLayer.mapM fun value => do pure (reqGradFalse (← admitDType cast dtype value)))
-    per_layer_model_projection := (← perLayerModelProjection.mapM fun value => do pure (reqGradFalse (← admitDType cast dtype value)))
+    embed_tokens := Tensor.detach (← admitDType cast dtype embedTokens)
+    embed_tokens_per_layer := (← embedTokensPerLayer.mapM fun value => do pure (Tensor.detach (← admitDType cast dtype value)))
+    per_layer_model_projection := (← perLayerModelProjection.mapM fun value => do pure (Tensor.detach (← admitDType cast dtype value)))
     per_layer_projection_norm := perLayerProjectionNorm
     layers := layers
     norm := norm
@@ -365,10 +364,10 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
   let lmHeadOpt ← tryLoadParameter src "lm_head" #[cfg.vocab_size, cfg.hidden_size]
   let lmHead ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse (← admitDType cast dtype w))
+    | some w => pure (Tensor.detach (← admitDType cast dtype w))
     | none =>
       if cfg.tie_word_embeddings then
-        pure (reqGradFalse model.embed_tokens)
+        pure (Tensor.detach model.embed_tokens)
       else
         throw <| IO.userError "lm_head not found and tie_word_embeddings=false"
 

@@ -15,7 +15,6 @@ namespace torch.qwen35
 variable {device : Device}
 
 open torch.Log
-open torch.Model (reqGradFalse)
 open torch.safetensors (Source)
 
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
@@ -52,10 +51,10 @@ private def loadVisionMLP (src : Source) (cfg : VisionConfig) (layerIdx : Nat)
   let w2 ← src.load (← src.resolve (visionNameCandidates s!"{p}.linear_fc2.weight")) #[cfg.hidden_size, cfg.intermediate_size] device
   let b2 ← src.load (← src.resolve (visionNameCandidates s!"{p}.linear_fc2.bias")) #[cfg.hidden_size] device
   pure {
-    linear_fc1_weight := reqGradFalse (← requireDType dtype w1)
-    linear_fc1_bias := reqGradFalse (← requireDType dtype b1)
-    linear_fc2_weight := reqGradFalse (← requireDType dtype w2)
-    linear_fc2_bias := reqGradFalse (← requireDType dtype b2)
+    linear_fc1_weight := Tensor.detach (← requireDType dtype w1)
+    linear_fc1_bias := Tensor.detach (← requireDType dtype b1)
+    linear_fc2_weight := Tensor.detach (← requireDType dtype w2)
+    linear_fc2_bias := Tensor.detach (← requireDType dtype b2)
   }
 
 private def loadVisionAttention (src : Source) (cfg : VisionConfig) (layerIdx : Nat)
@@ -67,10 +66,10 @@ private def loadVisionAttention (src : Source) (cfg : VisionConfig) (layerIdx : 
   let projW ← src.load (← src.resolve (visionNameCandidates s!"{p}.proj.weight")) #[cfg.hidden_size, cfg.hidden_size] device
   let projB ← src.load (← src.resolve (visionNameCandidates s!"{p}.proj.bias")) #[cfg.hidden_size] device
   pure {
-    qkv_weight := reqGradFalse (← requireDType dtype qkvW)
-    qkv_bias := reqGradFalse (← requireDType dtype qkvB)
-    proj_weight := reqGradFalse (← requireDType dtype projW)
-    proj_bias := reqGradFalse (← requireDType dtype projB)
+    qkv_weight := Tensor.detach (← requireDType dtype qkvW)
+    qkv_bias := Tensor.detach (← requireDType dtype qkvB)
+    proj_weight := Tensor.detach (← requireDType dtype projW)
+    proj_bias := Tensor.detach (← requireDType dtype projB)
   }
 
 private def loadVisionBlock (src : Source) (cfg : VisionConfig) (layerIdx : Nat)
@@ -93,8 +92,8 @@ private def loadVisionModel (src : Source) (cfg : VisionConfig)
   let patchW : Tensor { device := device, shape := #[cfg.hidden_size, VisionConfig.patchDim cfg], dtype := dtype } :=
     Tensor.reshape convW.2 #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed (dtype := dtype) (device := device) cfg := {
-    weight := reqGradFalse patchW
-    bias := reqGradFalse (← requireDType dtype convB)
+    weight := Tensor.detach patchW
+    bias := Tensor.detach (← requireDType dtype convB)
   }
 
   let posEmbed ← src.load (← src.resolve (visionNameCandidates "model.visual.pos_embed.weight")) #[cfg.num_position_embeddings, cfg.hidden_size] device
@@ -113,15 +112,15 @@ private def loadVisionModel (src : Source) (cfg : VisionConfig)
 
   let merger : Qwen35VisionPatchMerger (dtype := dtype) (device := device) cfg := {
     norm := mergerNorm
-    linear_fc1_weight := reqGradFalse (← requireDType dtype fc1W)
-    linear_fc1_bias := reqGradFalse (← requireDType dtype fc1B)
-    linear_fc2_weight := reqGradFalse (← requireDType dtype fc2W)
-    linear_fc2_bias := reqGradFalse (← requireDType dtype fc2B)
+    linear_fc1_weight := Tensor.detach (← requireDType dtype fc1W)
+    linear_fc1_bias := Tensor.detach (← requireDType dtype fc1B)
+    linear_fc2_weight := Tensor.detach (← requireDType dtype fc2W)
+    linear_fc2_bias := Tensor.detach (← requireDType dtype fc2B)
   }
 
   pure ⟨RealFloatingDType.ofDType dtype, {
     patch_embed := patchEmbed
-    pos_embed := reqGradFalse (← requireDType dtype posEmbed)
+    pos_embed := Tensor.detach (← requireDType dtype posEmbed)
     blocks := blocks
     merger := merger
   }⟩

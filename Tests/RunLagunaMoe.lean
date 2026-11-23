@@ -141,7 +141,7 @@ private def runCase (path : String) (device : Device) : IO Unit := do
   let expectedIds ← Tensor.toUInt64Array sortedExp.toInt64
   let idxMismatch := (gotIds.zip expectedIds).foldl (fun n (a, b) => n + if a == b then 0 else 1) (0 : Nat)
   check (idxMismatch == 0) s!"router [{lbl}] selected expert sets match (mismatches={idxMismatch})"
-  let (wGotSorted, _) := Tensor.topKLast2d (qwen35.floatDynamic w) 2
+  let (wGotSorted, _) := Tensor.topKLast2d (Tensor.toFloat32 w) 2
   let (wExpSorted, _) := Tensor.topKLast2d! (wExp.2.to device) 2
   let (wAbs, wRel) ← maxErrors wGotSorted wExpSorted
   IO.println s!"  router [{lbl}]: weights maxAbs={wAbs} maxRel={wRel}"
@@ -164,7 +164,7 @@ private def runCase (path : String) (device : Device) : IO Unit := do
     check (violF == 0.0) s!"forward2d(fused) [{lbl}] within rtol=2% atol=0.5 (violations={violF})"
 
 private def checkScatterDimension : IO Unit := do
-  let input := qwen35.zerosDynamic #[2, 3]
+  let input := Tensor.zeros #[2, 3]
   let indices := (Tensor.fromInt64Array #[2, 0]).reshape #[2, 1]
   let values := (Tensor.fromFloatArray #[5.0, 7.0]).reshape #[2, 1]
   let out := scatterAdd input 1 indices values

@@ -10,27 +10,8 @@ variable [DType.RealFloating dtype]
 def transposeSeq {batch seq dim : Nat} {d : DType} (x : Tensor { device := device, shape := #[batch, seq, dim], dtype := d }) :
     Tensor { device := device, shape := #[batch, dim, seq], dtype := d } := x.transpose 1 2
 
-def rsqrtDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.rsqrt x
-def logDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.log x
 def softplusDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
   Tensor.ofRaw! (RawTensor.softplus x.raw)
-def floatDynamic {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) : Tensor { device := device, shape := s, dtype := .Float32 } := x.toFloat32
-
-/-- Explicit-dtype constants for shape-parametric model code. -/
-def zerosDynamic (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU)
-    (_noGrad : requiresGrad = false := by decide) (dtype : DType := .Float32)
-    [DType.ConstantSupported dtype device] :
-    Tensor { device, shape, dtype } :=
-  Tensor.zerosFor { device, shape, dtype }
-def onesDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32)
-    [DType.ConstantSupported dtype device] :
-    Tensor { device, shape, dtype } :=
-  Tensor.onesFor { device, shape, dtype }
-def zerosDynamicOn {shape : Shape} (device : Device) (dtype : DType := .Float32)
-    [DType.ConstantSupported dtype device] :
-    Tensor { device, shape, dtype } := zerosDynamic shape false device (dtype := dtype)
 
 def randDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (Tensor { device, shape, dtype }) := do
@@ -38,12 +19,6 @@ def randDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Flo
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   Tensor.uniformLike (Tensor.zerosFor { shape, dtype, device })
-
-def initDynamicWeight (shape : Shape) (fanIn : Nat) (device : Device := .CPU)
-    (dtype : DType := .Float32) : IO (Tensor { device, shape, dtype }) :=
-  Model.initWeight shape fanIn dtype device
-def initDynamicBias (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) :
-    IO (Tensor { device, shape, dtype }) := Model.initBias shape dtype device
 
 def falseMaskTyped {n : Nat} (device : Device) : Tensor { device := device, shape := #[n], dtype := .Bool } :=
   Tensor.eqScalar ((Tensor.fullInt #[n] 0).to device) 1

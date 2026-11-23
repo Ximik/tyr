@@ -137,16 +137,6 @@ private def initLayerKVCaches {batch : Nat}
       (head_dim := cfg.head_dim)
       device (h := h))
 
-private def precomputeDecodeRotary {maxLen : Nat}
-    (_m : Qwen3ForCausalLM (device := device) cfg)
-    (device : Device)
-    : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 } × Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 } :=
-  qwen.computeFreqsOnDevice
-    maxLen
-    cfg.half_head_dim
-    cfg.rope_theta
-    device
-
 private def decodeStepFromEmbedWithCache {batch maxLen len : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
     (cosAll : Tensor { device := device, shape := #[maxLen, cfg.half_head_dim], dtype := .Float32 })
@@ -302,7 +292,7 @@ def generateGreedy {batch seq : Nat}
   let cacheDevice := inputsEmbeds.device
   let cacheMaxLen : Nat := seq + maxNewTokens
   let eosVector := eosVectorOnDevice (batch := batch) eosTokenIds cacheDevice
-  let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
+  let (cosAll, sinAll) := qwen.computeFreqsOnDevice cacheMaxLen cfg.half_head_dim cfg.rope_theta cacheDevice
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
   let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.slice inputsEmbeds 1 0 1
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 caches0 (Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
@@ -345,7 +335,7 @@ def forcedLogits {batch seq steps : Nat}
   let inputsEmbeds := m.embedTokens inputIds
   let cacheDevice := inputsEmbeds.device
   let cacheMaxLen : Nat := seq + steps
-  let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
+  let (cosAll, sinAll) := qwen.computeFreqsOnDevice cacheMaxLen cfg.half_head_dim cfg.rope_theta cacheDevice
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := by omega)
   let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.slice inputsEmbeds 1 0 1
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 caches0 (by omega)

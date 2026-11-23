@@ -14,12 +14,12 @@ example (n : Nat) (params : BlockParams (device := .CPU) n) (scale : Float) : Tr
   fail_if_success
     have _bad : IO (BlockParams (device := .CPU) n) := do
       let projection ← Tensor.randn #[n, 4*n + 1]
-      return { params with mlp_proj := ← makeLeafParam (projection * scale) }
+      return { params with mlp_proj := ← Tensor.parameter (projection * scale) }
   trivial
 
 example (n : Nat) (params : BlockParams (device := .CPU) n) (scale : Float) : IO (BlockParams (device := .CPU) n) := do
   let projection ← Tensor.randn #[n, 4*n]
-  return { params with mlp_proj := ← makeLeafParam (projection * scale) }
+  return { params with mlp_proj := ← Tensor.parameter (projection * scale) }
 
 example (params : GPTParams (device := .CPU) Config.tiny_shakespeare)
     (wrongTokens : Tokens (device := .CPU) #[1, 3]) (wrongDtype : Activation (device := .CPU) #[1, 2]) : True := by

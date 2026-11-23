@@ -16,7 +16,7 @@ namespace torch.qwen25omni
 
 variable {device : Device}
 open torch.Log
-open torch.Model (reqGradFalse dequantizeFP8 checkFP8Blocks)
+open torch.Model (dequantizeFP8 checkFP8Blocks)
 open torch.safetensors (pushUnique Source)
 
 private def nameCandidates (name : String) : Array String :=
@@ -49,7 +49,7 @@ private def loadLinearWeight (src : Source) (baseName : String) (outDim inDim : 
 private def loadBias (src : Source) (baseName : String) (dim : Nat)
     (device : Device := .CPU) : IO (Tensor { device := device, shape := #[dim], dtype := .Float32 }) := do
   let ⟨_, b⟩ ← src.load (← src.resolve (nameCandidates s!"{baseName}.bias")) #[dim] device
-  pure (reqGradFalse b.toFloat32)
+  pure (Tensor.detach b.toFloat32)
 
 private def loadAttention (src : Source) (layerIdx : Nat)
     (hidden_size num_heads num_kv_heads head_dim : Nat)
@@ -65,12 +65,12 @@ private def loadAttention (src : Source) (layerIdx : Nat)
   let kBias ← loadBias (device := device) src s!"{p}.k_proj" (num_kv_heads * head_dim)
   let vBias ← loadBias (device := device) src s!"{p}.v_proj" (num_kv_heads * head_dim)
   pure {
-    q_proj := reqGradFalse qProj
-    k_proj := reqGradFalse kProj
-    v_proj := reqGradFalse vProj
-    o_proj := reqGradFalse oProj
-    q_norm := qNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
-    k_norm := kNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
+    q_proj := Tensor.detach qProj
+    k_proj := Tensor.detach kProj
+    v_proj := Tensor.detach vProj
+    o_proj := Tensor.detach oProj
+    q_norm := qNorm.map (fun ⟨_, w⟩ => Tensor.detach w.toFloat32)
+    k_norm := kNorm.map (fun ⟨_, w⟩ => Tensor.detach w.toFloat32)
     q_bias := some qBias
     k_bias := some kBias
     v_bias := some vBias
@@ -84,15 +84,15 @@ private def loadMLP (src : Source) (layerIdx : Nat)
   let up ← loadLinearWeight (device := device) src s!"{p}.up_proj" intermediate_size hidden_size
   let down ← loadLinearWeight (device := device) src s!"{p}.down_proj" hidden_size intermediate_size
   pure {
-    gate_proj := reqGradFalse gate
-    up_proj := reqGradFalse up
-    down_proj := reqGradFalse down
+    gate_proj := Tensor.detach gate
+    up_proj := Tensor.detach up
+    down_proj := Tensor.detach down
   }
 
 private def loadRMSNorm (src : Source) (name : String) (dim : Nat)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
   let ⟨_, w⟩ ← src.load (← src.resolve (nameCandidates s!"{name}.weight")) #[dim] device
-  pure { weight := reqGradFalse w.toFloat32, eps := ⟨1e-6⟩ }
+  pure { weight := Tensor.detach w.toFloat32, eps := ⟨1e-6⟩ }
 
 private def loadLayer (src : Source) (layerIdx : Nat) (cfg : Config)
     (device : Device := .CPU) : IO (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := do
@@ -112,7 +112,7 @@ private def loadThinkerModel (src : Source) (cfg : Config) (log : Handlers := {}
     (device : Device := .CPU) : IO (qwen.Qwen3Model (device := device) cfg) := do
   log.onInfo s!"Loading Qwen2.5-Omni thinker model from {src.path}..."
   let ⟨_, embed⟩ ← src.load (← src.resolve (nameCandidates "model.embed_tokens.weight")) #[cfg.vocab_size, cfg.hidden_size] device
-  let embed := reqGradFalse embed.toFloat32
+  let embed := Tensor.detach embed.toFloat32
 
   let mut layers : Array (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := #[]
   for i in [:cfg.num_hidden_layers] do
@@ -145,10 +145,10 @@ def load (path : String) (cfg : Config := Config.qwen25omni_3B)
   let lmHeadOpt ← (src.find? lmHeadCandidates).mapM (src.load · #[cfg.vocab_size, cfg.hidden_size] device)
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some ⟨_, w⟩ => pure (reqGradFalse w.toFloat32, false)
+    | some ⟨_, w⟩ => pure (Tensor.detach w.toFloat32, false)
     | none => do
       log.onInfo "  lm_head.weight not found; using tied embeddings."
-      pure (reqGradFalse model.embed_tokens, true)
+      pure (Tensor.detach model.embed_tokens, true)
   pure { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }
 
 end Qwen25OmniForCausalLM

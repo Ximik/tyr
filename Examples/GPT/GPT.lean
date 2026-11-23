@@ -72,10 +72,6 @@ structure GPTParams (cfg : Config) where
   -- Note: lm_head shares weights with wte (weight tying)
   deriving TensorStruct
 
-/-- Helper to create a leaf parameter tensor: detach then set requires_grad -/
-def makeLeafParam {s : Shape} (t : Activation (device := device) s) : IO (Activation (device := device) s) :=
-  TensorOps.leaf t
-
 /-- Initialize block parameters with scaled random weights -/
 def BlockParams.init (n_embd : Nat) (scale : Float := 0.02) (device : Device := Device.CPU) : IO (BlockParams (device := device) n_embd) := do
   -- Create scaled random tensors as leaf tensors on target device
@@ -87,19 +83,19 @@ def BlockParams.init (n_embd : Nat) (scale : Float := 0.02) (device : Device := 
   let mlp_fc ← Tensor.randn #[4*n_embd, n_embd] false device
   let mlp_proj ← Tensor.randn #[n_embd, 4*n_embd] false device
   return {
-    ln1_weight := ← makeLeafParam (Tensor.ones #[n_embd] false device)
-    ln1_bias := ← makeLeafParam (Tensor.zeros #[n_embd] false device)
-    q_proj := ← makeLeafParam (q_proj * scale)
-    k_proj := ← makeLeafParam (k_proj * scale)
-    v_proj := ← makeLeafParam (v_proj * scale)
-    c_proj := ← makeLeafParam (c_proj * scale)
-    c_proj_bias := ← makeLeafParam (Tensor.zeros #[n_embd] false device)
-    ln2_weight := ← makeLeafParam (Tensor.ones #[n_embd] false device)
-    ln2_bias := ← makeLeafParam (Tensor.zeros #[n_embd] false device)
-    mlp_fc := ← makeLeafParam (mlp_fc * scale)
-    mlp_fc_bias := ← makeLeafParam (Tensor.zeros #[4*n_embd] false device)
-    mlp_proj := ← makeLeafParam (mlp_proj * scale)
-    mlp_proj_bias := ← makeLeafParam (Tensor.zeros #[n_embd] false device)
+    ln1_weight := ← Tensor.parameter (Tensor.ones #[n_embd] false device)
+    ln1_bias := ← Tensor.parameter (Tensor.zeros #[n_embd] false device)
+    q_proj := ← Tensor.parameter (q_proj * scale)
+    k_proj := ← Tensor.parameter (k_proj * scale)
+    v_proj := ← Tensor.parameter (v_proj * scale)
+    c_proj := ← Tensor.parameter (c_proj * scale)
+    c_proj_bias := ← Tensor.parameter (Tensor.zeros #[n_embd] false device)
+    ln2_weight := ← Tensor.parameter (Tensor.ones #[n_embd] false device)
+    ln2_bias := ← Tensor.parameter (Tensor.zeros #[n_embd] false device)
+    mlp_fc := ← Tensor.parameter (mlp_fc * scale)
+    mlp_fc_bias := ← Tensor.parameter (Tensor.zeros #[4*n_embd] false device)
+    mlp_proj := ← Tensor.parameter (mlp_proj * scale)
+    mlp_proj_bias := ← Tensor.parameter (Tensor.zeros #[n_embd] false device)
   }
 
 /-- Initialize full GPT model -/
@@ -111,11 +107,11 @@ def GPTParams.init (cfg : Config) (device : Device := Device.CPU) : IO (GPTParam
     let block ← BlockParams.init cfg.n_embd 0.02 device
     blocks := blocks.push block
   return {
-    wte := ← makeLeafParam (Tensor.mulScalar wte 0.02)
-    wpe := ← makeLeafParam (Tensor.mulScalar wpe 0.02)
+    wte := ← Tensor.parameter (Tensor.mulScalar wte 0.02)
+    wpe := ← Tensor.parameter (Tensor.mulScalar wpe 0.02)
     blocks := blocks
-    ln_f_weight := ← makeLeafParam (Tensor.ones #[cfg.n_embd] false device)
-    ln_f_bias := ← makeLeafParam (Tensor.zeros #[cfg.n_embd] false device)
+    ln_f_weight := ← Tensor.parameter (Tensor.ones #[cfg.n_embd] false device)
+    ln_f_bias := ← Tensor.parameter (Tensor.zeros #[cfg.n_embd] false device)
   }
 
 /-- Forward pass through a single transformer block with multi-head attention and dropout -/
@@ -125,7 +121,7 @@ def blockForward {n_embd n_head batch seq : Nat}
     (dropout_p : Float := 0.0)
     (training : Bool := true) : IO (Activation (device := device) #[batch, seq, n_embd]) := do
   -- Pre-norm attention
-  let h := TensorOps.layerNorm x params.ln1_weight params.ln1_bias
+  let h := Tensor.layerNorm x params.ln1_weight params.ln1_bias
   -- Q, K, V projections: [batch, seq, n_embd] @ [n_embd, n_embd] -> [batch, seq, n_embd]
   let q := Tensor.linear3d h params.q_proj
   let k := Tensor.linear3d h params.k_proj
@@ -139,26 +135,26 @@ def blockForward {n_embd n_head batch seq : Nat}
   let head_dim := n_embd / n_head
   have hHeads : batch * seq * n_embd = batch * seq * n_head * head_dim := by
     rw [Nat.mul_assoc _ n_head, Nat.mul_div_cancel' (Nat.dvd_of_mod_eq_zero hDiv)]
-  let q := TensorOps.splitHeads (q.reshape #[batch, seq, n_head, head_dim] (by simpa using hHeads))
-  let k := TensorOps.splitHeads (k.reshape #[batch, seq, n_head, head_dim] (by simpa using hHeads))
-  let v := TensorOps.splitHeads (v.reshape #[batch, seq, n_head, head_dim] (by simpa using hHeads))
+  let q := Tensor.splitHeads (q.reshape #[batch, seq, n_head, head_dim] (by simpa using hHeads))
+  let k := Tensor.splitHeads (k.reshape #[batch, seq, n_head, head_dim] (by simpa using hHeads))
+  let v := Tensor.splitHeads (v.reshape #[batch, seq, n_head, head_dim] (by simpa using hHeads))
   -- Scaled dot-product attention with causal masking (with dropout built-in)
   -- Input: [batch, n_head, seq, head_dim], Output: [batch, n_head, seq, head_dim]
-  let attn ← TensorOps.attention q k v dropout_p training
+  let attn ← Tensor.attentionIO q k v dropout_p training true
   -- Reshape back: [batch, n_head, seq, head_dim] -> [batch, seq, n_head, head_dim] -> [batch, seq, n_embd]
-  let attn := (TensorOps.joinHeads attn).reshape #[batch, seq, n_embd] (by simpa using hHeads.symm)
+  let attn := (Tensor.joinHeads attn).reshape #[batch, seq, n_embd] (by simpa using hHeads.symm)
   -- Output projection + dropout
   let attn := Tensor.affine3d attn params.c_proj params.c_proj_bias
-  let attn ← TensorOps.dropout attn dropout_p training
+  let attn ← Tensor.dropout attn dropout_p training
   -- Residual connection
   let x := x + attn
   -- Pre-norm MLP
-  let h := TensorOps.layerNorm x params.ln2_weight params.ln2_bias
+  let h := Tensor.layerNorm x params.ln2_weight params.ln2_bias
   let h := Tensor.affine3d h params.mlp_fc params.mlp_fc_bias
   let h := Tensor.gelu h (by rfl)
   let h := Tensor.affine3d h params.mlp_proj params.mlp_proj_bias
   -- MLP dropout
-  let h ← TensorOps.dropout h dropout_p training
+  let h ← Tensor.dropout h dropout_p training
   -- Residual connection
   return x + h
 
@@ -168,22 +164,22 @@ def forward {cfg : Config} {batch seq : Nat}
     (idx : Tokens (device := device) #[batch, seq])
     (training : Bool := true) : IO (Activation (device := device) #[batch, seq, cfg.vocab_size]) := do
   -- Token embeddings: [batch, seq] -> [batch, seq, n_embd]
-  let tok_emb := TensorOps.embedding idx params.wte
+  let tok_emb := Tensor.embedding idx params.wte
   -- Position embeddings (create position indices): [seq] -> [seq, n_embd]
   -- Move positions to the same device as the embedding weights
   let positions := (Tensor.arange seq).to params.wpe.device
-  let pos_emb := TensorOps.embedding1d positions params.wpe
+  let pos_emb := Tensor.embedding1d positions params.wpe
   -- Expand pos_emb to match batch: [seq, n_embd] -> [batch, seq, n_embd]
   let pos_emb_expanded := Tensor.broadcastTo pos_emb #[batch, seq, cfg.n_embd]
   -- Combine embeddings + dropout: [batch, seq, n_embd]
   let x : Activation (device := device) #[batch, seq, cfg.n_embd] := Tensor.add tok_emb pos_emb_expanded
-  let x ← TensorOps.dropout x cfg.dropout training
+  let x ← Tensor.dropout x cfg.dropout training
   -- Apply transformer blocks with multi-head attention and dropout
   let mut x := x
   for block in params.blocks do
     x ← blockForward (n_head := cfg.n_head) block x cfg.dropout training
   -- Final layer norm
-  let xNorm := TensorOps.layerNorm x params.ln_f_weight params.ln_f_bias
+  let xNorm := Tensor.layerNorm x params.ln_f_weight params.ln_f_bias
   -- Output projection (weight-tied with token embeddings): [batch, seq, n_embd] @ [n_embd, vocab] -> [batch, seq, vocab]
   let wte_t := Tensor.transpose2d params.wte  -- [vocab, n_embd] -> [n_embd, vocab]
   return Tensor.matmul3d xNorm wte_t

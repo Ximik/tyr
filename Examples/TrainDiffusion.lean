@@ -49,10 +49,6 @@ def asciiDecode (tokens : Array Int64) : String :=
 def tensorToArray {n : Nat} (t : Tokens #[n]) : IO (Array Int64) := do
   return (← t.toUInt64Array).map UInt64.toInt64
 
-/-- Extract tensor values as Float array (for confidence display). -/
-def tensorToFloatArray {n : Nat} (t : Activation #[n]) : IO (Array Float) :=
-  t.toFloatArray
-
 /-- Render mask with confidence-based background color -/
 def renderMask (conf : Float) : String :=
   let bg := if conf > 0.7 then ansiBgGreen
@@ -148,7 +144,7 @@ def sampleAnimatedMultiple {cfg : Config}
 
       -- Extract arrays for display
       let tokensArr ← tensorToArray (Tensor.reshape x #[cfg.seq_len])
-      let confArr ← tensorToFloatArray (Tensor.reshape confidences #[cfg.seq_len])
+      let confArr ← (Tensor.reshape confidences #[cfg.seq_len]).toFloatArray
 
       let remaining := tokensArr.foldl (fun acc t =>
         if t == cfg.mask_token_id.toInt64 then acc + 1 else acc) 0

@@ -74,7 +74,7 @@ def forwardWithHiddenStates {batch seq : Nat} (cfg : QwenConfig)
       (h', states.push h'))
     (hidden, #[])
   -- Add final normalized state
-  let finalHidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := model.norm.forward3dPreserving finalH
+  let finalHidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := model.norm.forward3d finalH
   hiddenStates.push finalHidden
 
 def forwardWithHiddenStatesMasked {batch seq : Nat} (cfg : QwenConfig)
@@ -95,7 +95,7 @@ def forwardWithHiddenStatesMasked {batch seq : Nat} (cfg : QwenConfig)
       (h', states.push h'))
     (hidden, #[])
   -- Add final normalized state
-  let finalHidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := model.norm.forward3dPreserving finalH
+  let finalHidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := model.norm.forward3d finalH
   hiddenStates.push finalHidden
 
 /-- Forward pass returning only the final hidden state.
@@ -115,7 +115,7 @@ def forward {batch seq : Nat} (cfg : QwenConfig)
     (fun h layer => layer.forward cfg.headsValid.2.2 h cos sin true)
     hidden
   -- Final normalization
-  model.norm.forward3dPreserving finalH
+  model.norm.forward3d finalH
 
 def forwardMasked {batch seq : Nat} (cfg : QwenConfig)
     {maskDtype : DType}
@@ -132,7 +132,7 @@ def forwardMasked {batch seq : Nat} (cfg : QwenConfig)
     (fun h layer => layer.forwardMasked cfg.headsValid.2.2 h cos sin attn_mask true)
     hidden
   -- Final normalization
-  model.norm.forward3dPreserving finalH
+  model.norm.forward3d finalH
 
 end Qwen3Model
 

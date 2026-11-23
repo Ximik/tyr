@@ -116,10 +116,10 @@ structure Qwen35VisionMLP (cfg : VisionConfig) (dtype : DType := .Float32) where
 namespace Qwen35VisionMLP
 
 def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35VisionMLP (dtype := dtype) (device := device) cfg) := do
-  let w1 ← initDynamicWeight (dtype := dtype) (device := device) #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
-  let b1 ← initDynamicBias (dtype := dtype) (device := device) #[cfg.intermediate_size]
-  let w2 ← initDynamicWeight (dtype := dtype) (device := device) #[cfg.hidden_size, cfg.intermediate_size] cfg.intermediate_size
-  let b2 ← initDynamicBias (dtype := dtype) (device := device) #[cfg.hidden_size]
+  let w1 ← Model.initWeight (dtype := dtype) (device := device) #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
+  let b1 ← Model.initBias (dtype := dtype) (device := device) #[cfg.intermediate_size]
+  let w2 ← Model.initWeight (dtype := dtype) (device := device) #[cfg.hidden_size, cfg.intermediate_size] cfg.intermediate_size
+  let b2 ← Model.initBias (dtype := dtype) (device := device) #[cfg.hidden_size]
   pure {
     linear_fc1_weight := w1
     linear_fc1_bias := b1
@@ -149,8 +149,8 @@ structure Qwen35VisionPatchEmbed (cfg : VisionConfig) (dtype : DType := .Float32
 namespace Qwen35VisionPatchEmbed
 
 def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35VisionPatchEmbed (dtype := dtype) (device := device) cfg) := do
-  let w ← initDynamicWeight (dtype := dtype) (device := device) #[cfg.hidden_size, VisionConfig.patchDim cfg] (VisionConfig.patchDim cfg)
-  let b ← initDynamicBias (dtype := dtype) (device := device) #[cfg.hidden_size]
+  let w ← Model.initWeight (dtype := dtype) (device := device) #[cfg.hidden_size, VisionConfig.patchDim cfg] (VisionConfig.patchDim cfg)
+  let b ← Model.initBias (dtype := dtype) (device := device) #[cfg.hidden_size]
   pure { weight := w, bias := b }
 
 def forward {nPatches : Nat}
@@ -173,10 +173,10 @@ structure Qwen35VisionAttention (cfg : VisionConfig) (dtype : DType := .Float32)
 namespace Qwen35VisionAttention
 
 def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35VisionAttention (dtype := dtype) (device := device) cfg) := do
-  let qkvW ← initDynamicWeight (dtype := dtype) (device := device) #[cfg.hidden_size * 3, cfg.hidden_size] cfg.hidden_size
-  let qkvB ← initDynamicBias (dtype := dtype) (device := device) #[cfg.hidden_size * 3]
-  let projW ← initDynamicWeight (dtype := dtype) (device := device) #[cfg.hidden_size, cfg.hidden_size] cfg.hidden_size
-  let projB ← initDynamicBias (dtype := dtype) (device := device) #[cfg.hidden_size]
+  let qkvW ← Model.initWeight (dtype := dtype) (device := device) #[cfg.hidden_size * 3, cfg.hidden_size] cfg.hidden_size
+  let qkvB ← Model.initBias (dtype := dtype) (device := device) #[cfg.hidden_size * 3]
+  let projW ← Model.initWeight (dtype := dtype) (device := device) #[cfg.hidden_size, cfg.hidden_size] cfg.hidden_size
+  let projB ← Model.initBias (dtype := dtype) (device := device) #[cfg.hidden_size]
   pure {
     qkv_weight := qkvW
     qkv_bias := qkvB
@@ -264,10 +264,10 @@ namespace Qwen35VisionPatchMerger
 
 def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35VisionPatchMerger (dtype := dtype) (device := device) cfg) := do
   let mergedHidden := cfg.hidden_size * VisionConfig.mergeUnit cfg
-  let fc1W ← initDynamicWeight (dtype := dtype) (device := device) #[mergedHidden, mergedHidden] mergedHidden
-  let fc1B ← initDynamicBias (dtype := dtype) (device := device) #[mergedHidden]
-  let fc2W ← initDynamicWeight (dtype := dtype) (device := device) #[cfg.out_hidden_size, mergedHidden] mergedHidden
-  let fc2B ← initDynamicBias (dtype := dtype) (device := device) #[cfg.out_hidden_size]
+  let fc1W ← Model.initWeight (dtype := dtype) (device := device) #[mergedHidden, mergedHidden] mergedHidden
+  let fc1B ← Model.initBias (dtype := dtype) (device := device) #[mergedHidden]
+  let fc2W ← Model.initWeight (dtype := dtype) (device := device) #[cfg.out_hidden_size, mergedHidden] mergedHidden
+  let fc2B ← Model.initBias (dtype := dtype) (device := device) #[cfg.out_hidden_size]
   pure {
     norm := (← Qwen35VisionLayerNorm.init (device := device) cfg.hidden_size 1e-6)
     linear_fc1_weight := fc1W

@@ -20,10 +20,6 @@ namespace torch.diffusion
 open torch
 open TensorStruct
 
-/-- RMSNorm without learnable parameters (functional) -/
-def norm {s : Shape} (x : Activation s) : Activation s :=
-  Tensor.rmsNorm x
-
 /-- Diffusion model configuration -/
 structure Config where
   seq_len : Nat := 256         -- sequence length for generation
@@ -87,10 +83,10 @@ def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
   let output_head := Tensor.zeros #[cfg.vocab_size, cfg.n_embd]
 
   return {
-    token_emb := ← makeLeafParam ((token_emb * scale))
-    time_emb := ← makeLeafParam time_emb  -- standard normal init for embeddings
+    token_emb := ← Tensor.parameter ((token_emb * scale))
+    time_emb := ← Tensor.parameter time_emb  -- standard normal init for embeddings
     blocks := blocks
-    output_head := ← makeLeafParam output_head
+    output_head := ← Tensor.parameter output_head
   }
 
 /-- Bidirectional attention forward pass (is_causal=false) -/
@@ -117,8 +113,8 @@ def bidirectionalAttentionForward {batch seq n_head half : Nat}
   let k := Tensor.applyRotary k cos sin
 
   -- QK normalization
-  let q := norm q
-  let k := norm k
+  let q := Tensor.rmsNorm q
+  let k := Tensor.rmsNorm k
 
   -- Transpose for attention: [batch, seq, n, d] -> [batch, n, seq, d]
   let q := Tensor.splitHeads q
@@ -151,9 +147,9 @@ def blockForward {batch seq n_head half : Nat}
     (rotaryCache : RotaryCache seq half)
     : Activation #[batch, seq, n_head * (2 * half)] :=
   -- Attention with residual (pre-norm)
-  let x := x + bidirectionalAttentionForward params.attn (norm x) rotaryCache
+  let x := x + bidirectionalAttentionForward params.attn (Tensor.rmsNorm x) rotaryCache
   -- MLP with residual (pre-norm)
-  x + mlpForward params.mlp (norm x)
+  x + mlpForward params.mlp (Tensor.rmsNorm x)
 
 /-- Full diffusion model forward pass -/
 def forward {cfg : Config} {batch seq : Nat}
@@ -171,7 +167,7 @@ def forward {cfg : Config} {batch seq : Nat}
   let t_emb := Tensor.broadcastTo t_emb #[batch, seq, cfg.n_embd]  -- [batch, seq, n_embd]
   let x := x + t_emb
   -- Norm after combining embeddings (matching tiny-diffusion)
-  let x := norm x
+  let x := Tensor.rmsNorm x
 
   -- Transformer blocks
   let x := params.blocks.foldl (fun x block =>
@@ -179,7 +175,7 @@ def forward {cfg : Config} {batch seq : Nat}
   ) x
 
   -- Final norm and output projection
-  let x := norm x
+  let x := Tensor.rmsNorm x
   Tensor.linear3d x params.output_head
 
 /-- Helper to get mask of positions that are still masked -/

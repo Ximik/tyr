@@ -111,8 +111,8 @@ private def batchedEosDeterministicModel : IO (Qwen35ForCausalLM (device := .CPU
     1, 0, 0, 0,
     0, 0, 0, 0
   ]
-  let embed : Tensor { shape := #[4, 4], device := .CPU, dtype := .Float32 } := floatDynamic (Tensor.reshape (Tensor.fromInt64Array embedVals) #[4, 4])
-  let lmHead : Tensor { shape := #[4, 4], device := .CPU, dtype := .Float32 } := floatDynamic (Tensor.reshape (Tensor.fromInt64Array lmHeadVals) #[4, 4])
+  let embed : Tensor { shape := #[4, 4], device := .CPU, dtype := .Float32 } := Tensor.toFloat32 (Tensor.reshape (Tensor.fromInt64Array embedVals) #[4, 4])
+  let lmHead : Tensor { shape := #[4, 4], device := .CPU, dtype := .Float32 } := Tensor.toFloat32 (Tensor.reshape (Tensor.fromInt64Array lmHeadVals) #[4, 4])
   pure {
     base with
     model := { base.model with embed_tokens := embed }

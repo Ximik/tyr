@@ -58,6 +58,8 @@ private def splitLinearUpdate {inDim outDim : Nat} {d : DType} {dev : Device}
   let dbVec : Tensor ⟨#[outDim], d, dev⟩ := Tensor.slice update 0 weightSize outDim
   (Tensor.reshape dwVec #[outDim, inDim], dbVec)
 
+end RiemannianModule
+
 namespace LocalLinearization
 
 private def rowAt {rows cols : Nat} {d : DType} {dev : Device}
@@ -101,6 +103,8 @@ def pullbackParamFactor {rank inDim paramDim outDim : Nat}
   { matrix := mapRows L.matrix lin.applyBT }
 
 end LocalLinearization
+
+namespace RiemannianModule
 
 private def linearApplyInput {inDim outDim : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) (x : Tensor ⟨#[inDim], d, dev⟩) :
@@ -236,32 +240,6 @@ instance manifoldLinearRiemannianModule
     pure { lin with weight := weight', bias := bias' }
 
 end RiemannianModule
-
-namespace LocalLinearization
-
-/-- Materialize the dense input Jacobian for debugging/tests. -/
-def materializeA {inDim paramDim outDim : Nat}
-    (lin : LocalLinearization (device := device) inDim paramDim outDim) : AmbientMatrix (device := device) outDim inDim :=
-  RiemannianModule.LocalLinearization.materializeA lin
-
-/-- Materialize the dense parameter Jacobian for debugging/tests. -/
-def materializeB {inDim paramDim outDim : Nat}
-    (lin : LocalLinearization (device := device) inDim paramDim outDim) : AmbientMatrix (device := device) outDim paramDim :=
-  RiemannianModule.LocalLinearization.materializeB lin
-
-/-- Pull a metric factor back through the input Jacobian using rowwise adjoints. -/
-def pullbackInputFactor {rank inDim paramDim outDim : Nat}
-    (lin : LocalLinearization (device := device) inDim paramDim outDim)
-    (L : MetricFactor rank outDim .Float32 device) : MetricFactor rank inDim .Float32 device :=
-  RiemannianModule.LocalLinearization.pullbackInputFactor lin L
-
-/-- Pull a metric factor back through the parameter Jacobian using rowwise adjoints. -/
-def pullbackParamFactor {rank inDim paramDim outDim : Nat}
-    (lin : LocalLinearization (device := device) inDim paramDim outDim)
-    (L : MetricFactor rank outDim .Float32 device) : MetricFactor rank paramDim .Float32 device :=
-  RiemannianModule.LocalLinearization.pullbackParamFactor lin L
-
-end LocalLinearization
 
 /-- Forward tape for a two-layer sequential composition. -/
 abbrev SequentialTape

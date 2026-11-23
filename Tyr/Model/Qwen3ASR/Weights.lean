@@ -15,7 +15,6 @@ namespace torch.qwen3asr
 
 variable {device : Device}
 open torch.Log
-open torch.Model (reqGradFalse)
 
 /-- Admit a stored weight at the model dtype: equality only unless `cast`,
 which converts it once here. -/
@@ -37,7 +36,7 @@ private def loadLayerNormSharded (modelDir : String) (name : String) (dim : Nat)
     (dtype : DType) (cast : Bool) (device : Device := .CPU) : IO (LayerNorm (device := device) dim dtype) := do
   let w ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir s!"{name}.weight" #[dim]
   let b ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir s!"{name}.bias" #[dim]
-  pure { weight := reqGradFalse w, bias := reqGradFalse b, eps := ⟨1e-5⟩ }
+  pure { weight := Tensor.detach w, bias := Tensor.detach b, eps := ⟨1e-5⟩ }
 
 private def loadAudioAttentionSharded (modelDir : String) (namePrefix : String) (cfg : AudioEncoderConfig)
     (dtype : DType) (cast : Bool) (device : Device := .CPU) : IO (AudioAttention (device := device) (dtype := dtype) cfg) := do
@@ -53,14 +52,14 @@ private def loadAudioAttentionSharded (modelDir : String) (namePrefix : String) 
     #[cfg.dModel, projDim]
   let outProjBias ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir s!"{namePrefix}.out_proj.bias" #[cfg.dModel]
   pure {
-    qProjWeight := reqGradFalse qProjWeight
-    qProjBias := reqGradFalse qProjBias
-    kProjWeight := reqGradFalse kProjWeight
-    kProjBias := reqGradFalse kProjBias
-    vProjWeight := reqGradFalse vProjWeight
-    vProjBias := reqGradFalse vProjBias
-    outProjWeight := reqGradFalse outProjWeight
-    outProjBias := reqGradFalse outProjBias
+    qProjWeight := Tensor.detach qProjWeight
+    qProjBias := Tensor.detach qProjBias
+    kProjWeight := Tensor.detach kProjWeight
+    kProjBias := Tensor.detach kProjBias
+    vProjWeight := Tensor.detach vProjWeight
+    vProjBias := Tensor.detach vProjBias
+    outProjWeight := Tensor.detach outProjWeight
+    outProjBias := Tensor.detach outProjBias
   }
 
 private def loadAudioLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : AudioEncoderConfig)
@@ -76,10 +75,10 @@ private def loadAudioLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : Au
   pure {
     selfAttn
     selfAttnLayerNorm
-    fc1Weight := reqGradFalse fc1Weight
-    fc1Bias := reqGradFalse fc1Bias
-    fc2Weight := reqGradFalse fc2Weight
-    fc2Bias := reqGradFalse fc2Bias
+    fc1Weight := Tensor.detach fc1Weight
+    fc1Bias := Tensor.detach fc1Bias
+    fc2Weight := Tensor.detach fc2Weight
+    fc2Bias := Tensor.detach fc2Bias
     finalLayerNorm
   }
 
@@ -118,25 +117,25 @@ private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfi
     #[cfg.outputDim]
 
   pure {
-    conv2d1Weight := reqGradFalse conv2d1Weight
-    conv2d1Bias := reqGradFalse conv2d1Bias
-    conv2d2Weight := reqGradFalse conv2d2Weight
-    conv2d2Bias := reqGradFalse conv2d2Bias
-    conv2d3Weight := reqGradFalse conv2d3Weight
-    conv2d3Bias := reqGradFalse conv2d3Bias
-    convOutWeight := reqGradFalse convOutWeight
+    conv2d1Weight := Tensor.detach conv2d1Weight
+    conv2d1Bias := Tensor.detach conv2d1Bias
+    conv2d2Weight := Tensor.detach conv2d2Weight
+    conv2d2Bias := Tensor.detach conv2d2Bias
+    conv2d3Weight := Tensor.detach conv2d3Weight
+    conv2d3Bias := Tensor.detach conv2d3Bias
+    convOutWeight := Tensor.detach convOutWeight
     layers
     lnPost
-    proj1Weight := reqGradFalse proj1Weight
-    proj1Bias := reqGradFalse proj1Bias
-    proj2Weight := reqGradFalse proj2Weight
-    proj2Bias := reqGradFalse proj2Bias
+    proj1Weight := Tensor.detach proj1Weight
+    proj1Bias := Tensor.detach proj1Bias
+    proj2Weight := Tensor.detach proj2Weight
+    proj2Bias := Tensor.detach proj2Bias
   }
 
 private def loadRMSNormSharded (modelDir : String) (name : String) (dim : Nat) (eps : Float)
     (dtype : DType) (cast : Bool) (device : Device := .CPU) : IO (RMSNorm (device := device) dim dtype) := do
   let w ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir s!"{name}.weight" #[dim]
-  pure { weight := reqGradFalse w, eps := ⟨eps⟩ }
+  pure { weight := Tensor.detach w, eps := ⟨eps⟩ }
 
 private def loadQwenAttentionSharded (modelDir : String) (namePrefix : String)
     (hiddenSize numHeads numKVHeads headDim : Nat)
@@ -148,12 +147,12 @@ private def loadQwenAttentionSharded (modelDir : String) (namePrefix : String)
   let qNorm ← loadOptional (dtype := dtype) (cast := cast) (device := device) modelDir s!"{namePrefix}.q_norm.weight" #[headDim]
   let kNorm ← loadOptional (dtype := dtype) (cast := cast) (device := device) modelDir s!"{namePrefix}.k_norm.weight" #[headDim]
   pure {
-    q_proj := reqGradFalse qProj
-    k_proj := reqGradFalse kProj
-    v_proj := reqGradFalse vProj
-    o_proj := reqGradFalse oProj
-    q_norm := qNorm.map (fun w => reqGradFalse w)
-    k_norm := kNorm.map (fun w => reqGradFalse w)
+    q_proj := Tensor.detach qProj
+    k_proj := Tensor.detach kProj
+    v_proj := Tensor.detach vProj
+    o_proj := Tensor.detach oProj
+    q_norm := qNorm.map (fun w => Tensor.detach w)
+    k_norm := kNorm.map (fun w => Tensor.detach w)
   }
 
 private def loadQwenMLPSharded (modelDir : String) (namePrefix : String)
@@ -166,9 +165,9 @@ private def loadQwenMLPSharded (modelDir : String) (namePrefix : String)
   let downProj ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir s!"{namePrefix}.down_proj.weight"
     #[hiddenSize, intermediateSize]
   pure {
-    gate_proj := reqGradFalse gateProj
-    up_proj := reqGradFalse upProj
-    down_proj := reqGradFalse downProj
+    gate_proj := Tensor.detach gateProj
+    up_proj := Tensor.detach upProj
+    down_proj := Tensor.detach downProj
   }
 
 private def loadQwenLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : TextConfig)
@@ -191,7 +190,7 @@ private def loadTextModelSharded (modelDir : String) (cfg : TextConfig)
     layers := layers.push layer
   let norm ← loadRMSNormSharded (dtype := dtype) (cast := cast) (device := device) modelDir "thinker.model.norm" cfg.hiddenSize cfg.rmsNormEps
   pure {
-    embed_tokens := reqGradFalse embedTokens
+    embed_tokens := Tensor.detach embedTokens
     layers
     norm
   }
@@ -230,7 +229,7 @@ private def loadThinkerSharded (modelDir : String) (cfg : ThinkerConfig)
     textModel
     audioProjectionWeight
     audioProjectionBias
-    lmHead := reqGradFalse lmHead
+    lmHead := Tensor.detach lmHead
   }
 
 namespace Qwen3ASRForConditionalGeneration

@@ -14,7 +14,6 @@ namespace torch.qwen3
 
 variable {device : Device}
 open torch.Log
-open torch.Model (reqGradFalse)
 open torch.safetensors (Source)
 
 namespace Qwen3ForCausalLM
@@ -31,7 +30,7 @@ def load (path : String) (cfg : Config := Config.qwen3_4B)
   let lmHeadOpt ← src.load? "lm_head.weight" #[cfg.vocab_size, cfg.hidden_size] device
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some ⟨_, w⟩ => pure (reqGradFalse w.toFloat32, false)
+    | some ⟨_, w⟩ => pure (Tensor.detach w.toFloat32, false)
     | none => do
       log.onInfo "  lm_head.weight not found; using tied embeddings."
       pure (model.embed_tokens, true)

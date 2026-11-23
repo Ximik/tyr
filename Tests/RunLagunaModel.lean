@@ -278,7 +278,7 @@ private def withStableRoutes (cfg : Config) (m : LagunaForCausalLM (device := de
   { m with model := { m.model with layers := m.model.layers.map fun _ layer =>
       { layer with ffn := Id.run <| mapMoeM (m := Id) (fun moe =>
           let bias : Tensor { shape := #[cfg.num_experts], device := device, dtype := .Float32 } := Tensor.reshape
-            (Tensor.mulScalar (floatDynamic ((Tensor.arange cfg.num_experts).to moe.router.weight.2.device)) 2.0)
+            (Tensor.mulScalar (Tensor.toFloat32 ((Tensor.arange cfg.num_experts).to moe.router.weight.2.device)) 2.0)
             #[cfg.num_experts]
           { moe with router := { moe.router with eScoreCorrectionBias := some (bias.packDType) } }) layer.ffn } } }
 

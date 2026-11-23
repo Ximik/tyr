@@ -32,10 +32,6 @@ def maskedAttention {b h kh qs ks d : Nat} {dm : DType} [DType.RealFloating dtyp
     Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype } :=
   maskedAttention! q k v mask gqa
 
-def zerosDynamicOn {s : Shape} (device : Device) (dtype : DType := .Float32)
-    [DType.ConstantSupported dtype device] : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.zerosFor { shape := s, dtype, device }
-
 def onesFloatOn {s : Shape} (device : Device) : Tensor { device := device, shape := s, dtype := .Float32 } :=
   (Tensor.ones s).to device
 

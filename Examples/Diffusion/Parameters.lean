@@ -40,9 +40,6 @@ structure BlockParams (n_head half n_kv_head : Nat) where
   mlp : MLPParams (n_head * (2 * half))
   deriving TensorStruct
 
-def makeLeafParam {s : Shape} (t : Activation s) : IO (Activation s) :=
-  Tensor.parameter t
-
 def AttentionParams.init (n_head half n_kv_head : Nat)
     : IO (AttentionParams n_head half n_kv_head) := do
   let scale := 1.0 / Float.sqrt (n_head * (2 * half)).toFloat
@@ -50,18 +47,18 @@ def AttentionParams.init (n_head half n_kv_head : Nat)
   let c_k ← Tensor.randn #[n_kv_head * (2 * half), n_head * (2 * half)] false
   let c_v ← Tensor.randn #[n_kv_head * (2 * half), n_head * (2 * half)] false
   return {
-    c_q := ← makeLeafParam ((c_q * scale))
-    c_k := ← makeLeafParam ((c_k * scale))
-    c_v := ← makeLeafParam ((c_v * scale))
-    c_proj := ← makeLeafParam (Tensor.zeros #[n_head * (2 * half), n_head * (2 * half)])
+    c_q := ← Tensor.parameter ((c_q * scale))
+    c_k := ← Tensor.parameter ((c_k * scale))
+    c_v := ← Tensor.parameter ((c_v * scale))
+    c_proj := ← Tensor.parameter (Tensor.zeros #[n_head * (2 * half), n_head * (2 * half)])
   }
 
 def MLPParams.init (n_embd : Nat) : IO (MLPParams n_embd) := do
   let scale := 1.0 / Float.sqrt n_embd.toFloat
   let c_fc ← Tensor.randn #[4 * n_embd, n_embd] false
   return {
-    c_fc := ← makeLeafParam ((c_fc * scale))
-    c_proj := ← makeLeafParam (Tensor.zeros #[n_embd, 4 * n_embd])
+    c_fc := ← Tensor.parameter ((c_fc * scale))
+    c_proj := ← Tensor.parameter (Tensor.zeros #[n_embd, 4 * n_embd])
   }
 
 def BlockParams.init (n_head half n_kv_head : Nat)

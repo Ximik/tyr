@@ -185,7 +185,7 @@ def forwardEmbeds {batch seq : Nat}
       m.textModel.layers.foldl
         (fun h layer => layer.forward cfg.textConfig.headsValid.2.2 h cos sin true)
         inputsEmbeds
-  let hidden := m.textModel.norm.forward3dPreserving hidden
+  let hidden := m.textModel.norm.forward3d hidden
   Tensor.linear3d hidden m.lmHead
 
 private def forwardEmbedsMaskedWithPositionRows {batch seq : Nat}
@@ -218,7 +218,7 @@ private def forwardEmbedsMaskedWithPositionRows {batch seq : Nat}
         m.textModel.layers.foldl
           (fun h layer => layer.forwardMasked cfg.textConfig.headsValid.2.2 h cosB sinB maskB true)
           embB
-      let hiddenB := m.textModel.norm.forward3dPreserving hiddenB
+      let hiddenB := m.textModel.norm.forward3d hiddenB
       perBatchHidden := perBatchHidden.push (Tensor.packShape hiddenB)
 
     let hidden := Tensor.catMany! perBatchHidden 0 #[batch, seq, cfg.textConfig.hiddenSize]
@@ -403,16 +403,6 @@ private def initLayerKVCaches {batch : Nat}
       (head_dim := cfg.textConfig.headDim)
       device dtype (h := h))
 
-private def precomputeDecodeRotary {maxLen : Nat}
-    (_m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (device : Device)
-    : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 } × Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 } :=
-  qwen.computeFreqsOnDevice
-    maxLen
-    cfg.textConfig.halfHeadDim
-    cfg.textConfig.ropeTheta
-    device
-
 private def decodeStepFromEmbedWithCache {batch maxLen len : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
@@ -439,7 +429,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen len : Nat}
     hidden := hNext
     nextCaches := nextCaches.push cNext
 
-  let hiddenNorm := m.textModel.norm.forward3dPreserving hidden
+  let hiddenNorm := m.textModel.norm.forward3d hidden
   let logits3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] } := Tensor.linear3d hiddenNorm m.lmHead
   let logits2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshape logits3 #[batch, ThinkerLmVocabSize cfg]
   pure (logits2, nextCaches)
@@ -537,7 +527,7 @@ private def buildStreamingPromptCacheFromEmbeds {seq : Nat}
     : IO (PromptCacheFor (device := device) cfg dtype seq maxNewTokens) := do
   let maxLen : Nat := seq + promptCacheReserve maxNewTokens
   let cacheDevice := inputsEmbeds.device
-  let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := maxLen) m cacheDevice
+  let (cosAll, sinAll) := qwen.computeFreqsOnDevice maxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
   let support ← dtype.acquireConstantSupport cacheDevice
   let _ := support.down
   let caches0 := initLayerKVCaches m maxLen cacheDevice (h := by omega)
@@ -768,7 +758,7 @@ def generateGreedy {batch seq frames : Nat}
   let cacheDevice := inputsEmbeds.device
   let cacheMaxLen : Nat := seq + maxNewTokens
   let eosVector := eosVectorOnDevice (batch := batch) eosTokenIds cacheDevice
-  let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
+  let (cosAll, sinAll) := qwen.computeFreqsOnDevice cacheMaxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
   let support ← dtype.acquireConstantSupport cacheDevice
   let _ := support.down
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
@@ -816,7 +806,7 @@ def forcedLogits {batch seq frames steps : Nat}
   let inputsEmbeds ← buildInputsEmbeds m inputIds inputFeatures featureAttentionMask
   let cacheDevice := inputsEmbeds.device
   let cacheMaxLen : Nat := seq + steps
-  let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
+  let (cosAll, sinAll) := qwen.computeFreqsOnDevice cacheMaxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
   let support ← dtype.acquireConstantSupport cacheDevice
   let _ := support.down
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := by omega)

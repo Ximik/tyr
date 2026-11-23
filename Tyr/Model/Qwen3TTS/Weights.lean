@@ -19,7 +19,6 @@ variable {device : Device} {dtype : RealFloatingDType}
 
 open torch.Log
 
-open torch.Model (reqGradFalse)
 
 
 /-- Admit a stored tensor at the component dtype: equality only unless `cast`,
@@ -46,7 +45,7 @@ private def loadOptionalTensorShardedTarget (modelDir : String) (cast : Bool) (n
 private def loadRMSNormSharded (modelDir : String) (cast : Bool) (name : String) (dim : Nat) (eps : Float)
     : IO (RMSNorm (device := device) dim dtype.val) := do
   let w ← loadTensorShardedTarget modelDir cast s!"{name}.weight" #[dim]
-  pure { weight := reqGradFalse w, eps := ⟨eps⟩ }
+  pure { weight := Tensor.detach w, eps := ⟨eps⟩ }
 
 private def loadTalkerLayerSharded (modelDir : String) (cast : Bool) (layerIdx : Nat) (cfg : TalkerConfig)
     : IO (TalkerLayer (device := device) (dtype := dtype) cfg) := do
@@ -77,17 +76,17 @@ private def loadTalkerLayerSharded (modelDir : String) (cast : Bool) (layerIdx :
   let post_attention_layernorm ← loadRMSNormSharded modelDir cast s!"{p}.post_attention_layernorm" cfg.hiddenSize cfg.rmsNormEps
 
   let self_attn : qwen.QwenAttention (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim dtype.val := {
-    q_proj := reqGradFalse q_proj
-    k_proj := reqGradFalse k_proj
-    v_proj := reqGradFalse v_proj
-    o_proj := reqGradFalse o_proj
-    q_norm := q_norm.map reqGradFalse
-    k_norm := k_norm.map reqGradFalse
+    q_proj := Tensor.detach q_proj
+    k_proj := Tensor.detach k_proj
+    v_proj := Tensor.detach v_proj
+    o_proj := Tensor.detach o_proj
+    q_norm := q_norm.map Tensor.detach
+    k_norm := k_norm.map Tensor.detach
   }
   let mlp : qwen.QwenMLP (device := device) cfg.hiddenSize cfg.intermediateSize dtype.val := {
-    gate_proj := reqGradFalse gate_proj
-    up_proj := reqGradFalse up_proj
-    down_proj := reqGradFalse down_proj
+    gate_proj := Tensor.detach gate_proj
+    up_proj := Tensor.detach up_proj
+    down_proj := Tensor.detach down_proj
   }
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
@@ -121,17 +120,17 @@ private def loadCodePredictorLayerSharded (modelDir : String) (cast : Bool) (lay
   let post_attention_layernorm ← loadRMSNormSharded modelDir cast s!"{p}.post_attention_layernorm" cp.hiddenSize cp.rmsNormEps
 
   let self_attn : qwen.QwenAttention (device := device) cp.hiddenSize cp.numAttentionHeads cp.numKeyValueHeads cp.headDim dtype.val := {
-    q_proj := reqGradFalse q_proj
-    k_proj := reqGradFalse k_proj
-    v_proj := reqGradFalse v_proj
-    o_proj := reqGradFalse o_proj
-    q_norm := q_norm.map reqGradFalse
-    k_norm := k_norm.map reqGradFalse
+    q_proj := Tensor.detach q_proj
+    k_proj := Tensor.detach k_proj
+    v_proj := Tensor.detach v_proj
+    o_proj := Tensor.detach o_proj
+    q_norm := q_norm.map Tensor.detach
+    k_norm := k_norm.map Tensor.detach
   }
   let mlp : qwen.QwenMLP (device := device) cp.hiddenSize cp.intermediateSize dtype.val := {
-    gate_proj := reqGradFalse gate_proj
-    up_proj := reqGradFalse up_proj
-    down_proj := reqGradFalse down_proj
+    gate_proj := Tensor.detach gate_proj
+    up_proj := Tensor.detach up_proj
+    down_proj := Tensor.detach down_proj
   }
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
@@ -143,7 +142,7 @@ private def loadCodePredictorProjectionSharded (modelDir : String) (cast : Bool)
   let bias ← loadOptionalTensorShardedTarget (dtype := dtype) modelDir cast
     "talker.code_predictor.small_to_mtp_projection.bias" #[cp.hiddenSize]
   match weight, bias with
-  | some w, some b => pure (reqGradFalse w, reqGradFalse b)
+  | some w, some b => pure (Tensor.detach w, Tensor.detach b)
   | none, none =>
     if hSame : cp.hiddenSize = cfg.hiddenSize then
       let support ← dtype.val.acquireConstantSupport device
@@ -180,12 +179,12 @@ private def loadTalkerModelSharded (modelDir : String) (cast : Bool) (cfg : Talk
 
   let norm ← loadRMSNormSharded modelDir cast "talker.model.norm" cfg.hiddenSize cfg.rmsNormEps
   pure {
-    codecEmbedding := reqGradFalse codecEmbedding
-    textEmbedding := reqGradFalse textEmbedding
-    textProjectionFc1 := reqGradFalse textProjectionFc1
-    textProjectionFc1Bias := reqGradFalse textProjectionFc1Bias
-    textProjectionFc2 := reqGradFalse textProjectionFc2
-    textProjectionFc2Bias := reqGradFalse textProjectionFc2Bias
+    codecEmbedding := Tensor.detach codecEmbedding
+    textEmbedding := Tensor.detach textEmbedding
+    textProjectionFc1 := Tensor.detach textProjectionFc1
+    textProjectionFc1Bias := Tensor.detach textProjectionFc1Bias
+    textProjectionFc2 := Tensor.detach textProjectionFc2
+    textProjectionFc2Bias := Tensor.detach textProjectionFc2Bias
     layers
     norm
   }
@@ -200,7 +199,7 @@ private def loadCodePredictorSharded (modelDir : String) (cast : Bool) (cfg : Ta
     let emb ← loadTensorShardedTarget modelDir cast
       s!"talker.code_predictor.model.codec_embedding.{i}.weight"
       #[cp.vocabSize, cfg.hiddenSize]
-    pure (reqGradFalse emb)
+    pure (Tensor.detach emb)
 
   let (inputProjection, inputProjectionBias) ← loadCodePredictorProjectionSharded modelDir cast cfg
 
@@ -215,7 +214,7 @@ private def loadCodePredictorSharded (modelDir : String) (cast : Bool) (cfg : Ta
     let head ← loadTensorShardedTarget modelDir cast
       s!"talker.code_predictor.lm_head.{i}.weight"
       #[cp.vocabSize, cp.hiddenSize]
-    pure (reqGradFalse head)
+    pure (Tensor.detach head)
 
   pure { inputEmbeddings, inputProjection, inputProjectionBias, layers, norm, lmHeads }
 
@@ -226,7 +225,7 @@ private def loadTalkerForConditionalGenerationSharded (modelDir : String) (cast 
   let codePredictor ← loadCodePredictorSharded modelDir cast cfg
   let codecHead ← loadTensorShardedTarget modelDir cast "talker.codec_head.weight"
     #[cfg.vocabSize, cfg.hiddenSize]
-  pure { model, codePredictor, codecHead := reqGradFalse codecHead }
+  pure { model, codePredictor, codecHead := Tensor.detach codecHead }
 
 private def loadTimeDelayNetBlockSharded (modelDir : String) (cast : Bool) (namePrefix : String)
     (inChannels outChannels kernelSize dilation : Nat)
@@ -236,8 +235,8 @@ private def loadTimeDelayNetBlockSharded (modelDir : String) (cast : Bool) (name
   let bias ← loadTensorShardedTarget modelDir cast s!"{namePrefix}.conv.bias"
     #[outChannels]
   pure {
-    weight := reqGradFalse weight
-    bias := reqGradFalse bias
+    weight := Tensor.detach weight
+    bias := Tensor.detach bias
   }
 
 private def loadSqueezeExcitationBlockSharded (modelDir : String) (cast : Bool) (namePrefix : String)
@@ -252,10 +251,10 @@ private def loadSqueezeExcitationBlockSharded (modelDir : String) (cast : Bool) 
   let conv2Bias ← loadTensorShardedTarget modelDir cast s!"{namePrefix}.conv2.bias"
     #[channels]
   pure {
-    conv1Weight := reqGradFalse conv1Weight
-    conv1Bias := reqGradFalse conv1Bias
-    conv2Weight := reqGradFalse conv2Weight
-    conv2Bias := reqGradFalse conv2Bias
+    conv1Weight := Tensor.detach conv1Weight
+    conv1Bias := Tensor.detach conv1Bias
+    conv2Weight := Tensor.detach conv2Weight
+    conv2Bias := Tensor.detach conv2Bias
   }
 
 private def loadRes2NetBlockSharded (modelDir : String) (cast : Bool) (namePrefix : String)
@@ -292,8 +291,8 @@ private def loadAttentiveStatisticsPoolingSharded (modelDir : String) (cast : Bo
     #[channels]
   pure {
     tdnn
-    convWeight := reqGradFalse convWeight
-    convBias := reqGradFalse convBias
+    convWeight := Tensor.detach convWeight
+    convBias := Tensor.detach convBias
     eps := 1e-12
   }
 
@@ -341,8 +340,8 @@ private def loadSpeakerEncoderSharded (modelDir : String) (cast : Bool) (cfg : S
     block3
     mfa
     asp
-    fcWeight := reqGradFalse fcWeight
-    fcBias := reqGradFalse fcBias
+    fcWeight := Tensor.detach fcWeight
+    fcBias := Tensor.detach fcBias
   }
 
 namespace Qwen3TTSForConditionalGeneration

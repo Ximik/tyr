@@ -47,8 +47,8 @@ def forwardAttn {batch n_head seq head_dim : Nat}
     (q : Tensor { dtype := dtype, device := device, shape := #[batch, n_head, seq, head_dim] })
     (k : Tensor { dtype := dtype, device := device, shape := #[batch, n_head, seq, head_dim] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, n_head, seq, head_dim] } × Tensor { dtype := dtype, device := device, shape := #[batch, n_head, seq, head_dim] } :=
-  let q_norm := qkn.query_norm.forward5d q
-  let k_norm := qkn.key_norm.forward5d k
+  let q_norm := qkn.query_norm.forward4d q
+  let k_norm := qkn.key_norm.forward4d k
   (q_norm, k_norm)
 
 end QKNorm
