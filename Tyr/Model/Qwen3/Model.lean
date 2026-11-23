@@ -115,7 +115,7 @@ def forwardWithHiddenStates {batch seq : Nat}
     | some mask => m.model.forwardWithHiddenStatesMasked cfg inputIds cos sin mask
     | none => m.model.forwardWithHiddenStates cfg inputIds cos sin
   let finalHidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 } :=
-    hiddenStates.getD (hiddenStates.size - 1) (Tensor.zeros (device := device) #[batch, seq, cfg.hidden_size])
+    hiddenStates.back?.getD (Tensor.zeros (device := device) #[batch, seq, cfg.hidden_size])
   let logits := Tensor.linear3d finalHidden m.lmHead
   { logits, hiddenStates := some hiddenStates }
 

@@ -33,13 +33,6 @@ structure Qwen3ASRProcessor where
 
 namespace Qwen3ASRProcessor
 
-private def repeatToken (tok : String) (n : Nat) : String :=
-  Id.run do
-    let mut out := ""
-    for _ in [:n] do
-      out := out ++ tok
-    out
-
 private def replaceInSample
     (audioToken : String)
     (sample : String)
@@ -55,7 +48,7 @@ private def replaceInSample
   for i in [1:parts.size] do
     if idx < audioLengths.size then
       let aLen := audioLengths[idx]!
-      out := out ++ repeatToken audioToken aLen ++ parts[i]!
+      out := out ++ String.join (List.replicate aLen audioToken) ++ parts[i]!
       idx := idx + 1
     else
       throw s!"Not enough audio lengths while replacing `{audioToken}` placeholders"

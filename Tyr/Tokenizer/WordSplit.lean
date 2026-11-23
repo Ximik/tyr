@@ -193,12 +193,6 @@ def sliceChars (chars : Array Char) (lo hi : Nat) : String :=
    ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+`
   Alternatives are tried in pattern order (leftmost-first semantics). -/
 
-private def lowerAscii (c : Char) : Char :=
-  if c >= 'A' && c <= 'Z' then
-    Char.ofNat (c.toNat + 32)
-  else
-    c
-
 /-- Match contraction `(?i:'s|'t|'re|'ve|'m|'ll|'d)` (ASCII case fold). -/
 private def matchContraction (chars : Array Char) (i : Nat) : Option Nat := Id.run do
   if i >= chars.size then return none
@@ -210,7 +204,7 @@ private def matchContraction (chars : Array Char) (i : Nat) : Option Nat := Id.r
     if i + len <= chars.size then
       let mut ok := true
       for j in [:len] do
-        if lowerAscii chars[i + j]! != lowerAscii pat[j]! then
+        if chars[i + j]!.toLower != pat[j]!.toLower then
           ok := false
       if ok then
         return some len

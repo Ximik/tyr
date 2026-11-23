@@ -91,10 +91,6 @@ def encode (s : String) : Array Int64 :=
 def decode (tokens : Array Int64) : String :=
   String.ofList (tokens.toList.map intToChar)
 
-/-- Float finite check helper for callers/tests. -/
-def isFiniteFloat (x : Float) : Bool :=
-  !x.isNaN && !x.isInf
-
 /-- Synthetic Shakespeare-sized token stream. -/
 def mkShakespeareLikeStream (cfg : PrototypeConfig) : IO (Tokens (device := .CPU) #[cfg.streamTokens]) := do
   Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[cfg.streamTokens]

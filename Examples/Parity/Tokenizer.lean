@@ -56,7 +56,7 @@ def codec (family dir : String) : IO Codec := do
   | other => throw <| IO.userError s!"unknown tokenizer family '{other}'"
 
 private def bytes (s : String) : Array Nat :=
-  s.toUTF8.toList.toArray.map (·.toNat)
+  s.toUTF8.data.map (·.toNat)
 
 def probe (args : Args) (_device : Device) (json : Json) : IO Output := do
   let request : Request ← IO.ofExcept (fromJson? json)

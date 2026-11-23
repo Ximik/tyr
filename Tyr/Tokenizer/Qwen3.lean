@@ -22,32 +22,6 @@ private def parseJsonFile (path : String) : IO Json := do
   | .ok json => pure json
   | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
 
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
-
-private def getStr? (j : Json) : Option String :=
-  match j with
-  | .str s => some s
-  | _ => none
-
-private def getArr? (j : Json) : Option (Array Json) :=
-  match j with
-  | .arr a => some a
-  | _ => none
-
-private def fromJson? {α} [FromJson α] (j : Json) : Option α :=
-  match (FromJson.fromJson? j : Except String α) with
-  | .ok v => some v
-  | .error _ => none
-
-private def getNat? (j : Json) : Option Nat :=
-  fromJson? j
-
-private def stringCharLength (s : String) : Nat :=
-  s.toList.length
-
 /-- Tokenizer for Qwen3 (ByteLevel BPE). -/
 structure QwenTokenizer where
   vocabSize : Nat
@@ -72,7 +46,7 @@ private def sortSpecials (specials : Array String) : Array String := Id.run do
     let mut inserted := false
     let mut next : Array String := #[]
     for existing in out do
-      if !inserted && stringCharLength s > stringCharLength existing then
+      if !inserted && s.length > existing.length then
         next := next.push s
         inserted := true
       next := next.push existing
@@ -91,19 +65,19 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
     if hasTokenizerJson then
       let tokJson <- parseJsonFile tokenizerJsonPath
       let modelJson <-
-        match getObjVal? tokJson "model" with
+        match (tokJson.getObjVal? "model").toOption with
         | some v => pure v
         | none => throw (IO.userError "tokenizer.json missing model")
       let vocabJson <-
-        match getObjVal? modelJson "vocab" with
+        match (modelJson.getObjVal? "vocab").toOption with
         | some v => pure v
         | none => throw (IO.userError "tokenizer.json missing model.vocab")
       let mergesJson <-
-        match getObjVal? modelJson "merges" >>= getArr? with
+        match (modelJson.getObjVal? "merges" >>= (·.getArr?)).toOption with
         | some v => pure v
         | none => throw (IO.userError "tokenizer.json missing model.merges")
       let unkName :=
-        match getObjVal? modelJson "unk_token" with
+        match (modelJson.getObjVal? "unk_token").toOption with
         | some (.str s) => some s
         | _ => none
       pure (some tokJson, vocabJson, mergesJson, unkName)
@@ -116,7 +90,7 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
         if !line.isEmpty && !line.startsWith "#" then
           merges := merges.push (.str line)
       let unkName :=
-        match getObjVal? cfgJson "unk_token" with
+        match (cfgJson.getObjVal? "unk_token").toOption with
         | some (.str s) => some s
         | _ => none
       pure (none, vocabJson, merges, unkName)
@@ -127,7 +101,7 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
   match vocabJson with
   | .obj kvs =>
     for (tok, idJson) in kvs do
-      match getNat? idJson with
+      match idJson.getNat?.toOption with
       | some id =>
         if id ≥ UInt32.size then
           throw (IO.userError s!"Vocab id {id} for token {tok} exceeds the UInt32 token id range")
@@ -147,7 +121,7 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
   -- Build char->id map for single-character tokens
   let mut charToId : Std.HashMap Char TokenId := {}
   for (tok, id) in tokenToId.toList do
-    if stringCharLength tok == 1 then
+    if tok.length == 1 then
       match tok.toList with
       | c :: _ => charToId := charToId.insert c id
       | _ => pure ()
@@ -157,13 +131,13 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
   let mut idToSpecial : Std.HashMap TokenId String := {}
   match tokJson? with
   | some tokJson =>
-      match getObjVal? tokJson "added_tokens" >>= getArr? with
+      match (tokJson.getObjVal? "added_tokens" >>= (·.getArr?)).toOption with
       | some arr =>
         for entry in arr do
           match entry with
           | .obj kvs =>
-            let content := getObjVal? (.obj kvs) "content" >>= getStr?
-            let id := getObjVal? (.obj kvs) "id" >>= getNat?
+            let content := ((Json.obj kvs).getObjVal? "content" >>= (·.getStr?)).toOption
+            let id := ((Json.obj kvs).getObjVal? "id" >>= (·.getNat?)).toOption
             match content, id with
             | some s, some n =>
               let tid := n.toUInt32
@@ -175,11 +149,11 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
   | none => pure ()
 
   -- HF fast-tokenizer fallback format (tokenizer_config.json::added_tokens_decoder)
-  match getObjVal? cfgJson "added_tokens_decoder" with
+  match (cfgJson.getObjVal? "added_tokens_decoder").toOption with
   | some (.obj kvs) =>
       for (idStr, entry) in kvs do
-        let content := getObjVal? entry "content" >>= getStr?
-        let idNat := (idStr.toNat?) <|> (getObjVal? entry "id" >>= getNat?)
+        let content := (entry.getObjVal? "content" >>= (·.getStr?)).toOption
+        let idNat := (idStr.toNat?) <|> ((entry.getObjVal? "id" >>= (·.getNat?)).toOption)
         match content, idNat with
         | some s, some n =>
             let tid := n.toUInt32
@@ -198,7 +172,7 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
 
   -- pad token: prefer config "pad_token" / "pad_token_id" if present, else <|endoftext|>
   let padToken : TokenId :=
-    match getObjVal? cfgJson "pad_token_id" >>= getNat? with
+    match (cfgJson.getObjVal? "pad_token_id" >>= (·.getNat?)).toOption with
     | some id => id.toUInt32
     | none =>
       match specialTokens.get? "<|endoftext|>" with
@@ -224,7 +198,7 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
           throw (IO.userError s!"Invalid merge entry: {mergeStr}")
       | .arr arr =>
         if arr.size >= 2 then
-          match getStr? arr[0]!, getStr? arr[1]! with
+          match arr[0]!.getStr?.toOption, arr[1]!.getStr?.toOption with
           | some l, some r => pure (l, r)
           | _, _ => throw (IO.userError "Invalid merge entry: non-string pair")
         else
@@ -250,10 +224,10 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
   let nfc ← match tokJson? with
     | none => pure true
     | some tokJson =>
-      match getObjVal? tokJson "normalizer" with
+      match (tokJson.getObjVal? "normalizer").toOption with
       | none | some .null => pure false
       | some normalizer =>
-        if getObjVal? normalizer "type" == some (.str "NFC") then pure true
+        if (normalizer.getObjVal? "type").toOption == some (.str "NFC") then pure true
         else throw (IO.userError s!"unsupported tokenizer.json normalizer {normalizer.compress}; tyr implements NFC")
   pure {
     vocabSize

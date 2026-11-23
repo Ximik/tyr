@@ -628,9 +628,9 @@ private def attentionSlidingStep {batch cap len : Nat}
   match sharedSource with
   | some src =>
     let kvLen := len + 1
-    let useLen := if kvLen > cfg.sliding_window then cfg.sliding_window else kvLen
+    let useLen := min kvLen cfg.sliding_window
     let start := kvLen - useLen
-    have _hUse : useLen ≤ kvLen := by simp only [useLen]; split <;> omega
+    have _hUse : useLen ≤ kvLen := by simp only [useLen]; omega
     let (kAll0, vAll0) := cacheSliceSliding cfg src
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := kAll0.slice 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := vAll0.slice 2 start useLen
@@ -662,9 +662,9 @@ private def attentionSlidingStep {batch cap len : Nat}
       vStore := vStore'
     }
     let kvLen := len + 1
-    let useLen := if kvLen > cfg.sliding_window then cfg.sliding_window else kvLen
+    let useLen := min kvLen cfg.sliding_window
     let start := kvLen - useLen
-    have _hUse : useLen ≤ kvLen := by simp only [useLen]; split <;> omega
+    have _hUse : useLen ≤ kvLen := by simp only [useLen]; omega
     let kAll0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
       (cacheSliceSliding cfg cache') |>.1
     let vAll0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=

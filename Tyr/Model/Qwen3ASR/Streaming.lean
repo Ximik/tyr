@@ -126,26 +126,6 @@ private def detachDecodeCache (cache : StreamingDecodeCache (device := device) (
       { frontend with inputFeaturesDyn := frontend.inputFeaturesDyn.detach
                       inputFeaturesDevDyn := frontend.inputFeaturesDevDyn.map Tensor.detach } }
 
-private def toLower (s : String) : String :=
-  String.ofList (s.toList.map Char.toLower)
-
-private def startsWithStr (s pref : String) : Bool :=
-  let ss := s.toList
-  let pp := pref.toList
-  pp.length ≤ ss.length && ss.take pp.length == pp
-
-private def dropChars (s : String) (n : Nat) : String :=
-  String.ofList (s.toList.drop n)
-
-private def minU64 (a b : Nat) : Nat :=
-  if a <= b then a else b
-
-private theorem minU64_le_left (a b : Nat) : minU64 a b ≤ a := by
-  unfold minU64; split <;> omega
-
-private theorem minU64_le_right (a b : Nat) : minU64 a b ≤ b := by
-  unfold minU64; split <;> omega
-
 private def appendRepeatedTokenId (ids : Array UInt32) (tokId : UInt32) (n : Nat) : Array UInt32 :=
   Id.run do
     let mut out := ids
@@ -166,7 +146,7 @@ private def mkStreamingPromptTokenCache
     let afterAudioIds := tokenizer.qwen3.encodeText tok parts[1]!
     some {
       basePrompt := basePrompt
-      basePromptLen := basePrompt.toList.length
+      basePromptLen := basePrompt.length
       audioToken := processor.audioToken
       beforeAudioIds := beforeAudioIds
       afterAudioIds := afterAudioIds
@@ -187,11 +167,11 @@ private def encodePromptIdsWithCache
     | none => mkStreamingPromptTokenCache tok processor basePrompt
   match seedCache with
   | some c =>
-    if startsWithStr prompt c.basePrompt then
-      let suffix := dropChars prompt c.basePromptLen
+    if prompt.startsWith c.basePrompt then
+      let suffix := (prompt.drop c.basePromptLen).toString
       let suffixIds :=
-        if startsWithStr suffix c.lastSuffix then
-          let suffixTail := dropChars suffix c.lastSuffix.toList.length
+        if suffix.startsWith c.lastSuffix then
+          let suffixTail := (suffix.drop c.lastSuffix.length).toString
           c.lastSuffixIds ++ tokenizer.qwen3.encodeText tok suffixTail
         else
           tokenizer.qwen3.encodeText tok suffix
@@ -201,13 +181,11 @@ private def encodePromptIdsWithCache
       ids := ids ++ suffixIds
       pure (ids, some { c with lastSuffix := suffix, lastSuffixIds := suffixIds })
     else
-      match processor.encodeWithExpandedAudioTokenIds tok prompt #[audioLen] audioTokenId with
-      | .ok ids => pure (ids, seedCache)
-      | .error e => throw <| IO.userError e
+      let ids ← IO.ofExcept (processor.encodeWithExpandedAudioTokenIds tok prompt #[audioLen] audioTokenId)
+      pure (ids, seedCache)
   | none =>
-    match processor.encodeWithExpandedAudioTokenIds tok prompt #[audioLen] audioTokenId with
-    | .ok ids => pure (ids, none)
-    | .error e => throw <| IO.userError e
+    let ids ← IO.ofExcept (processor.encodeWithExpandedAudioTokenIds tok prompt #[audioLen] audioTokenId)
+    pure (ids, none)
 
 private def idsToDyn1dOnDevice (ids : Array UInt32) (device : Device) : IO (Sigma (fun n => Tensor { device := device, shape := #[n], dtype := .Int64 })) := do
   let n : Nat := ids.size
@@ -459,11 +437,6 @@ private def buildStreamingFrontendPackWithCache
               featureAttentionMaskDyn := mergedOut.featureAttentionMask
             }, some prefixFrames)
 
-private def joinWith (sep : String) (parts : List String) : String :=
-  match parts with
-  | [] => ""
-  | p :: ps => ps.foldl (fun acc x => acc ++ sep ++ x) p
-
 private def containsSubstr (s pat : String) : Bool :=
   if pat.isEmpty then
     false
@@ -474,7 +447,7 @@ private def splitFirst (s sep : String) : Option (String × String) :=
   match s.splitOn sep with
   | [] => none
   | [_] => none
-  | x :: xs => some (x, joinWith sep xs)
+  | x :: xs => some (x, sep.intercalate xs)
 
 /-- Normalize language as `Xxxxx...` (first upper, rest lower). -/
 def normalizeLanguageName (language : String) : Except String String := do
@@ -595,7 +568,7 @@ def parseAsrOutput (raw : String) (userLanguage : Option String := none) : Strin
       match splitFirst s asrTextTag with
       | none => ("", stripSpecialTokens s)
       | some (metaPart, textPart) =>
-        let metaLower := toLower metaPart
+        let metaLower := metaPart.toLower
         if containsSubstr metaLower "language none" then
           let t := stripSpecialTokens textPart
           if t.isEmpty then
@@ -609,22 +582,14 @@ def parseAsrOutput (raw : String) (userLanguage : Option String := none) : Strin
               if lang.isEmpty then
                 let lineTrim := line.trimAscii.toString
                 if !lineTrim.isEmpty then
-                  let low := toLower lineTrim
-                  if startsWithStr low languagePrefix then
-                    let val := (dropChars lineTrim languagePrefix.length).trimAscii.toString
+                  let low := lineTrim.toLower
+                  if low.startsWith languagePrefix then
+                    let val := (lineTrim.drop languagePrefix.length).trimAscii.toString
                     if !val.isEmpty then
                       match normalizeLanguageName val with
                       | .ok ln => lang := ln
                       | .error _ => lang := val
             (lang, stripSpecialTokens textPart)
-
-private def joinArrayWith (sep : String) (xs : Array String) : String := Id.run do
-  if xs.isEmpty then
-    return ""
-  let mut out := xs[0]!
-  for i in [1:xs.size] do
-    out := out ++ sep ++ xs[i]!
-  out
 
 /-- Merge per-chunk languages by removing empties and consecutive duplicates. -/
 def mergeLanguages (langs : Array String) : String :=
@@ -643,7 +608,7 @@ def mergeLanguages (langs : Array String) : String :=
           out := out.push x
           prev := some x
     out
-  joinArrayWith "," merged
+  ",".intercalate merged.toList
 
 /-- Build base text prompt for streaming decode. -/
 def buildTextPrompt
@@ -684,12 +649,9 @@ def initStreamingState
       if s.isEmpty then
         pure none
       else
-        match normalizeLanguageName s with
-        | .error e => throw <| IO.userError e
-        | .ok ln =>
-          match validateLanguage supportedLanguages ln with
-          | .error e => throw <| IO.userError e
-          | .ok _ => pure (some ln)
+        let ln ← IO.ofExcept (normalizeLanguageName s)
+        IO.ofExcept (validateLanguage supportedLanguages ln)
+        pure (some ln)
 
   let chunkSizeSamples := chunkSizeSamplesFromSec chunkSizeSec
   let stepSizeSamples := chunkSizeSamplesFromSec stepSizeSec
@@ -728,7 +690,7 @@ private def rollbackPrefixForChunk
   let mut pref := ""
   let mut done := false
   while !done do
-    let endIdx := if curIds.size > k then curIds.size - k else 0
+    let endIdx := curIds.size - k
     let startIdx :=
       if promptMaxTokens == 0 then
         0
@@ -880,7 +842,7 @@ def decodeStreamingChunkWithModelStateCached
         throw <| IO.userError s!"feature attention mask counts {validFrames} valid frames of {frames}"
       let audioLenRaw := AudioEncoderConfig.featExtractOutputLength validFrames
       let audioLenCap := AudioEncoderConfig.featExtractOutputLength frames
-      let audioLen := minU64 audioLenRaw audioLenCap
+      let audioLen := min audioLenRaw audioLenCap
 
       let processor : Qwen3ASRProcessor := {}
       let (promptIds, promptTokenCache') ←
@@ -972,7 +934,7 @@ def decodeStreamingChunkWithModelStateCached
               model.thinker.encodeAudioVarLen ((Tensor.reshape inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel]))) #[validFrames]
             let audioProj : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength frames, cfg.thinkerConfig.textConfig.hiddenSize] } :=
               model.thinker.projectAudio audioRaw
-            let audioValid : Tensor { dtype := dtype, device := device, shape := #[1, audioLen, cfg.thinkerConfig.textConfig.hiddenSize] } := Tensor.slice audioProj 1 0 audioLen (_bounds := by simpa [audioLen] using minU64_le_right audioLenRaw audioLenCap)
+            let audioValid : Tensor { dtype := dtype, device := device, shape := #[1, audioLen, cfg.thinkerConfig.textConfig.hiddenSize] } := Tensor.slice audioProj 1 0 audioLen (_bounds := by simpa [audioLen] using Nat.min_le_right audioLenRaw audioLenCap)
             let nextAudioCache :=
               if decodeMode == .fullAccumulation then
                 some {
@@ -986,18 +948,18 @@ def decodeStreamingChunkWithModelStateCached
           else
             let prevFull := (ac.validFeatureLen / fullStepFeature) * fullStepFeature
             let curFull := (validFrames / fullStepFeature) * fullStepFeature
-            let reuseBase := minU64 prevFull curFull
+            let reuseBase := min prevFull curFull
             let reuseFeatureLen :=
               if reuseBase > 0 && validFrames % fullStepFeature != 0 then
                 reuseBase - fullStepFeature
               else
                 reuseBase
             let reuseAudioLenRaw := AudioEncoderConfig.featExtractOutputLength reuseFeatureLen
-            let reuseAudioLen := minU64 (minU64 reuseAudioLenRaw ac.validAudioLen) audioLen
+            let reuseAudioLen := min (min reuseAudioLenRaw ac.validAudioLen) audioLen
             let prevAudio : Tensor { dtype := dtype, device := device, shape := #[1, ac.validAudioLen, cfg.thinkerConfig.textConfig.hiddenSize] } :=
               Tensor.reshape ac.audioEmbedsValidDyn #[1, ac.validAudioLen, cfg.thinkerConfig.textConfig.hiddenSize]
             let prefixAudio : Tensor { dtype := dtype, device := device, shape := #[1, reuseAudioLen, cfg.thinkerConfig.textConfig.hiddenSize] } := Tensor.slice prevAudio 1 0 reuseAudioLen
-              (_bounds := by simpa [reuseAudioLen] using Nat.le_trans (minU64_le_left _ _) (minU64_le_right reuseAudioLenRaw ac.validAudioLen))
+              (_bounds := by simpa [reuseAudioLen] using Nat.le_trans (Nat.min_le_left _ _) (Nat.min_le_right reuseAudioLenRaw ac.validAudioLen))
             let tailFeatureLen := validFrames - reuseFeatureLen
             if tailFeatureLen == 0 then
               let audioValid : Tensor { dtype := dtype, device := device, shape := #[1, audioLen, cfg.thinkerConfig.textConfig.hiddenSize] } :=
@@ -1025,7 +987,7 @@ def decodeStreamingChunkWithModelStateCached
               pure (audioValid, nextAudioCache)
             else
               have hReuse : reuseFeatureLen ≤ frames := by
-                have hBase := minU64_le_right prevFull curFull
+                have hBase := Nat.min_le_right prevFull curFull
                 have hCur : curFull ≤ validFrames := Nat.div_mul_le_self _ _
                 simp only [reuseFeatureLen, reuseBase]
                 split <;> omega
@@ -1038,10 +1000,10 @@ def decodeStreamingChunkWithModelStateCached
                 model.thinker.projectAudio tailAudioRaw
               let tailAudioLenRaw := AudioEncoderConfig.featExtractOutputLength tailFeatureLen
               let tailAudioCap := AudioEncoderConfig.featExtractOutputLength tailFrames
-              let tailAudioLen := minU64 tailAudioLenRaw tailAudioCap
+              let tailAudioLen := min tailAudioLenRaw tailAudioCap
               let tailValid : Tensor { dtype := dtype, device := device, shape := #[1, tailAudioLen, cfg.thinkerConfig.textConfig.hiddenSize] } :=
                 Tensor.slice tailAudioProj 1 0 tailAudioLen
-                  (_bounds := by simpa [tailAudioLen] using minU64_le_right tailAudioLenRaw tailAudioCap)
+                  (_bounds := by simpa [tailAudioLen] using Nat.min_le_right tailAudioLenRaw tailAudioCap)
               let combinedDyn := Tensor.cat prefixAudio tailValid 1
               let combinedLen := reuseAudioLen + tailAudioLen
               let audioValid : Tensor { dtype := dtype, device := device, shape := #[1, audioLen, cfg.thinkerConfig.textConfig.hiddenSize] } :=
@@ -1076,7 +1038,7 @@ def decodeStreamingChunkWithModelStateCached
             model.thinker.encodeAudioVarLen ((Tensor.reshape inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel]))) #[validFrames]
           let audioProj : Tensor { dtype := dtype, device := device, shape := #[1, AudioEncoderConfig.featExtractOutputLength frames, cfg.thinkerConfig.textConfig.hiddenSize] } :=
             model.thinker.projectAudio audioRaw
-          let audioValid : Tensor { dtype := dtype, device := device, shape := #[1, audioLen, cfg.thinkerConfig.textConfig.hiddenSize] } := Tensor.slice audioProj 1 0 audioLen (_bounds := by simpa [audioLen] using minU64_le_right audioLenRaw audioLenCap)
+          let audioValid : Tensor { dtype := dtype, device := device, shape := #[1, audioLen, cfg.thinkerConfig.textConfig.hiddenSize] } := Tensor.slice audioProj 1 0 audioLen (_bounds := by simpa [audioLen] using Nat.min_le_right audioLenRaw audioLenCap)
           let nextAudioCache :=
             if decodeMode == .fullAccumulation then
               some {

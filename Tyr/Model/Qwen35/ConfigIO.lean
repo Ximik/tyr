@@ -97,9 +97,7 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
   let perTok ← fieldD? textCfg "num_experts_per_tok" d.num_experts_per_tok
   let ⟨hExperts⟩ ← if h : 0 < numExperts → 0 < perTok ∧ perTok ≤ numExperts then pure (PLift.up h) else
     throw s!"Invalid Qwen3.5 config: num_experts_per_tok={perTok} must be between 1 and num_experts={numExperts}"
-  let eos ← match ← tokenIdField? textCfg "eos_token_id" with
-    | some id => pure (some id)
-    | none => pure d.eos_token_id
+  let eos := (← tokenIdField? textCfg "eos_token_id") <|> d.eos_token_id
   let ⟨hEos⟩ ← if h : eos.all (·.toNat < vocab) = true then pure (PLift.up h) else
     throw s!"Invalid Qwen3.5 config: eos_token_id must be below vocab_size={vocab}"
   let tie ← match ← field? j "tie_word_embeddings" with

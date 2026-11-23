@@ -417,19 +417,6 @@ private def buildSlaneyMelFilterBankFlat
           out := out.push (tri * enorm)
       out
 
-private def takePadRight (xs : Array Float) (target : Nat) (padValue : Float) : Array Float × Nat :=
-  let taken := if xs.size > target then xs[:target].toArray else xs
-  let validLen := Nat.min xs.size target
-  if taken.size == target then
-    (taken, validLen)
-  else
-    Id.run do
-      let mut out := taken
-      let padN := target - taken.size
-      for _ in [:padN] do
-        out := out.push padValue
-      (out, validLen)
-
 private def zeroMeanUnitVar (audio : Array Float) (validLen : Nat) (paddingValue : Float) : Array Float :=
   if audio.isEmpty || validLen == 0 then
     audio
@@ -473,19 +460,6 @@ private def buildFeatureAttentionMask
         out := out.push v
       out
 
-private def adjustMaskLength (vals : Array Int64) (target : Nat) : Array Int64 :=
-  if vals.size == target then
-    vals
-  else if vals.size > target then
-    vals.extract 0 target
-  else
-    Id.run do
-      let mut out := vals
-      let pad := target - vals.size
-      for _ in [:pad] do
-        out := out.push 0
-      out
-
 /-- Faithful Whisper-style feature extraction on one waveform.
     This mirrors the reference path:
     Hann + STFT -> power -> Slaney mel -> log10 -> dynamic range clamp -> normalize. -/
@@ -502,7 +476,8 @@ def waveformToWhisperFeatures
   if targetSamples == 0 then
     throw <| IO.userError "Preprocessor config has n_samples=0"
 
-  let (prepared0, validLenNat) := takePadRight wave targetSamples cfg.paddingValue
+  let prepared0 := (wave.take targetSamples).rightpad targetSamples cfg.paddingValue
+  let validLenNat := min wave.size targetSamples
   let prepared :=
     if cfg.doNormalize then
       zeroMeanUnitVar prepared0 validLenNat cfg.paddingValue
@@ -592,7 +567,7 @@ def waveformToWhisperFeaturesDynamic
   -- still exceed that padding width to avoid a hard runtime exception in libtorch.
   let minStftSamples := (nFft / 2) + 1
   let waveSamples := wave.size
-  let targetSamplesRaw := if waveSamples >= minSamples then waveSamples else minSamples
+  let targetSamplesRaw := max waveSamples minSamples
   let targetSamples :=
     if targetSamplesRaw >= minStftSamples then
       targetSamplesRaw
@@ -610,7 +585,8 @@ def waveformToWhisperFeaturesDynamic
       else
         pure ()
 
-  let (prepared0, validLenNat) := takePadRight wave targetSamples cfg.paddingValue
+  let prepared0 := (wave.take targetSamples).rightpad targetSamples cfg.paddingValue
+  let validLenNat := min wave.size targetSamples
   let prepared :=
     if cfg.doNormalize then
       zeroMeanUnitVar prepared0 validLenNat cfg.paddingValue
@@ -674,7 +650,7 @@ def waveformToWhisperFeaturesDynamic
       Tensor.reshape normalized #[1, melBins, frames] (by simp [TensorSpec.numelOfShape])
 
     let maskVals0 := buildFeatureAttentionMask validLenNat targetSamples hop cfg.returnAttentionMask
-    let maskVals := adjustMaskLength maskVals0 frames
+    let maskVals := (maskVals0.take frames).rightpad frames 0
     let featureAttentionMaskCpu : Tensor { device := .CPU, shape := #[1, frames], dtype := .Int64 } ←
       IO.ofExcept (Tensor.fromInt64ArrayAs? maskVals #[1, frames])
     let featureAttentionMask : Tensor { device := runDevice, shape := #[1, frames], dtype := .Int64 } :=

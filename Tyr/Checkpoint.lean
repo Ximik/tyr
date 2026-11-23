@@ -116,9 +116,7 @@ def loadCheckpointMeta (path : String) : IO CheckpointMeta := do
       }
     else
       parseLegacyMeta content
-  match parsed with
-  | .ok m => pure m
-  | .error err => throw <| IO.userError err
+  IO.ofExcept parsed
 
 /-- Pin one committed snapshot directory for a multi-file read. Flat legacy
 directories are returned unchanged. Use the returned directory for every file

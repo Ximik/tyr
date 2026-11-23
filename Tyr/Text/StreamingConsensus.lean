@@ -23,8 +23,6 @@ structure TextDelta where
   fullText : String := ""
   deriving Repr
 
-private def safeSub (a b : Nat) : Nat := if a >= b then a - b else 0
-
 private def commonPrefixLenIds (a b : Array UInt32) : Nat :=
   let n := Nat.min a.size b.size
   Id.run do
@@ -78,25 +76,25 @@ def updateWithSignals
     : ConsensusState × TextDelta :=
   let hist0 := trimHistory (st.history.push ids) st.cfg.historyWindows
   let lcpPrev := commonPrefixLenIds st.lastIds ids
-  let cPrev := safeSub lcpPrev st.cfg.rollbackTokens
+  let cPrev := lcpPrev - st.cfg.rollbackTokens
   let cHistRaw := consensusPrefixLastK hist0 st.cfg.confirmWindows
-  let cHist := safeSub cHistRaw st.cfg.rollbackTokens
+  let cHist := cHistRaw - st.cfg.rollbackTokens
   let candidate0 :=
     if hist0.size >= st.cfg.confirmWindows then cHist else cPrev
   let unchanged := if ids == st.lastIds then st.unchangedSteps + 1 else 0
   let freezeCommit :=
     if st.cfg.freezeAfterSteps > 0 && unchanged >= st.cfg.freezeAfterSteps then
-      safeSub ids.size st.cfg.rollbackTokens
+      ids.size - st.cfg.rollbackTokens
     else
       0
   let boundaryCommit :=
     if boundary || !speechActive then
-      safeSub ids.size st.cfg.rollbackTokens
+      ids.size - st.cfg.rollbackTokens
     else
       0
   let speechCap :=
     if speechActive then
-      safeSub ids.size st.cfg.mutableTailTokensWhileSpeech
+      ids.size - st.cfg.mutableTailTokensWhileSpeech
     else
       ids.size
   let candidate := Nat.min speechCap (Nat.max candidate0 (Nat.max freezeCommit boundaryCommit))
@@ -107,7 +105,7 @@ def updateWithSignals
   let commitLen := if canAdvanceStable then commitLenRaw else oldStableLen
   let stableIds :=
     if canAdvanceStable then
-      ids.extract 0 (Nat.min commitLen ids.size)
+      ids.extract 0 commitLen
     else
       st.stableIds
   let unstableIds :=

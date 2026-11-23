@@ -55,7 +55,7 @@ def parseJson (j : Json) (d : QwenConfig) (allowMRope : Bool := false) (deriveHe
   let ⟨hHeadDim⟩ ← if h : 0 < headDim ∧ 2 ∣ headDim then pure (PLift.up h) else
     throw s!"Invalid Qwen config: head_dim={headDim} must be positive and even"
   if let some layout := mrope then
-    unless layout.sections.foldl (· + ·) 0 == headDim / 2 do
+    unless layout.sections.sum == headDim / 2 do
       throw s!"Invalid Qwen config: mrope_section {layout.sections} must sum to head_dim / 2 = {headDim / 2}"
   let vocab ← fieldD? j "vocab_size" d.vocab_size
   let ⟨hVocab⟩ ← if h : 0 < vocab then pure (PLift.up h) else

@@ -110,11 +110,6 @@ private def leavesAllclose (lhs rhs : Array TensorLeafValue) : Bool := Id.run do
           return false
   return true
 
-private def unwrapOrFail {α : Type} (result : Except String α) : IO α :=
-  match result with
-  | .ok value => pure value
-  | .error err => LeanTest.fail err
-
 @[test]
 def testTensorStructFlattenDiffOnlyUsesDifferentiableLeafOrder : IO Unit := do
   let leaves := TensorStructFlatten.flatten templateOuter .diffOnly
@@ -155,7 +150,7 @@ def testTensorStructFlattenDiffAndFrozenIncludesForwardOnlyLeaves : IO Unit := d
 
 @[test]
 def testTensorStructRebuildFromDiffOnlyReplacesOnlyDiffLeaves : IO Unit := do
-  let rebuilt ← unwrapOrFail <|
+  let rebuilt ← IO.ofExcept <|
     TensorStructFlatten.rebuildFrom templateOuter
       (TensorStructFlatten.flatten replacementOuter .diffOnly)
       .diffOnly
@@ -171,7 +166,7 @@ def testTensorStructRebuildFromDiffOnlyReplacesOnlyDiffLeaves : IO Unit := do
 
 @[test]
 def testTensorStructRebuildFromDiffAndFrozenReplacesAllSelectedLeaves : IO Unit := do
-  let rebuilt ← unwrapOrFail <|
+  let rebuilt ← IO.ofExcept <|
     TensorStructFlatten.rebuildFrom templateOuter
       (TensorStructFlatten.flatten replacementOuter .diffAndFrozen)
       .diffAndFrozen
@@ -238,7 +233,7 @@ def testTypedModelTraversalAndRebuildPreserveFullSpec : IO Unit := do
   let some first := leaves[0]? | LeanTest.fail "Missing first typed parameter leaf."
   LeanTest.assertTrue (first.payload.1.device == .CPU)
     "Flattening must retain the pinned device policy."
-  let rebuilt ← unwrapOrFail (TensorStructFlatten.rebuildFrom original leaves)
+  let rebuilt ← IO.ofExcept (TensorStructFlatten.rebuildFrom original leaves)
   LeanTest.assertTrue (leavesAllclose leaves (TensorStructFlatten.flatten rebuilt))
     "Typed heterogeneous parameters must round-trip through flatten/rebuild."
 

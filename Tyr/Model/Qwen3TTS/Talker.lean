@@ -683,7 +683,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
       let mut done := done
       let mut lengths := lengths
       let mut historyCols := historyCols
-      let allDone := done.foldl (fun acc d => acc && d) true
+      let allDone := done.all id
       if allDone then
         return lengths
 

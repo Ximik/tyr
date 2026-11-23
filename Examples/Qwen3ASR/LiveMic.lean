@@ -150,8 +150,6 @@ private def toSamples (sec : Float) : Nat :=
   let n := ((sec * 16000.0) + 0.5).toUInt64.toNat
   if n == 0 then 1 else n
 
-private def safeSubNat (a b : Nat) : Nat := if a >= b then a - b else 0
-
 private structure AudioRing where
   data : Array Float
   head : Nat
@@ -222,10 +220,6 @@ private def rms (xs : Array Float) : Float :=
 private def toChars (s : String) : Array Char := s.toList.toArray
 private def fromChars (xs : Array Char) : String := String.ofList xs.toList
 
-private def tailChars (s : String) (n : Nat) : String :=
-  let xs := toChars s
-  if xs.size <= n then s else fromChars (xs.extract (xs.size - n) xs.size)
-
 private def suffixPrefixOverlap (a b : String) : Nat :=
   let xa := toChars a
   let xb := toChars b
@@ -293,7 +287,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let silenceSamples := toSamples args.silenceSec
   let minSpeechSamples := toSamples args.minSpeechSec
   let ratioSteps := Nat.max 1 (((args.chunkSec / args.hopSec) + 0.5).toUInt64.toNat)
-  let autoCommitEvery := Nat.max 1 (safeSubNat ratioSteps 1)
+  let autoCommitEvery := Nat.max 1 (ratioSteps - 1)
   let commitEverySteps := if args.commitEvery == 0 then autoCommitEvery else args.commitEvery
   let maxNewTokensStream : Nat :=
     if args.useCase == .conversation then
@@ -470,7 +464,7 @@ def runMain (argv : List String) : IO UInt32 := do
                 if args.prettyUI then
                   uiClearInline
                 IO.println s!"STABLE+= {commitText}"
-                committedTail := tailChars (committedTail ++ commitText) committedTailCap
+                committedTail := ((committedTail ++ commitText).takeEnd committedTailCap).toString
               if !lastPartial.isEmpty then
                 if args.prettyUI then
                   uiClearInline

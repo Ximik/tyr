@@ -6,13 +6,10 @@ import LeanTest
 open torch
 open torch.qwen35
 
-private def ensureDir (path : String) : IO Unit :=
-  IO.FS.createDirAll ⟨path⟩
-
 @[test]
 def testQwen35HubShardFilesFromIndex : IO Unit := do
   let dir := "/tmp/qwen35_hub_index_test"
-  ensureDir dir
+  IO.FS.createDirAll dir
   let indexPath := s!"{dir}/model.safetensors.index.json"
   let json :=
     "{\"metadata\":{},\"weight_map\":{" ++
@@ -31,7 +28,7 @@ def testQwen35HubShardFilesFromIndex : IO Unit := do
 @[test]
 def testQwen35HubResolveLocalPretrainedDir : IO Unit := do
   let localDir := "/tmp/qwen35_hub_local_dir"
-  ensureDir localDir
+  IO.FS.createDirAll localDir
   IO.FS.writeFile s!"{localDir}/config.json" "{}"
   IO.FS.writeFile s!"{localDir}/model.safetensors" ""
 
@@ -56,7 +53,7 @@ def testQwen35CollectionListCoverage : IO Unit := do
 @[test]
 def testSafeTensorsLoadShardedHfSingleShardPattern : IO Unit := do
   let dir := "/tmp/qwen35_hf_single_shard_pattern"
-  ensureDir dir
+  IO.FS.createDirAll dir
   let shardPath := s!"{dir}/model.safetensors-00001-of-00001.safetensors"
   let input : Tensor { shape := #[2, 2], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshape #[2, 2]
   Tensor.saveSafeTensor input shardPath "model.language_model.embed_tokens.weight"

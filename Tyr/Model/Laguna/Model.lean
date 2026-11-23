@@ -329,7 +329,7 @@ def forwardStep {batch rotaryHalf numHeads cap len : Nat}
   -- Sliding-window read truncation: keep only the last `useLen` entries.
   let useLen : Nat :=
     match window with
-    | some w => if kvLen > w then w else kvLen
+    | some w => min kvLen w
     | none => kvLen
   let start : Nat := kvLen - useLen
   have _hUse : useLen ≤ kvLen := by simp only [useLen]; split <;> (try split) <;> omega

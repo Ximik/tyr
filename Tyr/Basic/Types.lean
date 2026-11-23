@@ -84,7 +84,7 @@ def DType.all : Array DType := #[
 ]
 
 private def normalizeDTypeToken (raw : String) : String :=
-  let token := String.ofList <| raw.toList.map Char.toLower
+  let token := raw.toLower
   if token.startsWith "torch." then (token.drop 6).toString else token
 
 /-- Parse Tyr canonical names, native ScalarType names, Python torch dtype

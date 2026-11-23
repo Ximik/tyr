@@ -37,9 +37,6 @@ structure TimestampConfig where
 private def msToSamples (samplingRate ms : Nat) : Nat :=
   (samplingRate * ms) / 1000
 
-private def safeSub (a b : Nat) : Nat :=
-  if a >= b then a - b else 0
-
 private def fmax (a b : Float) : Float :=
   if a > b then a else b
 
@@ -167,17 +164,17 @@ def timestampsFromProbabilities
       let mut curEnd := cur.endPos
 
       if i == 0 then
-        curStart := safeSub curStart speechPadSamples
+        curStart := curStart - speechPadSamples
 
       if let some nxt := out[i + 1]? then
-        let silenceDuration := safeSub nxt.start curEnd
+        let silenceDuration := nxt.start - curEnd
         if silenceDuration < 2 * speechPadSamples then
           curEnd := curEnd + silenceDuration / 2
-          let nxtStart := safeSub nxt.start (silenceDuration / 2)
+          let nxtStart := nxt.start - silenceDuration / 2
           out := out.set! (i + 1) { nxt with start := nxtStart }
         else
           curEnd := Nat.min audioLengthSamples (curEnd + speechPadSamples)
-          let nxtStart := safeSub nxt.start speechPadSamples
+          let nxtStart := nxt.start - speechPadSamples
           out := out.set! (i + 1) { nxt with start := nxtStart }
         out := out.set! i { start := curStart, endPos := curEnd }
       else
@@ -276,7 +273,7 @@ def step (it : (VADIterator (device := device))) (chunk : Array Float) : IO (Opt
     next := { next with tempEnd := 0 }
 
   if speechProb >= it.threshold && !next.triggered then
-    let startPos := safeSub (safeSub curSample next.speechPadSamples) win
+    let startPos := curSample - next.speechPadSamples - win
     next := { next with triggered := true }
     pure (some (.start startPos), next)
   else if speechProb < (it.threshold - 0.15) && next.triggered then
@@ -285,7 +282,7 @@ def step (it : (VADIterator (device := device))) (chunk : Array Float) : IO (Opt
     if curSample - next.tempEnd < next.minSilenceSamples then
       pure (none, next)
     else
-      let stopPos := safeSub (next.tempEnd + next.speechPadSamples) win
+      let stopPos := next.tempEnd + next.speechPadSamples - win
       next := { next with triggered := false, tempEnd := 0 }
       pure (some (.stop stopPos), next)
   else

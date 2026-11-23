@@ -13,7 +13,7 @@ def testRiemannianNanoGPTPrototypeSmoke : IO Unit := do
   let stats ← runPrototype cfg
   LeanTest.assertEqual stats.steps cfg.trainSteps
   LeanTest.assertTrue (stats.avgLoss > 0.0) s!"Expected avgLoss > 0, got {stats.avgLoss}"
-  LeanTest.assertTrue (isFiniteFloat stats.finalLoss) s!"Expected finite finalLoss, got {stats.finalLoss}"
+  LeanTest.assertTrue (stats.finalLoss.isFinite) s!"Expected finite finalLoss, got {stats.finalLoss}"
   LeanTest.assertTrue (stats.finalDiagnostics.factorRank > 0)
     s!"Expected positive factorRank, got {stats.finalDiagnostics.factorRank}"
 
@@ -28,8 +28,8 @@ def testRiemannianNanoGPTBenchmarkStats : IO Unit := do
   LeanTest.assertEqual stats.steps cfg.benchmarkSteps
   LeanTest.assertTrue (stats.elapsedNs > 0) s!"Expected positive elapsedNs, got {stats.elapsedNs}"
   LeanTest.assertTrue (stats.elapsedMs > 0.0) s!"Expected positive elapsedMs, got {stats.elapsedMs}"
-  LeanTest.assertTrue (isFiniteFloat stats.avgLoss) s!"Expected finite avgLoss, got {stats.avgLoss}"
-  LeanTest.assertTrue (isFiniteFloat stats.finalLoss) s!"Expected finite finalLoss, got {stats.finalLoss}"
+  LeanTest.assertTrue (stats.avgLoss.isFinite) s!"Expected finite avgLoss, got {stats.avgLoss}"
+  LeanTest.assertTrue (stats.finalLoss.isFinite) s!"Expected finite finalLoss, got {stats.finalLoss}"
   LeanTest.assertTrue (stats.finalDiagnostics.gradientNorm >= 0.0)
     s!"Expected non-negative gradientNorm, got {stats.finalDiagnostics.gradientNorm}"
 
@@ -46,5 +46,5 @@ def testRiemannianNanoGPTSampledFisherPrototype : IO Unit := do
   }
   let stats ← runPrototype cfg
   LeanTest.assertEqual stats.steps cfg.trainSteps
-  LeanTest.assertTrue (isFiniteFloat stats.finalLoss) s!"Expected finite finalLoss, got {stats.finalLoss}"
+  LeanTest.assertTrue (stats.finalLoss.isFinite) s!"Expected finite finalLoss, got {stats.finalLoss}"
   LeanTest.assertEqual stats.finalDiagnostics.factorRank 4

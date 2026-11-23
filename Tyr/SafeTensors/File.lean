@@ -30,16 +30,6 @@ structure SafeTensorsHandle where
   dataOffset : Nat
   entries : Std.HashMap String Entry
 
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
-
-private def getNats? (j : Json) : Option (Array Nat) :=
-  match j with
-  | .arr xs => xs.mapM fun x => (FromJson.fromJson? x : Except String Nat).toOption
-  | _ => none
-
 private def readU64LE? (bytes : ByteArray) (offset : Nat) : Option UInt64 :=
   if offset + 8 > bytes.size then
     none
@@ -56,20 +46,20 @@ private def readBytes (handle : IO.FS.Handle) (count : Nat) : IO ByteArray := do
   pure bytes
 
 private def parseEntry (name : String) (json : Json) (dataSize : Nat) : Except String Entry := do
-  let some dtypeJson := getObjVal? json "dtype"
+  let some dtypeJson := (json.getObjVal? "dtype").toOption
     | throw s!"SafeTensors entry '{name}' is missing 'dtype'"
   let .str tag := dtypeJson
     | throw s!"SafeTensors entry '{name}' has non-string 'dtype'"
   let some (dtype, width) := DType.all.findSome? fun dtype =>
       dtype.safeTensorFormat?.bind fun (t, w) => if t == tag then some (dtype, w) else none
     | throw s!"SafeTensors entry '{name}' has unsupported dtype '{tag}'"
-  let some shapeJson := getObjVal? json "shape"
+  let some shapeJson := (json.getObjVal? "shape").toOption
     | throw s!"SafeTensors entry '{name}' is missing 'shape'"
-  let some dims := getNats? shapeJson
+  let some dims := (fromJson? shapeJson : Except String (Array Nat)).toOption
     | throw s!"SafeTensors entry '{name}' has a malformed 'shape'"
-  let some offsetsJson := getObjVal? json "data_offsets"
+  let some offsetsJson := (json.getObjVal? "data_offsets").toOption
     | throw s!"SafeTensors entry '{name}' is missing 'data_offsets'"
-  let some #[dataStart, dataEnd] := getNats? offsetsJson
+  let some #[dataStart, dataEnd] := (fromJson? offsetsJson : Except String (Array Nat)).toOption
     | throw s!"SafeTensors entry '{name}' has malformed 'data_offsets'"
   if dataStart > dataEnd then
     throw s!"SafeTensors entry '{name}' has an invalid data_offsets range"
@@ -137,7 +127,7 @@ def readWeightMap (indexPath : System.FilePath) : IO (Array (String × String)) 
   let json ← match Json.parse (← IO.FS.readFile indexPath) with
     | .ok json => pure json
     | .error err => throw (invalid s!"failed to parse JSON: {err}")
-  let some weightMapJson := getObjVal? json "weight_map"
+  let some weightMapJson := (json.getObjVal? "weight_map").toOption
     | throw (invalid "missing 'weight_map'")
   let .obj weightMap := weightMapJson
     | throw (invalid "'weight_map' must be a JSON object")

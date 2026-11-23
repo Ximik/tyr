@@ -43,17 +43,6 @@ private def minAsrInputSeconds : Float := 0.5
 private def maxAsrInputSeconds : Float := 1200.0
 private def maxForceAlignInputSeconds : Float := 180.0
 
-private def padRightWithZeros (xs : Array Float) (target : Nat) : Array Float :=
-  if xs.size >= target then
-    xs
-  else
-    Id.run do
-      let mut out := xs
-      let pad := target - xs.size
-      for _ in [:pad] do
-        out := out.push 0.0
-      out
-
 private def argminFloatArray (xs : Array Float) : Nat :=
   if xs.isEmpty then
     0
@@ -149,7 +138,7 @@ private def splitAudioIntoChunks
         else
           chunks.map (fun (c, off) =>
             if c.size < minLenRaw then
-              (padRightWithZeros c minLenRaw, off)
+              (c.rightpad minLenRaw 0.0, off)
             else
               (c, off))
 
@@ -194,12 +183,9 @@ private def validateForcedLanguage
     if s.isEmpty then
       pure none
     else
-      match normalizeLanguageName s with
-      | .error e => throw <| IO.userError e
-      | .ok ln =>
-        match validateLanguage supportedLanguages ln with
-        | .error e => throw <| IO.userError e
-        | .ok _ => pure (some ln)
+      let ln ← IO.ofExcept (normalizeLanguageName s)
+      IO.ofExcept (validateLanguage supportedLanguages ln)
+      pure (some ln)
 
 private def preparePromptInputIds
     {cfg : Qwen3ASRConfig}
@@ -208,14 +194,8 @@ private def preparePromptInputIds
     (audioLen : Nat)
     : IO (Sigma (fun seq => Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 })) := do
   let processor : Qwen3ASRProcessor := {}
-  let promptIds ←
-    match processor.encodeWithExpandedAudioTokenIds
-      tok
-      prompt
-      #[audioLen]
-      cfg.thinkerConfig.audioTokenId with
-    | .ok ids => pure ids
-    | .error e => throw <| IO.userError e
+  let promptIds ← IO.ofExcept <|
+    processor.encodeWithExpandedAudioTokenIds tok prompt #[audioLen] cfg.thinkerConfig.audioTokenId
   let idsVals : Array Int64 := promptIds.map (fun id => Int64.ofNat id.toNat)
 
   let seq : Nat := idsVals.size
@@ -271,7 +251,7 @@ private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : Nat}
   let validFrames := validFramesTensor.itemInt.toInt.toNat
   let audioLenRaw := AudioEncoderConfig.featExtractOutputLength validFrames
   let audioLenCap := AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames
-  pure (if audioLenRaw <= audioLenCap then audioLenRaw else audioLenCap)
+  pure (min audioLenRaw audioLenCap)
 
 private def alignSingleWithModel
     {alignCfg : Qwen3ASRConfig}
@@ -287,14 +267,9 @@ private def alignSingleWithModel
   let alignModel := TensorStruct.detach alignModel
   let (wordList, alignRaw) := Qwen3ForceAlignProcessor.encodeTimestampText text language
   let processor : Qwen3ASRProcessor := {}
-  let alignIdsArr ←
-    match processor.encodeWithExpandedAudioTokenIds
-      alignTok
-      alignRaw
-      #[audioLen]
-      alignCfg.thinkerConfig.audioTokenId with
-    | .ok ids => pure ids
-    | .error e => throw <| IO.userError e
+  let alignIdsArr ← IO.ofExcept <|
+    processor.encodeWithExpandedAudioTokenIds alignTok alignRaw #[audioLen]
+      alignCfg.thinkerConfig.audioTokenId
   let seqAlign : Nat := alignIdsArr.size
   if seqAlign == 0 then
     pure none
@@ -894,13 +869,9 @@ def loadFromPretrained
   pure { cfg, device, dtype, model, tok, preprocessor, melBinsMatch }
 
 private def validateAlignLanguage (aligner : Qwen3ForcedAligner) (language : String) : IO String := do
-  let ln ←
-    match normalizeLanguageName language with
-    | .ok s => pure s
-    | .error e => throw <| IO.userError e
-  match validateLanguage aligner.cfg.supportLanguages ln with
-  | .ok _ => pure ln
-  | .error e => throw <| IO.userError e
+  let ln ← IO.ofExcept (normalizeLanguageName language)
+  IO.ofExcept (validateLanguage aligner.cfg.supportLanguages ln)
+  pure ln
 
 private def broadcastTexts (n : Nat) (texts : Array String) : IO (Array String) := do
   if n == 0 then

@@ -231,7 +231,7 @@ private def trimDanglingTailAfterPeriod (text : String) : String :=
               let ww := w.trimAscii.toString
               if ww.isEmpty then acc else acc + 1)
             0
-        let isLongText := t.toList.length > 200
+        let isLongText := t.length > 200
         if isLongText && suffixWords <= 8 then
           let body := (String.intercalate "." restRev.reverse).trimAscii.toString
           if body.isEmpty then
@@ -337,19 +337,11 @@ private def decodeTemperatures (opts : WhisperDecodeOptions) : Array Float :=
         guard := guard + 1
       out
 
-private def uniqueTokenCount (ids : Array UInt32) : Nat :=
-  Id.run do
-    let mut uniq : Array UInt32 := #[]
-    for id in ids do
-      if !uniq.contains id then
-        uniq := uniq.push id
-    uniq.size
-
 private def approxCompressionRatio (ids : Array UInt32) : Float :=
   if ids.isEmpty then
     0.0
   else
-    let uniq := uniqueTokenCount ids
+    let uniq := ids.toList.eraseDups.length
     if uniq == 0 then
       0.0
     else
@@ -380,12 +372,7 @@ private def hasRepeatedSingleTail (ids : Array UInt32) (runLen : Nat) : Bool :=
   else
     let tail := ids.extract (ids.size - runLen) ids.size
     let first := tail[0]!
-    Id.run do
-      let mut ok := true
-      for id in tail do
-        if ok && id != first then
-          ok := false
-      ok
+    tail.all (· == first)
 
 private def hasRepetitionLoop (ids : Array UInt32) : Bool :=
   hasRepeatedSingleTail ids 8 ||
@@ -570,7 +557,7 @@ private def topKLogProbPairs (logProbs : Array Float) (k : Nat) : Array (Nat × 
       for i in [:logProbs.size] do
         pairs := pairs.push (i, logProbs[i]!)
       let sorted := pairs.qsort (fun a b => a.2 > b.2)
-      sorted.extract 0 (Nat.min k sorted.size)
+      sorted.extract 0 k
 
 private def tokenLogProbFromLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })

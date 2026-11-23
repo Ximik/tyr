@@ -75,7 +75,7 @@ def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : Nat)
     let keys ← cloneInferenceIO template
     let values ← cloneInferenceIO template
     layers := layers.push { keys, values }
-  let seqLens := Array.mk (List.replicate batch (0 : Nat))
+  let seqLens := Array.replicate batch (0 : Nat)
   return { layers, seqLens, maxLen := maxSeqLen }
 
 private def Cache.validate

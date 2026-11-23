@@ -279,7 +279,7 @@ private def featureLengthsFromFeatureMask (cfg : ThinkerConfig) {batch featureSe
   let _ := cfg
   let featureLensTensor : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.sumDim (Tensor.toInt64 featureAttentionMask) 1 false).reshape #[batch]
   let featureLensRaw := (← Tensor.toUInt64Array featureLensTensor).map (·.toNat)
-  pure <| featureLensRaw.map (fun l => if l <= featureSeq then l else featureSeq)
+  pure <| featureLensRaw.map (min · featureSeq)
 
 private def getPlaceholderMask2d (cfg : ThinkerConfig) {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -509,17 +509,6 @@ private partial def greedyLoopCached {batch maxLen : Nat}
         decodeStepFromEmbedWithCache m cosAll sinAll nextEmb caches (by omega)
       greedyLoopCached m cosAll sinAll eosTokenIds eosVector (remaining - 1) caches' nextLogits (some finished') appended (by omega)
 
-private def isUInt32Prefix (pref xs : Array UInt32) : Bool :=
-  if pref.size > xs.size then
-    false
-  else
-    Id.run do
-      let mut ok := true
-      for i in [:pref.size] do
-        if ok && pref[i]! != xs[i]! then
-          ok := false
-      ok
-
 /-- Reusable streaming prompt prefill state for batch=1 greedy decode.
     Carries text-model KV/cos/sin state for the current prompt prefix. -/
 structure StreamingPromptCache (cfg : ThinkerConfig) (dtype : DType := .Float32) where
@@ -612,7 +601,7 @@ private def streamingPromptCacheFor {seq : Nat}
   match prefixCache with
   | some c =>
     if h : c.seq ≤ seq ∧ seq + promptCacheReserve maxNewTokens ≤ c.maxLen ∧
-        isUInt32Prefix c.promptTokenIds promptTokenIds = true then
+        c.promptTokenIds.isPrefixOf promptTokenIds = true then
       let ⟨extended, hSeqEq, hMax⟩ ←
         extendStreamingPromptCacheFromEmbeds m c inputsEmbeds promptTokenIds h.1 (by omega)
       pure ⟨extended, hSeqEq, hMax ▸ h.2.1⟩
@@ -649,7 +638,7 @@ def forwardWithAux {batch seq frames : Nat}
         let raw := rawVals.getD b 0
         let valid := validCounts.getD b 0
         let pad := seq - valid
-        let adj := if raw >= pad then raw - pad else 0
+        let adj := raw - pad
         out := out.push (Int64.ofNat adj)
       let deltas : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? out #[batch, 1])).to device
       pure (some deltas)

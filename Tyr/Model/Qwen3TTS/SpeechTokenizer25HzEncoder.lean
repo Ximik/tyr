@@ -333,13 +333,6 @@ private def encodeMelChunk {melFrames : Nat}
       let dist : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.sub (Tensor.add x2e e2e) (Tensor.mulScalar dot 2.0)
       Tensor.reshape (Tensor.argmax (Tensor.mulScalar dist (-1.0)) 1) #[vqFrames melFrames] (by simp +zetaDelta)
 
-private def appendAll (dst src : Array UInt64) : Array UInt64 :=
-  Id.run do
-    let mut out := dst
-    for x in src do
-      out := out.push x
-    out
-
 /-- Encode mono waveform to flat codec IDs for the 25Hz tokenizer architecture.
     Returns `(numCodeGroups, flatCodes)` where `numCodeGroups = 1`. -/
 def encodeWaveToCodes
@@ -378,7 +371,7 @@ def encodeWaveToCodes
         let idx : Tensor { shape := #[vqFrames cur], dtype := .Int64, device := device } := encodeMelChunk m melChunk
           (by simp only [conv2Frames, cur, remaining, chunkMel]; split <;> omega)
         let vals ← Tensor.toUInt64Array idx
-        outVals := appendAll outVals vals
+        outVals := outVals ++ vals
       start := start + cur
     else
       break

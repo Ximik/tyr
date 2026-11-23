@@ -3,13 +3,10 @@ import LeanTest
 
 open torch.qwen25omni
 
-private def ensureDir (path : String) : IO Unit :=
-  IO.FS.createDirAll ⟨path⟩
-
 @[test]
 def testQwen25OmniHubShardFilesFromIndex : IO Unit := do
   let dir := "/tmp/qwen25omni_hub_index_test"
-  ensureDir dir
+  IO.FS.createDirAll dir
   let indexPath := s!"{dir}/model.safetensors.index.json"
   let json :=
     "{\"metadata\":{},\"weight_map\":{" ++
@@ -28,7 +25,7 @@ def testQwen25OmniHubShardFilesFromIndex : IO Unit := do
 @[test]
 def testQwen25OmniHubResolveLocalPretrainedDir : IO Unit := do
   let localDir := "/tmp/qwen25omni_hub_local_dir"
-  ensureDir localDir
+  IO.FS.createDirAll localDir
   IO.FS.writeFile s!"{localDir}/config.json" "{}"
   IO.FS.writeFile s!"{localDir}/model.safetensors" ""
 

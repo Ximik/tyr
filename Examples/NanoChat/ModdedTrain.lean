@@ -738,9 +738,7 @@ private def loadCheckpointAt (cfg : moddedGpt.Config) (path : String) (quiet : B
       (asParameters := false)
     let loadedDualState ← match stateMetadata? with
       | some metadata => do
-          let dualTemplate ← match restoreDualStateLayout templateOpt.dualState metadata with
-            | .ok state => pure state
-            | .error err => throw <| IO.userError err
+          let dualTemplate ← IO.ofExcept (restoreDualStateLayout templateOpt.dualState metadata)
           checkpoint.loadParams dualTemplate path "optim_dual" (asParameters := false)
       | none => do
           -- Only legacy flat checkpoints lack layout metadata. Their optional
