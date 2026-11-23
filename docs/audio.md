@@ -56,8 +56,7 @@ One namespace quirk: the module is named `Tyr.Inference.KVCache` but declares
 `namespace torch.Generator.KVCache` (`Tyr/Inference/KVCache.lean`), a
 leftover from its NanoChat origin. Call sites write
 `torch.Generator.KVCache.Cache`, or `open torch.Generator` and use
-`KVCache.Cache`. The older `Examples/NanoChat/Generator/KVCache.lean` is a thin
-re-export shim; new code should import `Tyr.Inference.KVCache` directly.
+`KVCache.Cache`.
 
 **Position bookkeeping is the caller's job.** `Cache.attendLayer` appends and
 attends but does *not* advance the sequence position. Call
