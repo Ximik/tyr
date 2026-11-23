@@ -130,20 +130,11 @@ The dual norm is the sum of row norms (ℓ₁ of row ℓ₂ norms).
 structure Embedding (vocabSize dim : Nat) (dtype : torch.DType := .Float32)
     (device : torch.Device := .CPU) where
   weight : torch.Tensor ⟨#[vocabSize, dim], dtype, device⟩
-
-derive_tensor_struct_for Embedding
+  deriving torch.TensorStruct
 
 variable {dtype : torch.DType} {device : torch.Device}
 
 namespace Embedding
-
-instance : torch.TensorStruct (Embedding vocabSize dim dtype device) where
-  map f e := { weight := torch.TensorStruct.map f e.weight }
-  mapM f e := do
-    let w' ← torch.TensorStruct.mapM f e.weight
-    pure { weight := w' }
-  zipWith f e1 e2 := { weight := torch.TensorStruct.zipWith f e1.weight e2.weight }
-  fold f init e := torch.TensorStruct.fold f init e.weight
 
 /-- Initialize with small random values -/
 def init (vocabSize dim : Nat) : IO (Embedding vocabSize dim) := do

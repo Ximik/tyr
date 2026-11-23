@@ -46,7 +46,7 @@ structure RMSNorm (dim : UInt64) (dtype : DType := .Float32)
 
 `Tyr/Module/Derive.lean` registers two deriving handlers (`Derive.lean`):
 
-- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector α n`, `Static α`, and `Frozen σ`; `Derive.lean` adds the pair instance `α × β`. Parametric structures (shape or type parameters) are supported.
+- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector α n`, `Static α`, `Frozen σ` and pairs `α × β`. Parametric structures (shape or type parameters) are supported.
 - `deriving Model` — one-shot derivation of `TensorStruct` + `ToTensorStructSchema` + `TensorStructFlatten` (`Derive.lean`; `Model` is a marker class at `Tyr/TensorStruct.lean`, the two schema handlers come from `Tyr/TensorStruct/Schema.lean`). Use it when the structure should also serialize/flatten, e.g. for checkpointing.
 
 ### Tyr/Modular: normed modules and budgets
@@ -69,7 +69,7 @@ Atomic instances (`Tyr/Modular/Atomic.lean`): `Linear` uses the spectral norm on
 
 Composition is recursive (`Tyr/Modular/Compose.lean`):
 
-- `structure Sequential (M₁ M₂ : Type) where first second` (`Compose.lean`) marks M₂-after-M₁ composition. Its norm is `max(ν₂·‖w₁‖, ‖w₂‖)`, sensitivities multiply (`ν = ν₁·ν₂`), and `μ = max(μ₁·ν₂, μ₂)` — the paper's formulas (`Compose.lean`). Build one with `compose m₁ m₂` or the `⊛` infix (`Compose.lean`).
+- `structure Sequential (M₁ M₂ : Type) where first second` (`Compose.lean`) marks M₂-after-M₁ composition. Its norm is `max(ν₂·‖w₁‖, ‖w₂‖)`, sensitivities multiply (`ν = ν₁·ν₂`), and `μ = max(μ₁·ν₂, μ₂)` — the paper's formulas (`Compose.lean`).
 - The plain product `M₁ × M₂` is parallel composition with ℓ₂ norm combination and `max` sensitivity (`Compose.lean`).
 - `Array M` and `Vector M n` aggregate norms by ℓ₂ but multiply `nu` across elements (`Compose.lean`) — sequential sensitivity with parallel norm, which the file header itself flags as a mixture.
 
@@ -256,7 +256,7 @@ open torch Tyr.Modular
 -- Sequential composition: norms and sensitivities combine by the paper's formulas
 let l1 ← Linear.init 10 20
 let l2 ← Linear.init 20 5
-let net := compose l1 l2                 -- Sequential (Linear 10 20) (Linear 20 5)
+let net : Sequential (Linear 10 20) (Linear 20 5) := ⟨l1, l2⟩
 let n := NormedModule.norm net           -- max(ν₂·‖l1‖, ‖l2‖)
 let ν := NormedModule.nu net             -- ν₁ · ν₂
 

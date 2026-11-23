@@ -64,7 +64,7 @@ structure ParamState (σ : StaticSpec) where
   secondMoment : Option (Tensor σ.sumSpec) := none
   /-- Step count for bias correction -/
   step : Nat := 0
-  deriving Repr
+  deriving Repr, TensorStruct
 
 /-- Initialize state for a parameter. -/
 def initParamState {σ : StaticSpec} (_param : Tensor σ) : ParamState σ := {
@@ -72,38 +72,6 @@ def initParamState {σ : StaticSpec} (_param : Tensor σ) : ParamState σ := {
   secondMoment := none
   step := 0
 }
-
-instance {σ : StaticSpec} : TensorStruct (ParamState σ) where
-  map f ps := { ps with
-    momentumBuffer := ps.momentumBuffer.map (TensorStruct.map f),
-    secondMoment := ps.secondMoment.map (TensorStruct.map f)
-  }
-  mapM f ps := do
-    let momentumBuffer ← match ps.momentumBuffer with
-      | some t => some <$> TensorStruct.mapM f t
-      | none => pure none
-    let secondMoment ← match ps.secondMoment with
-      | some t => some <$> TensorStruct.mapM f t
-      | none => pure none
-    return { ps with momentumBuffer, secondMoment }
-  zipWith f ps1 ps2 := {
-    momentumBuffer := match ps1.momentumBuffer, ps2.momentumBuffer with
-      | some t1, some t2 => some (TensorStruct.zipWith f t1 t2)
-      | _, _ => none
-    secondMoment := match ps1.secondMoment, ps2.secondMoment with
-      | some t1, some t2 => some (TensorStruct.zipWith f t1 t2)
-      | _, _ => none
-    step := ps1.step
-  }
-  fold f acc ps :=
-    let acc := match ps.momentumBuffer with
-      | some t => TensorStruct.fold f acc t
-      | none => acc
-    match ps.secondMoment with
-      | some t => TensorStruct.fold f acc t
-      | none => acc
-
-derive_tensor_struct_for ParamState
 
 /-- Update momentum buffer with orthogonalized gradient.
 

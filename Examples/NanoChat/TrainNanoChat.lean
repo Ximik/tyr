@@ -249,7 +249,7 @@ def runTraining (args : Args) (env : TrainEnvState) : IO Unit := do
     IO.println s!"Training for {hp.numIterations + hp.extensionIterations} iterations"
     IO.println s!"  Cooldown fraction: {hp.cooldownFrac}"
     IO.println s!"  Gradient accumulation: {effectiveGradAccumSteps hp worldSize}"
-    IO.println s!"  Validation interval: {hp.valInterval}"
+    IO.println s!"  Validation interval: {PosNat.renderOrNone hp.valInterval}"
     IO.println ""
 
   if isMaster then

@@ -299,7 +299,7 @@ unsafe def main (rawArgs : List String) : IO UInt32 := do
   IO.println s!"  tokenizer:  {tokenizerPath}"
   IO.println s!"  device:     {deviceToString device}"
   IO.println s!"  model:      depth={cfg.nLayer} vocab={cfg.vocabSize}"
-  IO.println s!"  decoding:   max_new={args.maxNewTokens} temp={args.temperature} top_k={args.topK} eos={eosToken}"
+  IO.println s!"  decoding:   max_new={args.maxNewTokens} temp={args.temperature} top_k={PosNat.renderOrNone args.topK} eos={eosToken}"
   IO.println ""
 
   let maybeCkpt ← loadCheckpoint cfg checkpointPath (device := device)

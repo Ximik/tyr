@@ -32,7 +32,7 @@ example : FloatingTensorStruct (Parameters .Float64 (device := .CPU)) := inferIn
 example {dtype : DType} {device : Device} [DType.RealFloating dtype] :
     FloatingTensorStruct (Parameters dtype (device := device)) := inferInstance
 
-example : Optim.GradientTransformation (Parameters .Float32 (device := .CPU)) Optim.EmptyState :=
+example : Optim.GradientTransformation (Parameters .Float32 (device := .CPU)) Unit :=
   Optim.sgd 0.1
 example : Optim.GradientTransformation (Parameters .Float64 (device := .CPU))
     (Optim.AdamWState (Parameters .Float64 (device := .CPU))) := Optim.adamw

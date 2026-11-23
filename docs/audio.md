@@ -17,12 +17,11 @@ aggregator — import the submodules directly.
 
 ### Audio: thin façades over C++ globals
 
-All three audio modules are `@[extern]` bindings; every piece of state (the
+Both audio modules are `@[extern]` bindings; every piece of state (the
 AudioQueue, a sample FIFO, lifecycle mutexes) lives in C++:
 
 | Lean module | C++ backing | Off macOS |
 | --- | --- | --- |
-| `Tyr/Audio/FloatBuffer.lean` | `cc/src/float_buffer.cpp` | works everywhere |
 | `Tyr/Audio/AppleInput.lean` | `cc/src/apple_audio_input.mm` | `start` raises `IO.userError`; `read`/`readBuffer` return empty, `stop` is a no-op |
 | `Tyr/Audio/AppleOutput.lean` | `cc/src/apple_audio_output.mm` | silent no-ops |
 
@@ -38,9 +37,9 @@ Only one capture session can be active at a time.
 
 The currency at the model boundary is a 16 kHz mono waveform as `Array Float`
 (see [Audio and speech models](models/audio-speech.md)). Inside capture loops,
-samples flow through `FloatBuffer` to avoid per-element boxing of
-`Array Float`; convert once with `FloatBuffer.toArray` when handing off to a
-model frontend.
+samples flow through core `FloatArray` (from `readBuffer`) to avoid per-element
+boxing of `Array Float`; convert once with `.data` when handing off to a model
+frontend.
 
 ### Inference: a preallocated, shape-indexed KV cache
 
@@ -73,40 +72,13 @@ checked cast APIs. See
 
 ## Key APIs
 
-### `FloatBuffer` (`Tyr/Audio/FloatBuffer.lean`)
-
-Opaque contiguous `Float64` buffer backed by native memory, registered as a
-Lean external class with a finalizer. Mutation is gated behind `IO` and returns
-the same buffer for chaining, enforcing linear use.
-
-```lean
-opaque FloatBuffer : Type := Unit
-
-namespace FloatBuffer
-  opaque mkEmpty (capacity : @& Nat) : IO FloatBuffer
-  opaque size (buf : @& FloatBuffer) : Nat                      -- pure, O(1)
-  opaque uget (buf : @& FloatBuffer) (i : @& Nat) : Float       -- unchecked!
-  opaque rms (buf : @& FloatBuffer) : IO Float
-  opaque push (buf : FloatBuffer) (x : Float) : IO FloatBuffer
-  opaque append (buf : FloatBuffer) (src : @& FloatBuffer) : IO FloatBuffer
-  opaque appendArray (buf : FloatBuffer) (arr : @& Array Float) : IO FloatBuffer
-  opaque clear (buf : FloatBuffer) : IO FloatBuffer
-  opaque keepLast (buf : FloatBuffer) (n : @& Nat) : IO FloatBuffer  -- memmove
-  opaque toArray (buf : @& FloatBuffer) : IO (Array Float)      -- boxes; use at boundaries
-end FloatBuffer
-```
-
-Two sharp edges: `uget` performs no bounds check, and the auto-derived
-`Inhabited` instance is the `Unit` witness, not a valid native buffer — never
-call an op on `(default : FloatBuffer)`.
-
 ### `Tyr.Audio.AppleInput` (`Tyr/Audio/AppleInput.lean`)
 
 ```lean
 opaque start (sampleRate : UInt64 := 16000) (channels : UInt64 := 1)
     (bufferMs : UInt64 := 100) : IO Unit
 opaque read (maxSamples : UInt64) (blockMs : UInt64 := 250) : IO (Array Float)
-opaque readBuffer (maxSamples : UInt64) (blockMs : UInt64 := 250) : IO FloatBuffer
+opaque readBuffer (maxSamples : UInt64) (blockMs : UInt64 := 250) : IO FloatArray
 opaque stop : IO Unit
 opaque rms (xs : @& Array Float) : IO Float
 ```
@@ -119,8 +91,7 @@ opaque rms (xs : @& Array Float) : IO Float
   timeout — always handle the empty case.
 - `readBuffer` is the unboxed variant; prefer it in tight capture loops.
   `read` boxes every sample and is fine for hop-wise streaming.
-- `rms` is a native-loop RMS over a boxed array (works on all platforms); the
-  `FloatBuffer.rms` method covers the unboxed case.
+- `rms` is a native-loop RMS over a boxed array (works on all platforms).
 - Off macOS, only `start` fails loudly (`IO.userError "audio input is only
   supported on macOS"`); `read`/`readBuffer` just return empty results, so a
   capture loop that never checks for `start` failure would spin silently.
@@ -182,13 +153,13 @@ not automatically replace them.
 Reconstructed example (from `Examples/Whisper/VoiceMode.lean`, beeps
 and `start`/`stop` at lines 255-256 and 368-393). The real demo records until
 trailing silence, keeping a 500 ms pre-roll so speech onset is not clipped;
-audio flows through unboxed `FloatBuffer`s and is boxed once at the model
-boundary:
+audio flows through unboxed `FloatArray`s and is boxed once at the model
+boundary. `appendSamples`, `keepLast` and `rms` are small `FloatArray` folds
+defined in that file:
 
 ```lean
 import Tyr.Audio.AppleInput
 import Tyr.Audio.AppleOutput
-import Tyr.Audio.FloatBuffer
 
 /-- Record 16 kHz mono audio until 1.5 s of trailing silence. -/
 def recordUntilSilence : IO (Array Float) := do
@@ -197,25 +168,25 @@ def recordUntilSilence : IO (Array Float) := do
   let preRollSamples := sampleRate.toNat / 2      -- 500 ms
   Tyr.Audio.AppleOutput.beepStart                 -- cue the user
   Tyr.Audio.AppleInput.start sampleRate 1 100
-  let mut buf ← FloatBuffer.mkEmpty (sampleRate.toNat * 10)
+  let mut buf := FloatArray.emptyWithCapacity (sampleRate.toNat * 10)
   let mut recording := false
   let mut silenceSamples : Nat := 0
   while buf.size < sampleRate.toNat * 30 do       -- 30 s hard cap
     let pcm ← Tyr.Audio.AppleInput.readBuffer (sampleRate / 10) 250  -- 100 ms chunks
     if pcm.size == 0 then continue                -- read timed out
-    let level ← pcm.rms
-    buf ← buf.append pcm
+    let level := rms pcm
+    buf := appendSamples buf pcm
     if level >= speechRmsThreshold then
       recording := true
       silenceSamples := 0
     else if !recording then
-      buf ← buf.keepLast preRollSamples           -- slide the pre-roll window
+      buf := keepLast buf preRollSamples          -- slide the pre-roll window
     else
       silenceSamples := silenceSamples + pcm.size
       if silenceSamples >= sampleRate.toNat * 3 / 2 then break  -- 1.5 s silence
   Tyr.Audio.AppleInput.stop
   if !recording then Tyr.Audio.AppleOutput.beepNoSpeech
-  buf.toArray                                     -- box once, hand to the model
+  pure buf.data                                   -- box once, hand to the model
 ```
 
 For hop-wise streaming recognition, read fixed-size hops with the boxed

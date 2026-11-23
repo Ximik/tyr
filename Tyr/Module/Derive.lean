@@ -67,21 +67,6 @@ instance : TensorStruct MyLayer where
 ```
 -/
 
-/-! ## Instance for Single Tensor
-
-A single tensor is trivially a TensorStruct.
--/
-
-/-! ## Tuple Instances
-
-Allow pairs of TensorStructs to be TensorStructs.
--/
-
-instance [TensorStruct α] [TensorStruct β] : TensorStruct (α × β) where
-  map f pair := (TensorStruct.map f pair.1, TensorStruct.map f pair.2)
-  mapM f pair := do pure (← TensorStruct.mapM f pair.1, ← TensorStruct.mapM f pair.2)
-  zipWith f p1 p2 := (TensorStruct.zipWith f p1.1 p2.1, TensorStruct.zipWith f p1.2 p2.2)
-  fold f init pair := TensorStruct.fold f (TensorStruct.fold f init pair.1) pair.2
 
 /-! ## Deriving Handler for TensorStruct -/
 

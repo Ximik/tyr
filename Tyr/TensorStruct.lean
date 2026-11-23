@@ -378,6 +378,12 @@ Basic types contain no tensors, so they are passed through unchanged.
 This allows structures with mixed tensor and non-tensor fields to derive TensorStruct.
 -/
 
+instance : TensorStruct Unit where
+  map _ u := u
+  mapM _ u := pure u
+  zipWith _ u _ := u
+  fold _ init _ := init
+
 instance : TensorStruct Bool where
   map _ b := b
   mapM _ b := pure b
@@ -516,6 +522,7 @@ instance {P : StaticSpec → Prop} {σ : StaticSpec} [TensorStructFor.Fact (P σ
   fold _ initial _ := initial
 
 instance {P : StaticSpec → Prop} : TensorStructFor P (Static α) := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Unit := metadataTraversal P _
 instance {P : StaticSpec → Prop} : TensorStructFor P Bool := metadataTraversal P _
 instance {P : StaticSpec → Prop} : TensorStructFor P Float := metadataTraversal P _
 instance {P : StaticSpec → Prop} : TensorStructFor P UInt8 := metadataTraversal P _

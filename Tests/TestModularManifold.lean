@@ -75,7 +75,7 @@ def testModularBudgetBridgeProducesFiniteMultiplier : IO Unit := do
   let modules : Array (StiefelLinear 8 16 × StiefelLinear 16 16) := #[(l1, l2)]
 
   let merged : Array (Sequential (StiefelLinear 8 16) (StiefelLinear 16 16)) :=
-    modules.map (fun (a, b) => Sequential.mk' a b)
+    modules.map (fun (a, b) => ⟨a, b⟩)
   let scales := sequentialDownstreamScales {} merged
   LeanTest.assertTrue (!scales.isEmpty) "Expected non-empty modular scale array"
   for s in scales do
@@ -137,7 +137,7 @@ def testHyperbolicVectorBenchmarkPositive : IO Unit := do
 def testManifoldUpdatableSequentialComposes : IO Unit := do
   let l1 ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 8 16 true
   let l2 ← ManifoldLinear.init (M := Tyr.Manifolds.Grassmann) 16 16 true
-  let net : Sequential (StiefelLinear 8 16) (GrassmannLinear 16 16) := Sequential.mk' l1 l2
+  let net : Sequential (StiefelLinear 8 16) (GrassmannLinear 16 16) := ⟨l1, l2⟩
 
   let g1w ← Tensor.randn #[16, 8] false
   let g1b ← Tensor.randn #[16] false

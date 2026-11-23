@@ -160,8 +160,7 @@ SRCS := \
 	tyr_distributed.cpp\
 	tyr_polar.cpp\
 	tyr_media_stub.cpp\
-	tyr_parquet.cpp\
-	float_buffer.cpp
+	tyr_parquet.cpp
 MM_SRCS :=
 ifeq ($(UNAME_S),Darwin)
 MM_SRCS += apple_mps.mm

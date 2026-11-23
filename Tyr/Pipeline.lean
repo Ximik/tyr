@@ -1,6 +1,7 @@
 import Tyr.Torch
 import Tyr.Distributed
 import Tyr.Train.RunLedger
+import Tyr.Log
 import Lean.Data.Json.Basic
 import Lean.Data.Json.Parser
 import Lean.Data.Json.Printer
@@ -364,12 +365,6 @@ structure PipelineConfig where
   runId : String := ""
   deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
 
-/-- Log handlers for pipeline progress. Library code stays silent unless these are supplied. -/
-structure LogHandlers where
-  onInfo : String → IO Unit := fun _ => pure ()
-  onError : String → IO Unit := fun _ => pure ()
-  deriving Inhabited
-
 /-- Pipeline execution state -/
 structure PipelineState where
   /-- Configuration -/
@@ -385,7 +380,7 @@ structure PipelineState where
   /-- World size -/
   worldSize : Nat := 1
   /-- Logging handlers -/
-  logHandlers : LogHandlers := {}
+  logHandlers : Log.Handlers := {}
   deriving Inhabited
 
 /-- Check if this is the master rank -/
@@ -540,7 +535,7 @@ def recordMetrics (metrics : List (String × String)) : PipelineM Unit := do
 /-! ## Pipeline Initialization and Cleanup -/
 
 /-- Initialize pipeline state with explicit log handlers. -/
-def initPipelineWithHandlers (config : PipelineConfig) (logHandlers : LogHandlers := {}) : IO PipelineState := do
+def initPipelineWithHandlers (config : PipelineConfig) (logHandlers : Log.Handlers := {}) : IO PipelineState := do
   -- Check distributed status
   let isDistributed ← dist.isInitialized
   let (rank, worldSize) ← if isDistributed then
@@ -646,7 +641,7 @@ def finalizePipeline (state : PipelineState) : IO Unit := do
       clearCheckpoint baseDir
 
 /-- Run a pipeline action with explicit log handlers. -/
-def runPipelineWithHandlers (config : PipelineConfig) (logHandlers : LogHandlers := {})
+def runPipelineWithHandlers (config : PipelineConfig) (logHandlers : Log.Handlers := {})
     (action : PipelineM α) : IO α := do
   let initialState ← initPipelineWithHandlers config logHandlers
   let (result, finalState) ← action.run initialState
@@ -656,7 +651,7 @@ def runPipelineWithHandlers (config : PipelineConfig) (logHandlers : LogHandlers
 /-! ## Distributed Execution Helpers -/
 
 /-- Run with torchrun-style distributed setup and explicit log handlers. -/
-def withDistributedWithHandlers (config : PipelineConfig) (logHandlers : LogHandlers := {})
+def withDistributedWithHandlers (config : PipelineConfig) (logHandlers : Log.Handlers := {})
     (action : PipelineM α) : IO α := do
   -- Initialize distributed if env vars are set
   let worldSize := (← IO.getEnv "WORLD_SIZE").bind (·.toNat?) |>.getD 1

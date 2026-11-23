@@ -9,8 +9,6 @@
 #include <string>
 #include <atomic>
 
-// Defined in float_buffer.cpp — creates a FloatBuffer from raw float data.
-extern "C" lean_object* tyr_float_buffer_from_raw(const float* src, size_t n);
 
 #ifdef __APPLE__
 #include <AudioToolbox/AudioToolbox.h>
@@ -219,7 +217,7 @@ lean_object* lean_tyr_audio_input_read_buffer(
     return mk_io_error(e.what());
   }
   if (max_samples == 0) {
-    return lean_io_result_mk_ok(tyr_float_buffer_from_raw(nullptr, 0));
+    return lean_io_result_mk_ok(lean_alloc_sarray(sizeof(double), 0, 0));
   }
 
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(block_ms);
@@ -232,20 +230,16 @@ lean_object* lean_tyr_audio_input_read_buffer(
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 
-  // Drain from FIFO into a temporary contiguous float buffer, then wrap as FloatBuffer.
+  // Drain from the FIFO straight into an unboxed FloatArray.
   std::lock_guard<std::mutex> lock(g_audio_mu);
   size_t n = std::min(static_cast<size_t>(max_samples), g_audio_fifo.size());
-  if (n == 0) {
-    return lean_io_result_mk_ok(tyr_float_buffer_from_raw(nullptr, 0));
-  }
-  auto* tmp = static_cast<float*>(std::malloc(sizeof(float) * n));
+  lean_object* out = lean_alloc_sarray(sizeof(double), n, n);
+  double* dst = lean_float_array_cptr(out);
   for (size_t i = 0; i < n; ++i) {
-    tmp[i] = g_audio_fifo.front();
+    dst[i] = static_cast<double>(g_audio_fifo.front());
     g_audio_fifo.pop_front();
   }
-  lean_object* fb = tyr_float_buffer_from_raw(tmp, n);
-  std::free(tmp);
-  return lean_io_result_mk_ok(fb);
+  return lean_io_result_mk_ok(out);
 }
 
 lean_object* lean_tyr_audio_input_stop() {

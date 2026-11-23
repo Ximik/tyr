@@ -92,13 +92,8 @@ end NormedModule
 
 /-! ## Trivial Instances -/
 
-/-- Float is a trivial 0-dimensional normed module.
-    It contains no tensors, so TensorStruct operations are identity. -/
+/-- Float is a trivial 0-dimensional normed module. -/
 instance : NormedModule Float where
-  map _ x := x  -- No tensors to map
-  mapM _ x := pure x
-  zipWith _ x _ := x  -- Just return first (they should be equal in valid use)
-  fold _ init _ := init  -- No tensors to fold
   norm x := Float.abs x
   dualNorm x := Float.abs x
   nu _ := 1.0
@@ -107,11 +102,7 @@ instance : NormedModule Float where
   normalizeDual x := if x == 0.0 then 0.0 else x / Float.abs x
 
 /-- Static values have trivial zero norm (they don't contribute to optimization) -/
-instance [Inhabited α] : NormedModule (torch.Static α) where
-  map _ s := s
-  mapM _ s := pure s
-  zipWith _ s _ := s
-  fold _ init _ := init
+instance : NormedModule (torch.Static α) where
   norm _ := 0.0
   dualNorm _ := 0.0
   nu _ := 1.0  -- Identity for composition

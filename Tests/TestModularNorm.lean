@@ -119,7 +119,7 @@ def testSequentialCompositionNorm : IO Unit := do
   -- Test that sequential composition computes correctly
   let lin1 ← torch.Linear.init 10 20
   let lin2 ← torch.Linear.init 20 5
-  let seq := compose lin1 lin2
+  let seq : Sequential _ _ := ⟨lin1, lin2⟩
   let n := NormedModule.norm seq
   LeanTest.assertTrue (n > 0.0) s!"Sequential norm should be positive, got {n}"
 
@@ -130,7 +130,7 @@ def testSequentialNuMultiplies : IO Unit := do
   let lin2 ← torch.Linear.init 20 5
   let ν1 := NormedModule.nu lin1
   let ν2 := NormedModule.nu lin2
-  let seq := compose lin1 lin2
+  let seq : Sequential _ _ := ⟨lin1, lin2⟩
   let νSeq := NormedModule.nu seq
   let expected := ν1 * ν2
   let relError := Float.abs (νSeq - expected) / expected

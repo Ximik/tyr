@@ -51,8 +51,9 @@ open tokenizer
 
 /-! ## Pipeline Configuration -/
 
-private def consolePipelineLogHandlers : LogHandlers := {
+private def consolePipelineLogHandlers : Log.Handlers := {
   onInfo := fun msg => IO.println msg
+  onWarn := fun msg => IO.eprintln msg
   onError := fun msg => IO.eprintln msg
 }
 
@@ -1105,7 +1106,7 @@ def pretrainBaseModel (cfg : NanoChatConfig) : PipelineM Unit := do
     let gradAccum := effectiveGradAccumSteps hp worldSize
     log s!"Starting training with {worldSize} GPUs"
     log s!"Data path: {dataDir}"
-    log s!"Pretrain schedule: iters={hp.numIterations}, ext={hp.extensionIterations}, batch={hp.deviceBatchSize}, seq={hp.maxSeqLen}, accum={gradAccum}, val_int={hp.valInterval}, ckpt_int={hp.checkpointInterval}"
+    log s!"Pretrain schedule: iters={hp.numIterations}, ext={hp.extensionIterations}, batch={hp.deviceBatchSize}, seq={hp.maxSeqLen}, accum={gradAccum}, val_int={PosNat.renderOrNone hp.valInterval}, ckpt_int={PosNat.renderOrNone hp.checkpointInterval}"
     log s!"Pretrain parquet stream: train_files={trainStream0.files.size}, val_files={valStream0.files.size}, text_col={pretrainTextColumn}, tokenizer_batch={pretrainTokenizerBatchSize}, val_batches={valBatches}"
     if hasCheckpoint then
       log s!"Resuming base pretraining from {ckptPath}"
@@ -1466,7 +1467,7 @@ def midtrain (cfg : NanoChatConfig) : PipelineM Unit := do
   if isMaster then
     let gradAccum := effectiveGradAccumSteps hp worldSize
     log s!"Starting midtraining with {worldSize} GPUs"
-    log s!"Midtrain schedule: iters={hp.numIterations}, ext={hp.extensionIterations}, batch={hp.deviceBatchSize}, seq={hp.maxSeqLen}, accum={gradAccum}, val_int={hp.valInterval}, ckpt_int={hp.checkpointInterval}"
+    log s!"Midtrain schedule: iters={hp.numIterations}, ext={hp.extensionIterations}, batch={hp.deviceBatchSize}, seq={hp.maxSeqLen}, accum={gradAccum}, val_int={PosNat.renderOrNone hp.valInterval}, ckpt_int={PosNat.renderOrNone hp.checkpointInterval}"
     log s!"Midtrain token-stream batches: train_rows={trainTaskMixture.size}, val_rows={valTaskMixture.size}, val_batches={valBatches}"
     if hasMid then
       log s!"Resuming midtraining from {midCkptPath}"
