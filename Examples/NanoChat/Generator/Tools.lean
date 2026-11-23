@@ -147,8 +147,8 @@ def stringToFloat (s : String) : Option Float :=
       match intPart.toInt?, fracPart.toNat? with
       | some i, some f =>
         let fracValue := f.toFloat / Float.pow 10.0 fracPart.length.toFloat
-        if i >= 0 then some (intToFloat i + fracValue)
-        else some (intToFloat i - fracValue)
+        if intPart.startsWith "-" then some (intToFloat i - fracValue)
+        else some (intToFloat i + fracValue)
       | _, _ => none
     else none
 
