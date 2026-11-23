@@ -825,7 +825,7 @@ structure Gemma4Layer (cfg : Config) (dtype : DType := .Float32) where
 /-- One K/V cache per layer, each holding `len` tokens. A shared-KV layer's entry is its
     source layer's cache. -/
 structure Gemma4Cache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) where
-  attnCaches : Vector cfg.num_hidden_layers (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap len)
+  attnCaches : Vector (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap len) cfg.num_hidden_layers
 
 namespace Gemma4Layer
 
@@ -1059,7 +1059,7 @@ structure Gemma4Model (cfg : Config) (dtype : DType := .Float32) where
   per_layer_model_projection :
     Option (Tensor { device := device, shape := #[cfg.num_hidden_layers * cfg.hidden_size_per_layer_input, cfg.hidden_size], dtype := dtype }) := none
   per_layer_projection_norm : Option (Gemma4RMSNorm (device := device) cfg.hidden_size_per_layer_input) := none
-  layers : Vector cfg.num_hidden_layers (Gemma4Layer (dtype := dtype) (device := device) cfg)
+  layers : Vector (Gemma4Layer (dtype := dtype) (device := device) cfg) cfg.num_hidden_layers
   norm : Gemma4RMSNorm (device := device) cfg.hidden_size
   deriving TensorStruct
 
@@ -1132,13 +1132,13 @@ private def precomputeFullRotary {seq : Nat}
 /-- Run the layers in order. `step` gets layer `i`'s cache and, for a shared-KV layer,
     the new cache of its source layer; the cache it returns becomes layer `i`'s. -/
 private def runLayers {C C' H : Type} (cfg : Config)
-    (old : Vector cfg.num_hidden_layers C) (hidden : H)
+    (old : Vector C cfg.num_hidden_layers) (hidden : H)
     (step : Fin cfg.num_hidden_layers → H → C → Option C' → H × C') :
-    H × Vector cfg.num_hidden_layers C' :=
+    H × Vector C' cfg.num_hidden_layers :=
   go 0 (Nat.zero_le _) #[] rfl hidden
 where
   go (i : Nat) (hi : i ≤ cfg.num_hidden_layers) (acc : Array C') (hacc : acc.size = i) (hidden : H) :
-      H × Vector cfg.num_hidden_layers C' :=
+      H × Vector C' cfg.num_hidden_layers :=
     if hlt : i < cfg.num_hidden_layers then
       let source := (Config.sharedSourceLayer? cfg i).map fun s => acc[s.val]'(by have := s.isLt; omega)
       let (hidden', own) := step ⟨i, hlt⟩ hidden (old.get ⟨i, hlt⟩) source
@@ -1155,7 +1155,7 @@ def initCache {batch : Nat}
     [DType.ConstantSupported dtype cacheDevice]
     (h : 0 < maxLen := by omega)
     : Gemma4Cache (dtype := dtype) (device := cacheDevice) cfg batch maxLen 0 :=
-  let layers : Vector cfg.num_hidden_layers Nat := ⟨Array.range cfg.num_hidden_layers, Array.size_range⟩
+  let layers : Vector Nat cfg.num_hidden_layers := Vector.range cfg.num_hidden_layers
   { attnCaches := layers.map fun _ =>
       let kv := qwen.QwenAttention.initKVCache
         maxLen

@@ -26,7 +26,7 @@ written once and reused across many models.
 - `Static α`: marks non-tensor metadata that should be skipped during traversal.
 - `Frozen σ`: marks tensor fields that should remain in the structure but are typically
   treated as non-trainable.
-- `Vector n α`: length-indexed container for compile-time-safe `zipWith`.
+- `Vector α n` (core): instances for length-indexed containers, so `zipWith` cannot mismatch.
 - `TensorStruct` utilities: `count`, `grads`, `zeroGrads`, `detach`,
   `requiresGrad`, `makeLeafParams`, `scale`, `add`, `sub`.
 - `TensorStruct.castTo`: explicit conversion to a destination tensor-tree type
@@ -120,17 +120,17 @@ def averageParams [FloatingTensorStruct α] (a b : α) : α :=
 ```lean
 open torch
 
-def blendVec {n : Nat} [FloatingTensorStruct α] (a b : Vector n α) : Vector n α :=
+def blendVec {n : Nat} [FloatingTensorStruct α] (a b : Vector α n) : Vector α n :=
   FloatingTensorStruct.zipWith (fun a b => Tensor.add a b) a b
 ```
 
-Unlike `Array`/`List`, `Vector n α` encodes length in the type, so mismatched zip sizes
+Unlike `Array`/`List`, `Vector α n` encodes length in the type, so mismatched zip sizes
 are rejected by typing instead of failing at runtime.
 
 ## Safety Notes
 
 `TensorStruct` instances for `Array` and `List` perform runtime length checks in `zipWith`.
-If lengths differ, they panic. Use `Vector n α` when you want static guarantees that a zip
+If lengths differ, they panic. Use `Vector α n` when you want static guarantees that a zip
 cannot mismatch.
 
 ## Scope
@@ -177,81 +177,6 @@ end Frozen
 
 /-- Mark an indexed tensor as a frozen parameter. -/
 instance {σ : StaticSpec} : Coe (Tensor σ) (Frozen σ) := ⟨Frozen.mk⟩
-
-/-! ## Vector: Length-indexed array
-
-A Vector carries its length in the type, enabling type-safe operations
-like zipWith that require matching lengths.
--/
-
-/-- Length-indexed array. Carries length in the type for type-safe operations. -/
-structure Vector (n : Nat) (α : Type) where
-  data : Array α
-  size_eq : data.size = n
-
-namespace Vector
-
-/-- Get the underlying array -/
-def toArray {n : Nat} (v : Vector n α) : Array α := v.data
-
-/-- Get element at index (uses Fin for bounds safety) -/
-def get {n : Nat} (v : Vector n α) (i : Fin n) : α :=
-  v.data[i.val]'(by rw [v.size_eq]; exact i.isLt)
-
-/-- Map a function over all elements -/
-def map {n : Nat} (f : α → β) (v : Vector n α) : Vector n β :=
-  ⟨v.data.map f, by rw [Array.size_map]; exact v.size_eq⟩
-
-/-- Helper to build array by mapping over Fin indices -/
-private def mapMCore {n : Nat} {m : Type → Type} [Monad m]
-    (f : α → m β) (v : Vector n α) (acc : Array β) (i : Nat)
-    (h_acc : acc.size = i) (h_bound : i ≤ n) : m { arr : Array β // arr.size = n } := do
-  if h : i < n then
-    let elem := v.data[i]'(by rw [v.size_eq]; exact h)
-    let b ← f elem
-    let acc' := acc.push b
-    have h_acc' : acc'.size = i + 1 := by simp [acc', Array.size_push, h_acc]
-    mapMCore f v acc' (i + 1) h_acc' h
-  else
-    have : i = n := Nat.le_antisymm h_bound (Nat.ge_of_not_lt h)
-    pure ⟨acc, by rw [h_acc, this]⟩
-
-/-- Monadic map - maps function over elements, preserving vector size.
-    Uses explicit recursion to maintain size proof without relying on Array.size_mapM. -/
-def mapM {n : Nat} {m : Type → Type} [Monad m] (f : α → m β) (v : Vector n α) : m (Vector n β) := do
-  let ⟨arr, h⟩ ← mapMCore f v #[] 0 rfl (Nat.zero_le n)
-  pure ⟨arr, h⟩
-
-/-- Zip two vectors with a function (always safe - types guarantee same length) -/
-def zipWith {n : Nat} (f : α → β → γ) (v1 : Vector n α) (v2 : Vector n β) : Vector n γ :=
-  ⟨Array.zipWith f v1.data v2.data, by
-    rw [Array.size_zipWith, v1.size_eq, v2.size_eq, Nat.min_self]⟩
-
-/-- Fold over elements -/
-def foldl {n : Nat} (f : β → α → β) (init : β) (v : Vector n α) : β :=
-  v.data.foldl f init
-
-/-- Create vector by replicating a value -/
-def set {n : Nat} (v : Vector n α) (i : Fin n) (a : α) : Vector n α :=
-  ⟨v.data.set i.val a (by rw [v.size_eq]; exact i.isLt), by rw [Array.size_set]; exact v.size_eq⟩
-
-def replicate (n : Nat) (a : α) : Vector n α :=
-  ⟨Array.replicate n a, Array.size_replicate ..⟩
-
-/-- Create an empty vector -/
-def empty : Vector 0 α := ⟨#[], rfl⟩
-
-/-- Push an element (increments size in type) -/
-def push {n : Nat} (v : Vector n α) (a : α) : Vector (n + 1) α :=
-  ⟨v.data.push a, by simp only [Array.size_push, v.size_eq]⟩
-
-end Vector
-
-instance {n : Nat} {α : Type} [Repr α] : Repr (Vector n α) where
-  reprPrec v p := reprPrec v.data p
-
-instance {n : Nat} {α : Type} [Inhabited α] : Inhabited (Vector n α) where
-  default := Vector.replicate n default
 
 /-! ## TensorStruct Typeclass
 
@@ -365,13 +290,13 @@ instance {shape : Shape} {device : Device} : TensorStruct (SomeDTypeTensor shape
 For containers like Array and List, `zipWith` requires matching sizes at runtime
 since these types don't encode length in the type. If sizes mismatch, it panics.
 
-**For type-safe `zipWith` operations, use `Vector n α` instead.**
+**For type-safe `zipWith` operations, use `Vector α n` instead.**
 Vector carries its length in the type, so `zipWith` is statically guaranteed to work.
 
 Example migration:
 ```lean
 -- Instead of: Array (BlockParams n_embd)
--- Use:        Vector numBlocks (BlockParams n_embd)
+-- Use:        Vector (BlockParams n_embd) numBlocks
 ```
 
 This trades some flexibility for compile-time guarantees.
@@ -389,7 +314,7 @@ instance [TensorStruct α] [TensorStruct β] : TensorStruct (α × β) where
 
 /-- TensorStruct instance for Array.
     **Warning**: `zipWith` panics if arrays have different sizes.
-    For type-safe zipWith, use `Vector n α` instead. -/
+    For type-safe zipWith, use `Vector α n` instead. -/
 instance {α : Type} [TensorStruct α] : TensorStruct (Array α) where
   map f arr := arr.map (TensorStruct.map f)
   mapM f arr := arr.mapM (TensorStruct.mapM f)
@@ -402,7 +327,7 @@ instance {α : Type} [TensorStruct α] : TensorStruct (Array α) where
 
 /-- TensorStruct instance for List.
     **Warning**: `zipWith` panics if lists have different lengths.
-    For type-safe zipWith, use `Vector n α` instead. -/
+    For type-safe zipWith, use `Vector α n` instead. -/
 instance {α : Type} [TensorStruct α] : TensorStruct (List α) where
   map f l := l.map (TensorStruct.map f)
   mapM f l := l.mapM (TensorStruct.mapM f)
@@ -415,11 +340,11 @@ instance {α : Type} [TensorStruct α] : TensorStruct (List α) where
 
 /-- TensorStruct instance for Vector - `zipWith` is always type-safe!
     Length is encoded in the type, so no runtime check is needed. -/
-instance {n : Nat} {α : Type} [TensorStruct α] : TensorStruct (Vector n α) where
-  map f v := Vector.map (TensorStruct.map f) v
-  mapM f v := Vector.mapM (TensorStruct.mapM f) v
-  zipWith f v1 v2 := Vector.zipWith (TensorStruct.zipWith f) v1 v2  -- No runtime check needed!
-  fold f init v := v.data.foldl (fun acc x => TensorStruct.fold f acc x) init
+instance {n : Nat} {α : Type} [TensorStruct α] : TensorStruct (Vector α n) where
+  map f v := v.map (TensorStruct.map f)
+  mapM f v := v.mapM (TensorStruct.mapM f)
+  zipWith f v1 v2 := Vector.zipWith (TensorStruct.zipWith f) v1 v2
+  fold f init v := v.foldl (fun acc x => TensorStruct.fold f acc x) init
 
 instance {α : Type} [TensorStruct α] : TensorStruct (Option α) where
   map f opt := opt.map (TensorStruct.map f)
@@ -558,11 +483,11 @@ instance {P : StaticSpec → Prop} [TensorStructFor P α] : TensorStructFor P (L
   fold f initial values := values.foldl (fun acc value => TensorStructFor.fold f acc value) initial
 
 instance {P : StaticSpec → Prop} {n : Nat} [TensorStructFor P α] :
-    TensorStructFor P (Vector n α) where
-  map f values := Vector.map (TensorStructFor.map f) values
-  mapM f values := Vector.mapM (TensorStructFor.mapM f) values
+    TensorStructFor P (Vector α n) where
+  map f values := values.map (TensorStructFor.map f)
+  mapM f values := values.mapM (TensorStructFor.mapM f)
   zipWith f lhs rhs := Vector.zipWith (TensorStructFor.zipWith f) lhs rhs
-  fold f initial values := values.data.foldl
+  fold f initial values := values.foldl
     (fun acc value => TensorStructFor.fold f acc value) initial
 
 instance {P : StaticSpec → Prop} [TensorStructFor P α] : TensorStructFor P (Option α) where

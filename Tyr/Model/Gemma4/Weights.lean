@@ -344,7 +344,7 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
     else
       pure none
 
-  let indices : Vector cfg.num_hidden_layers Nat := ⟨Array.range cfg.num_hidden_layers, Array.size_range⟩
+  let indices : Vector Nat cfg.num_hidden_layers := Vector.range cfg.num_hidden_layers
   let layers ← indices.mapM fun i => do
     let layer ← loadLayer src cfg i cast
     if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then

@@ -140,14 +140,14 @@ end SqueezeExcitationBlock
 
 /-- Res2Net block split over channel groups. -/
 structure Res2NetBlock (channels scale kernelSize dilation : Nat) (dtype : RealFloatingDType := float32DType) where
-  blocks : Vector (scale - 1) (TimeDelayNetBlock (dtype := dtype) (device := device) (channels / scale) (channels / scale) kernelSize dilation)
+  blocks : Vector (TimeDelayNetBlock (dtype := dtype) (device := device) (channels / scale) (channels / scale) kernelSize dilation) (scale - 1)
   deriving TensorStruct
 
 namespace Res2NetBlock
 
 def init (channels scale kernelSize dilation : Nat) (device : Device := .CPU) (dtype : RealFloatingDType := float32DType)
     : IO (Res2NetBlock (dtype := dtype) (device := device) channels scale kernelSize dilation) := do
-  let indices : Vector (scale - 1) Nat := ⟨Array.range (scale - 1), Array.size_range⟩
+  let indices : Vector Nat (scale - 1) := Vector.range (scale - 1)
   let blocks ← indices.mapM fun _ =>
     TimeDelayNetBlock.init (dtype := dtype) (device := device) (channels / scale) (channels / scale) kernelSize dilation
   pure { blocks }

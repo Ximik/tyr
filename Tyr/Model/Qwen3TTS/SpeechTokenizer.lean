@@ -140,7 +140,7 @@ structure QuantizerCodebook (dtypes : SpeechTokenizerDTypes := float32SpeechToke
 
 structure RVQDecode (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) (count : Nat) where
   outputProj : Tensor { shape := #[512, 256, 1], dtype := dtypes.compute.val, device := device }
-  codebooks : Vector count (QuantizerCodebook (device := device) (dtypes := dtypes))
+  codebooks : Vector (QuantizerCodebook (device := device) (dtypes := dtypes)) count
   deriving TensorStruct
 
 structure DecoderTransformerLayer (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
@@ -239,7 +239,7 @@ private def loadCodebook (weightsPath : String) (namePrefix : String) : IO (Quan
 
 private def loadRVQ (weightsPath : String) (namePrefix : String) (nCodebooks : Nat) : IO (RVQDecode (device := device) (dtypes := dtypes) (count := nCodebooks)) := do
   let outputProj ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.output_proj.weight" #[512, 256, 1]
-  let indices : Vector nCodebooks Nat := ⟨Array.range nCodebooks, Array.size_range⟩
+  let indices : Vector Nat nCodebooks := Vector.range nCodebooks
   let codebooks ← indices.mapM fun i =>
     loadCodebook (device := device) (dtypes := dtypes) weightsPath s!"{namePrefix}.vq.layers.{i}._codebook"
   pure { outputProj, codebooks }

@@ -18,7 +18,7 @@ example (_layout : SpeechTokenizerDTypes)
     (_projection : Tensor ⟨#[512, 256, 1], .Float32, .CPU⟩) : True := by
   fail_if_success
     have _ : RVQDecode (device := .CPU) _layout (count := 0) :=
-      { outputProj := _projection, codebooks := Vector.empty }
+      { outputProj := _projection, codebooks := #v[] }
   fail_if_success
     have _ : QuantizerCodebook (device := .CPU) float32SpeechTokenizerDTypes := _codebook
   trivial

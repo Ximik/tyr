@@ -58,7 +58,7 @@ Generated schemas retain tensor metadata and distinguish parameter participation
 | `Tensor σ` | One indexed leaf |
 | `ShapePackedTensor dtype device` | Existential shape with a fixed dtype and concrete device; zip checks shape equality |
 | `Array α`, `List α` | Elementwise traversal; zip panics on unequal lengths |
-| `Vector n α` | Length-indexed traversal and zip |
+| `Vector α n` (core) | Length-indexed traversal and zip |
 | `Option α` | Traverses `some`; mismatched zip variants yield `none` |
 | `Static α` | Skipped by all tensor traversals |
 | `Frozen σ` | Wraps `Tensor σ`; ordinary traversal still visits it |
@@ -68,9 +68,7 @@ also have no-tensor instances. `Frozen` describes intended participation but doe
 not make ordinary `TensorStruct.map` skip a tensor. An optimizer must honor its
 participation policy; wrapping a value alone does not prevent arbitrary updates.
 
-`Vector n α` stores an array with a proof of its length. Its operations include
-`map`, `mapM`, `zipWith`, `foldl`, `replicate`, `get`, `toArray`, and `push`.
-Use it when the number of layers or states is known. It checks the outer count;
+Core `Vector α n` stores an array with a proof of its length. Use it when the number of layers or states is known. It checks the outer count;
 nested runtime-dependent structures can still need their own checks.
 
 ## Utilities

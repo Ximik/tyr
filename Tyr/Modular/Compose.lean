@@ -176,25 +176,25 @@ instance [NormedModule M] : NormedModule (Array M) where
 
   normalizeDual arr := arr.map NormedModule.normalizeDual
 
-instance [NormedModule M] {n : Nat} : NormedModule (torch.Vector n M) where
+instance [NormedModule M] {n : Nat} : NormedModule (Vector M n) where
   norm v :=
-    let norms := v.data.map NormedModule.norm
+    let norms := v.toArray.map NormedModule.norm
     Float.sqrt (norms.foldl (fun acc n => acc + n * n) 0.0)
 
   dualNorm v :=
-    let duals := v.data.map NormedModule.dualNorm
+    let duals := v.toArray.map NormedModule.dualNorm
     Float.sqrt (duals.foldl (fun acc d => acc + d * d) 0.0)
 
   nu v :=
-    v.data.foldl (fun acc m => acc * NormedModule.nu m) 1.0
+    v.toArray.foldl (fun acc m => acc * NormedModule.nu m) 1.0
 
   mu v :=
-    let mus := v.data.map NormedModule.mu
+    let mus := v.toArray.map NormedModule.mu
     Float.sqrt (mus.foldl (fun acc μ => acc + μ * μ) 0.0)
 
-  normalize v := torch.Vector.map NormedModule.normalize v
+  normalize v := v.map NormedModule.normalize
 
-  normalizeDual v := torch.Vector.map NormedModule.normalizeDual v
+  normalizeDual v := v.map NormedModule.normalizeDual
 
 /-! ## Utility: Compose operator -/
 

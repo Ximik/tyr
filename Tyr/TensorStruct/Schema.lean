@@ -368,29 +368,6 @@ private def rebuildListLeaves
       let rest' ← rebuildListLeaves rest path selection leaves (idx + 1)
       pure (x' :: rest')
 
-private def rebuildVectorLeaves
-    {n : Nat}
-    [TensorStructFlatten α]
-    (xs : Vector n α)
-    (path : TensorLeafPath)
-    (selection : TensorLeafSelection)
-    (leaves : Array TensorLeafValue)
-    (acc : Array α)
-    (idx : Nat)
-    (hacc : acc.size = idx)
-    (hbound : idx ≤ n) :
-    StateT Nat (Except String) { arr : Array α // arr.size = n } := do
-  if h : idx < n then
-    let x := xs.data[idx]'(by rw [xs.size_eq]; exact h)
-    let x' ← TensorStructFlatten.rebuildAt x (path.pushIndex idx) selection leaves
-    let acc' := acc.push x'
-    have hacc' : acc'.size = idx + 1 := by
-      simp [acc', hacc]
-    rebuildVectorLeaves xs path selection leaves acc' (idx + 1) hacc' h
-  else
-    have hEq : idx = n := Nat.le_antisymm hbound (Nat.ge_of_not_lt h)
-    pure ⟨acc, by rw [hacc, hEq]⟩
-
 instance {α : Type} [TensorStructFlatten α] : TensorStructFlatten (List α) where
   flattenAt xs path selection := Id.run do
     let mut out : Array TensorLeafValue := #[]
@@ -402,16 +379,15 @@ instance {α : Type} [TensorStructFlatten α] : TensorStructFlatten (List α) wh
   rebuildAt xs path selection leaves :=
     rebuildListLeaves xs path selection leaves
 
-instance {n : Nat} {α : Type} [ToTensorStructSchema α] : ToTensorStructSchema (Vector n α) where
+instance {n : Nat} {α : Type} [ToTensorStructSchema α] : ToTensorStructSchema (Vector α n) where
   typeName := Name.anonymous
-  describeLeaves xs path := describeListLeaves xs.data.toList path
+  describeLeaves xs path := describeListLeaves xs.toList path
 
-instance {n : Nat} {α : Type} [TensorStructFlatten α] : TensorStructFlatten (Vector n α) where
+instance {n : Nat} {α : Type} [TensorStructFlatten α] : TensorStructFlatten (Vector α n) where
   flattenAt xs path selection :=
-    TensorStructFlatten.flattenAt xs.data path selection
-  rebuildAt xs path selection leaves := do
-    let ⟨data', hsize⟩ ← rebuildVectorLeaves xs path selection leaves #[] 0 rfl (Nat.zero_le n)
-    pure ⟨data', hsize⟩
+    TensorStructFlatten.flattenAt xs.toArray path selection
+  rebuildAt xs path selection leaves :=
+    xs.mapIdxM fun idx x => TensorStructFlatten.rebuildAt x (path.pushIndex idx) selection leaves
 
 instance {α : Type} [ToTensorStructSchema α] : ToTensorStructSchema (Option α) where
   typeName := Name.anonymous
