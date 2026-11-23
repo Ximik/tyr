@@ -11,6 +11,13 @@ construction boundary.
 
 namespace torch
 
+/-- Proof-only witness that a Boolean computed at reducible transparency is
+`true`, so instance search can accept a decidable check. -/
+class IsTrue (value : _root_.Bool) : Prop where
+  valid : value = true
+
+instance : IsTrue true := ⟨rfl⟩
+
 abbrev Shape := Array Nat
 
 inductive DType where

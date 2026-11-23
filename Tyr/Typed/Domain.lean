@@ -30,14 +30,9 @@ class Ordered (dtype : DType) : Prop where
 class Mean (dtype : DType) : Prop where
   valid : meanDomain dtype = true
 
-class InDomain (accepted : _root_.Bool) : Prop where
-  valid : accepted = true
-
-instance : InDomain true := ⟨rfl⟩
-
-instance {dtype : DType} [h : InDomain (reluDomain dtype)] : Relu dtype := ⟨h.valid⟩
-instance {dtype : DType} [h : InDomain (orderedDomain dtype)] : Ordered dtype := ⟨h.valid⟩
-instance {dtype : DType} [h : InDomain (meanDomain dtype)] : Mean dtype := ⟨h.valid⟩
+instance {dtype : DType} [h : IsTrue (reluDomain dtype)] : Relu dtype := ⟨h.valid⟩
+instance {dtype : DType} [h : IsTrue (orderedDomain dtype)] : Ordered dtype := ⟨h.valid⟩
+instance {dtype : DType} [h : IsTrue (meanDomain dtype)] : Mean dtype := ⟨h.valid⟩
 
 instance {dtype : DType} [h : RealFloating dtype] : Relu dtype := by
   constructor

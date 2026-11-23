@@ -20,19 +20,17 @@ instance : OfNat PosNat (n + 1) := ⟨⟨n + 1, Nat.succ_pos n⟩⟩
 
 instance : OfNat (Option PosNat) (n + 1) := ⟨some ⟨n + 1, Nat.succ_pos n⟩⟩
 
-instance : ToString PosNat := ⟨fun n => toString n.val⟩
-
-instance : ToString (Option PosNat) where
-  toString
-    | none => "none"
-    | some n => toString n.val
-
 instance : Lean.ToJson PosNat := ⟨fun n => Lean.toJson n.val⟩
 
 instance : Lean.FromJson PosNat where
   fromJson? json := do
     let n ← Lean.fromJson? (α := Nat) json
     if h : 0 < n then pure ⟨n, h⟩ else throw "expected a positive count, got 0"
+
+/-- The count, or the word `none`; the inverse of `parseOrNone?`. -/
+def renderOrNone : Option PosNat → String
+  | none => "none"
+  | some n => toString n.val
 
 /-- A positive count, or `none` for the word `none`. -/
 def parseOrNone? (s : String) : Option (Option PosNat) :=

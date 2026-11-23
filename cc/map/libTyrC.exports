@@ -3,5 +3,4 @@
 # functions libTyrC calls, which ld turns into re-exports that dyld rejects.
 _lean_torch_*
 _lean_tyr_*
-_lean_float_buffer_*
 _lean_parquet_*

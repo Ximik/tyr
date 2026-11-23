@@ -116,7 +116,7 @@ versus borrowed arguments: `lean_obj_arg` and `b_lean_obj_arg` are both
 
 Every `@[extern]` of `Tyr` lives in the `TyrFFI` library (`Tyr.Basic`,
 `Tyr.Basic.Types`, `Tyr.ConstantSupport`, `Tyr.RawTensor` and its submodules, `Tyr.Audio`'s
-FloatBuffer and Apple I/O). It is not precompiled, so it builds before
+Apple I/O). It is not precompiled, so it builds before
 `libTyrC`. The `libtyr` target runs `GenerateFfiHeader` over it, writing
 `cc/src/generated/tyr_ffi.h` from Lean's compiled extern declarations, and
 `cc/src` and `cc/tools` include that header. A C++ definition whose signature
@@ -349,7 +349,6 @@ setup/result errors without leaks, and fatal callback errors in separate process
 | `tyr_polar.cpp` | `lean_torch_xxt`, `ba_plus_cAA`, `newton_schulz_step`, `polar_express`, `muon_orthogonalize`, `cautious_update` | manifold/optimizer modules |
 | `tyr_parquet.cpp` | `lean_parquet_*` Arrow/Parquet readers | `Tyr/RawTensor/Parquet.lean` |
 | `tyr_qwen35.cpp` | `lean_torch_qwen35_{chunk,recurrent}_gated_delta_rule` linear attention | `Tyr/Model/Qwen35/Model.lean` |
-| `float_buffer.cpp` | `lean_float_buffer_*` streaming-audio ring buffer | `Tyr/Audio/FloatBuffer.lean` |
 | `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/Audio/Apple*.lean` |
 | `tyr_media_stub.cpp` | non-Apple error stubs for the media entry points | same |
 

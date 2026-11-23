@@ -33,14 +33,6 @@ structure Sequential (M₁ M₂ : Type) where
   first : M₁
   second : M₂
 
-derive_tensor_struct_for Sequential
-
-namespace Sequential
-
-def mk' (m₁ : M₁) (m₂ : M₂) : Sequential M₁ M₂ := ⟨m₁, m₂⟩
-
-end Sequential
-
 /-- TensorStruct for Sequential just combines the two modules -/
 instance [TensorStruct M₁] [TensorStruct M₂] : TensorStruct (Sequential M₁ M₂) where
   map f s := ⟨TensorStruct.map f s.first, TensorStruct.map f s.second⟩
@@ -54,6 +46,8 @@ instance [TensorStruct M₁] [TensorStruct M₂] : TensorStruct (Sequential M₁
   fold f init s :=
     let acc := TensorStruct.fold f init s.first
     TensorStruct.fold f acc s.second
+
+derive_tensor_struct_for Sequential
 
 /-! ## Sequential Composition
 
@@ -110,17 +104,6 @@ For outputs that are separately processed:
 
 /-- Parallel composition with ℓ₂ norm combination -/
 instance [NormedModule M₁] [NormedModule M₂] : NormedModule (M₁ × M₂) where
-  map f p := (TensorStruct.map f p.1, TensorStruct.map f p.2)
-  mapM f p := do
-    let m₁' ← TensorStruct.mapM f p.1
-    let m₂' ← TensorStruct.mapM f p.2
-    pure (m₁', m₂')
-  zipWith f a b :=
-    (TensorStruct.zipWith f a.1 b.1, TensorStruct.zipWith f a.2 b.2)
-  fold f init p :=
-    let acc := TensorStruct.fold f init p.1
-    TensorStruct.fold f acc p.2
-
   -- ℓ₂ combination of norms
   norm p :=
     let n₁ := NormedModule.norm p.1
@@ -195,12 +178,5 @@ instance [NormedModule M] {n : Nat} : NormedModule (Vector M n) where
   normalize v := v.map NormedModule.normalize
 
   normalizeDual v := v.map NormedModule.normalizeDual
-
-/-! ## Utility: Compose operator -/
-
-/-- Compose two modules sequentially: M₂ after M₁ -/
-def compose (m₁ : M₁) (m₂ : M₂) : Sequential M₁ M₂ := ⟨m₁, m₂⟩
-
-infixr:90 " ⊛ " => compose
 
 end Tyr.Modular

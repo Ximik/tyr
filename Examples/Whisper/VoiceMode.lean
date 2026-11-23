@@ -14,7 +14,6 @@
 import Tyr.Model.Whisper
 import Tyr.Audio.AppleInput
 import Tyr.Audio.AppleOutput
-import Tyr.Audio.FloatBuffer
 
 open torch.whisper
 
@@ -157,78 +156,19 @@ inductive RecordPhase where
   | done
   deriving BEq, Repr
 
-/-- Record from the microphone until silence is detected.
-    Returns the recorded waveform as a FloatBuffer (unboxed), or empty if no speech.
-    Audio data flows entirely through unboxed FloatBuffers — no per-sample boxing. -/
-private def recordUntilSilence (args : Args) : IO FloatBuffer := do
-  let readChunkSamples : Nat := sampleRate / 10  -- 100ms chunks
-  let silenceThresholdSamples := toSamples args.silenceDuration
-  let dipToleranceSamples := toSamples args.dipTolerance
-  let minSpeechSamples := toSamples args.minSpeechDuration
-  let maxSamples := toSamples args.maxRecordingSeconds
-  let maxWaitSamples := toSamples args.maxWaitNoSpeech
+/-- Append `src` to `buf`. -/
+private def appendSamples (buf src : FloatArray) : FloatArray :=
+  src.foldl (·.push ·) buf
 
-  -- Pre-roll: keep ~500ms of audio before speech onset so the beginning isn't lost.
-  let preRollSamples := toSamples 0.5
+/-- The last `n` samples of `buf`. -/
+private def keepLast (buf : FloatArray) (n : Nat) : FloatArray :=
+  if buf.size ≤ n then buf
+  else buf.foldl (·.push ·) (FloatArray.emptyWithCapacity n) (buf.size - n)
 
-  let mut audioBuf ← FloatBuffer.mkEmpty (sampleRate * 10) -- ~10s initial capacity
-  let mut phase := RecordPhase.waitingForSpeech
-  let mut speechSamples : Nat := 0
-  let mut silenceSamples : Nat := 0
-  let mut dipSamples : Nat := 0
-  let mut totalSamples : Nat := 0
-
-  while phase != RecordPhase.done do
-    let pcm ← Tyr.Audio.AppleInput.readBuffer readChunkSamples 250
-    let pcmSize := pcm.size
-    if pcmSize == 0 then
-      continue
-
-    let chunkRms ← pcm.rms
-    let isSpeech := chunkRms >= args.speechRmsThreshold
-    totalSamples := totalSamples + pcmSize
-
-    match phase with
-    | .waitingForSpeech =>
-        -- Always accumulate (including pre-speech audio for context).
-        audioBuf ← audioBuf.append pcm
-        if isSpeech then
-          speechSamples := speechSamples + pcmSize
-          dipSamples := 0
-          if speechSamples >= minSpeechSamples then
-            phase := .recording
-        else
-          if speechSamples > 0 then
-            -- Brief dip during speech onset — tolerate it.
-            dipSamples := dipSamples + pcmSize
-            if dipSamples > dipToleranceSamples then
-              -- False start — reset, but keep pre-roll.
-              speechSamples := 0
-              dipSamples := 0
-              audioBuf ← audioBuf.keepLast preRollSamples
-          else
-            -- No speech yet — slide the pre-roll window forward.
-            audioBuf ← audioBuf.keepLast preRollSamples
-          -- Check if we've waited too long with no speech.
-          if totalSamples >= maxWaitSamples then
-            phase := .done
-    | .recording =>
-        audioBuf ← audioBuf.append pcm
-        if isSpeech then
-          silenceSamples := 0
-          dipSamples := 0
-        else
-          dipSamples := dipSamples + pcmSize
-          if dipSamples > dipToleranceSamples then
-            silenceSamples := silenceSamples + pcmSize
-            if silenceSamples >= silenceThresholdSamples then
-              phase := .done
-        -- Check max recording length.
-        if audioBuf.size >= maxSamples then
-          phase := .done
-    | .done => pure ()
-
-  pure audioBuf
+/-- Root mean square of the samples; 0 for an empty buffer. -/
+private def rms (xs : FloatArray) : Float :=
+  if xs.size == 0 then 0.0
+  else Float.sqrt (xs.foldl (fun acc x => acc + x * x) 0.0 / xs.size.toFloat)
 
 -- ============================================================================
 -- Main loop
@@ -268,7 +208,7 @@ private def runOnce
   -- Transcribe every ~2s of new audio while recording.
   let transcribeInterval := toSamples 2.0
 
-  let mut audioBuf ← FloatBuffer.mkEmpty (sampleRate * 10)
+  let mut audioBuf := FloatArray.emptyWithCapacity (sampleRate * 10)
   let mut phase := RecordPhase.waitingForSpeech
   let mut speechSamples : Nat := 0
   let mut silenceSamples : Nat := 0
@@ -283,13 +223,13 @@ private def runOnce
     if pcmSize == 0 then
       continue
 
-    let chunkRms ← pcm.rms
+    let chunkRms := rms pcm
     let isSpeech := chunkRms >= args.speechRmsThreshold
     totalSamples := totalSamples + pcmSize
 
     match phase with
     | .waitingForSpeech =>
-        audioBuf ← audioBuf.append pcm
+        audioBuf := appendSamples audioBuf pcm
         if isSpeech then
           speechSamples := speechSamples + pcmSize
           dipSamples := 0
@@ -302,13 +242,13 @@ private def runOnce
             if dipSamples > dipToleranceSamples then
               speechSamples := 0
               dipSamples := 0
-              audioBuf ← audioBuf.keepLast preRollSamples
+              audioBuf := keepLast audioBuf preRollSamples
           else
-            audioBuf ← audioBuf.keepLast preRollSamples
+            audioBuf := keepLast audioBuf preRollSamples
           if totalSamples >= maxWaitSamples then
             phase := .done
     | .recording =>
-        audioBuf ← audioBuf.append pcm
+        audioBuf := appendSamples audioBuf pcm
         if isSpeech then
           silenceSamples := 0
           dipSamples := 0
@@ -323,7 +263,7 @@ private def runOnce
         -- Periodic transcription: run Whisper on accumulated audio every ~2s.
         let newSinceLastTranscribe := audioBuf.size - lastTranscribeSize
         if newSinceLastTranscribe >= transcribeInterval && audioBuf.size >= toSamples 0.5 then
-          let wav ← audioBuf.toArray
+          let wav := audioBuf.data
           lastTranscribeSize := audioBuf.size
           let result ← transcribeWaveform16k model tok pre hMel wav args.language true decodeOpts
           let text := result.text.trimAscii.toString
@@ -339,7 +279,7 @@ private def runOnce
       Tyr.Audio.AppleOutput.beepNoSpeech
     return false
 
-  let wav ← audioBuf.toArray
+  let wav := audioBuf.data
   let result ← transcribeWaveform16k model tok pre hMel wav args.language true decodeOpts
   let text := result.text.trimAscii.toString
 

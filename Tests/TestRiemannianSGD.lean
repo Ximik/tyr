@@ -56,7 +56,7 @@ def testManifoldLinearRiemannianStepPreservesStiefelConstraint : IO Unit := do
 def testSequentialFactorRecursionMatchesExplicitGlobalJacobian : IO Unit := do
   let l1 ← torch.Linear.init 4 3 false
   let l2 ← torch.Linear.init 3 2 false
-  let net : Sequential (torch.Linear 4 3) (torch.Linear 3 2) := Sequential.mk' l1 l2
+  let net : Sequential (torch.Linear 4 3) (torch.Linear 3 2) := ⟨l1, l2⟩
   let x ← Tensor.randn #[4]
   let (_y, (tape1, tape2)) :
       AmbientVector 2 × SequentialTape (torch.Linear 4 3) 4 3 (torch.Linear 3 2) 2 :=
@@ -81,7 +81,7 @@ def testSequentialFactorRecursionMatchesExplicitGlobalJacobian : IO Unit := do
 def testSequentialRiemannianMSEStepReturnsLayerDiagnostics : IO Unit := do
   let l1 ← torch.Linear.init 4 3 false
   let l2 ← torch.Linear.init 3 2 false
-  let net : Sequential (torch.Linear 4 3) (torch.Linear 3 2) := Sequential.mk' l1 l2
+  let net : Sequential (torch.Linear 4 3) (torch.Linear 3 2) := ⟨l1, l2⟩
   let x ← Tensor.randn #[4]
   let target ← Tensor.randn #[2]
   let result ←

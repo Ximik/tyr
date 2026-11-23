@@ -157,7 +157,7 @@ lean_lib TyrFFI where
   roots := #[`Tyr.Basic, `Tyr.ConstantSupport, `Tyr.RawTensor, `Tyr.Audio.AppleInput,
     `Tyr.Audio.AppleOutput]
   globs := #[.one `Tyr.Basic, .one `Tyr.Basic.Types, .andSubmodules `Tyr.ConstantSupport, .andSubmodules `Tyr.RawTensor,
-    .one `Tyr.Audio.FloatBuffer, .one `Tyr.Audio.AppleInput, .one `Tyr.Audio.AppleOutput]
+    .one `Tyr.Audio.AppleInput, .one `Tyr.Audio.AppleOutput]
   precompileModules := false
   moreLinkLibs := #[`@/libtyr]
 

@@ -81,7 +81,7 @@ structure ParamState (m n : Nat) (dtype : DType := .Float32)
   dualVar : Option (Tensor ⟨#[n, n], dtype, device⟩) := none
   /-- Step counter. -/
   step : Nat := 0
-  deriving Repr
+  deriving Repr, TensorStruct
 
 /-- Initialize per-parameter state. -/
 def initParamState {m n : Nat} (_param : Tensor ⟨#[m, n], d, dev⟩) : ParamState m n d dev := {
@@ -89,40 +89,6 @@ def initParamState {m n : Nat} (_param : Tensor ⟨#[m, n], d, dev⟩) : ParamSt
   dualVar := none
   step := 0
 }
-
-instance {m n : Nat} {d : DType} {dev : Device} :
-    TensorStruct (ParamState m n d dev) where
-  map f s := {
-    momentumBuffer := s.momentumBuffer.map (TensorStruct.map f)
-    dualVar := s.dualVar.map (TensorStruct.map f)
-    step := s.step
-  }
-  mapM f s := do
-    let momentumBuffer ← match s.momentumBuffer with
-      | some t => some <$> TensorStruct.mapM f t
-      | none => pure none
-    let dualVar ← match s.dualVar with
-      | some t => some <$> TensorStruct.mapM f t
-      | none => pure none
-    pure { s with momentumBuffer, dualVar }
-  zipWith f a b := {
-    momentumBuffer := match a.momentumBuffer, b.momentumBuffer with
-      | some t1, some t2 => some (TensorStruct.zipWith f t1 t2)
-      | _, _ => none
-    dualVar := match a.dualVar, b.dualVar with
-      | some t1, some t2 => some (TensorStruct.zipWith f t1 t2)
-      | _, _ => none
-    step := a.step
-  }
-  fold f init s :=
-    let acc := match s.momentumBuffer with
-      | some t => TensorStruct.fold f init t
-      | none => init
-    match s.dualVar with
-    | some t => TensorStruct.fold f acc t
-    | none => acc
-
-derive_tensor_struct_for ParamState
 
 /-- Symmetric part of a square matrix. -/
 def sym {n : Nat} (A : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=

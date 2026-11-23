@@ -7,7 +7,6 @@
   global:
     lean_torch_*;
     lean_tyr_*;
-    lean_float_buffer_*;
     lean_parquet_*;
   local: *;
 };

@@ -56,7 +56,7 @@ structure ParamState (σ : StaticSpec) where
   expAvgSq : Tensor σ
   /-- Step count for bias correction -/
   step : Nat := 0
-  deriving Repr
+  deriving Repr, TensorStruct
 
 /-- Initialize parameter state with zeros -/
 def initParamState {σ : StaticSpec} (param : Tensor σ) : ParamState σ := {
@@ -64,23 +64,6 @@ def initParamState {σ : StaticSpec} (param : Tensor σ) : ParamState σ := {
   expAvgSq := Tensor.zerosLike param
   step := 0
 }
-
-instance {σ : StaticSpec} : TensorStruct (ParamState σ) where
-  map f ps := { ps with expAvg := TensorStruct.map f ps.expAvg, expAvgSq := TensorStruct.map f ps.expAvgSq }
-  mapM f ps := do
-    let expAvg ← TensorStruct.mapM f ps.expAvg
-    let expAvgSq ← TensorStruct.mapM f ps.expAvgSq
-    return { ps with expAvg, expAvgSq }
-  zipWith f ps1 ps2 := {
-    expAvg := TensorStruct.zipWith f ps1.expAvg ps2.expAvg
-    expAvgSq := TensorStruct.zipWith f ps1.expAvgSq ps2.expAvgSq
-    step := ps1.step
-  }
-  fold f acc ps :=
-    let acc := TensorStruct.fold f acc ps.expAvg
-    TensorStruct.fold f acc ps.expAvgSq
-
-derive_tensor_struct_for ParamState
 
 /-- Single Adam update step for one parameter.
 

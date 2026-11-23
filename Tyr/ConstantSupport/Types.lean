@@ -26,13 +26,8 @@ the factories; it does not certify arbitrary operations on this dtype. -/
 class ConstantSupported (dtype : DType) (device : Device) : Prop where
   valid : staticConstantSupport dtype device = true ∨ RuntimeConstantSupport dtype device
 
-private class StaticSupport (value : _root_.Bool) : Prop where
-  valid : value = true
-
-private instance : StaticSupport true := ⟨rfl⟩
-
 instance {dtype : DType} {device : Device}
-    [support : StaticSupport (staticConstantSupport dtype device)] :
+    [support : IsTrue (staticConstantSupport dtype device)] :
     ConstantSupported dtype device := ⟨.inl support.valid⟩
 
 -- `Device.CPU` deliberately remains an ordinary definition. Explicit instances

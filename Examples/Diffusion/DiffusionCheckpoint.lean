@@ -282,7 +282,7 @@ def loadDiffusionAdamWState (cfg : Config) (dir : String)
     output_head := nu_output_head
   }
   IO.println s!"Diffusion optimizer state loaded from {dir} (count={count})"
-  return { fst := { count, mu, nu }, snd := { fst := {}, snd := {} } }
+  return ({ count, mu, nu }, (), ())
 
 /-- Save full checkpoint with optimizer state -/
 def saveFullCheckpoint {cfg : Config}

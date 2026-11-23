@@ -34,8 +34,8 @@ structure GradientTransformation (α : Type) (S : Type) where
 ```
 
 `update` returns *transformed gradients*, not new parameters — that is what makes
-transformations composable via `chain` (`Tyr/Optim.lean`). State types (`EmptyState`,
-`ScaleByAdamState α`, `TraceState α`, `ChainState S1 S2`, `ScaleByScheduleState`) all have
+transformations composable via `chain` (`Tyr/Optim.lean`). State types (`Unit` for stateless transforms,
+`ScaleByAdamState α`, `TraceState α`, pairs `S1 × S2` from `chain`, `ScaleByScheduleState`) all have
 `TensorStruct` instances, so optimizer state can be mapped and
 checkpointed with the same machinery as model parameters (see
 [tensorstruct.md](core/tensorstruct.md)).
@@ -257,7 +257,7 @@ Optim core (`torch.Optim`, `Tyr/Optim.lean`):
 | `adamw` | `(lr := 1e-3) (b1 := 0.9) (b2 := 0.999) (eps := 1e-8) (weight_decay := 0.01) : GradientTransformation α (AdamWState α)` |
 | `adamw_schedule` | `(lr_schedule : Schedule) (b1 b2 eps weight_decay := …) : GradientTransformation α (AdamWScheduleState α)` |
 | `sgd` / `sgd_momentum` | `(lr : Float)` / `(lr) (momentum := 0.9)` |
-| `chain` | `GradientTransformation α S1 → GradientTransformation α S2 → GradientTransformation α (ChainState S1 S2)` |
+| `chain` | `GradientTransformation α S1 → GradientTransformation α S2 → GradientTransformation α (S1 × S2)` |
 | `scale_by_schedule` | `(schedule : Schedule) : GradientTransformation α ScaleByScheduleState` |
 | `step` | `opt → params → grads → state → IO (α × S)` |
 | `apply_updates` | `params → updates → IO params` (add, then create independent trainable leaves) |

@@ -210,7 +210,7 @@ completion the checkpoint file is removed.
 Entry points:
 
 ```lean
-def runPipelineWithHandlers (config) (logHandlers : LogHandlers := {}) (action) : IO α
+def runPipelineWithHandlers (config) (logHandlers : Log.Handlers := {}) (action) : IO α
 def withDistributedWithHandlers (config) (logHandlers := {}) (action) : IO α
 ```
 
@@ -220,7 +220,7 @@ reads the torchrun environment — `WORLD_SIZE`, `RANK`, `LOCAL_RANK`,
 (`Tyr/Pipeline.lean`). `resolveTrainingDevice`
 (`Tyr/Pipeline.lean`) honors `TYR_DEVICE=cpu|mps|cuda|auto` and maps
 `LOCAL_RANK` to the CUDA ordinal. Logging is silent unless you pass
-`LogHandlers` (`onInfo`/`onError` callbacks, `Tyr/Pipeline.lean`).
+`Log.Handlers` (`onInfo`/`onWarn`/`onError` callbacks, `Tyr/Log.lean`).
 
 There is a background-task API (`background`, `await`, `Tyr/Pipeline.lean`). `spawnBackground`
 (`Tyr/Pipeline.lean`) starts the action immediately via `IO.asTask`
