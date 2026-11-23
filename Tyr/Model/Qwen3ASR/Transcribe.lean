@@ -443,30 +443,19 @@ def transcribeWaveform
         none
   }
 
-private def broadcastContexts (n : Nat) (contexts : Array String) : IO (Array String) := do
+/-- Repeat a single value across `n` inputs, or require one value per input. -/
+private def broadcastBatch {α : Type} (n : Nat) (field : String) (xs : Array α)
+    (onEmpty : IO (Array α)) : IO (Array α) := do
   if n == 0 then
     pure #[]
-  else if contexts.isEmpty then
-    pure (Array.replicate n "")
-  else if contexts.size == 1 then
-    pure (Array.replicate n (contexts[0]!))
-  else if contexts.size == n then
-    pure contexts
+  else if xs.isEmpty then
+    onEmpty
+  else if h : xs.size = 1 then
+    pure (Array.replicate n (xs[0]'(by omega)))
+  else if xs.size == n then
+    pure xs
   else
-    throw <| IO.userError s!"Batch size mismatch: audio={n}, context={contexts.size}"
-
-private def broadcastLanguages (n : Nat) (languages : Array (Option String))
-    : IO (Array (Option String)) := do
-  if n == 0 then
-    pure #[]
-  else if languages.isEmpty then
-    pure (Array.replicate n none)
-  else if languages.size == 1 then
-    pure (Array.replicate n (languages[0]!))
-  else if languages.size == n then
-    pure languages
-  else
-    throw <| IO.userError s!"Batch size mismatch: audio={n}, language={languages.size}"
+    throw <| IO.userError s!"Batch size mismatch: audio={n}, {field}={xs.size}"
 
 /-- Inputs decoded per batch; `none` decodes all `n` at once. -/
 private def effectiveBatchStep (n : Nat) (maxInferenceBatchSize : Option Nat)
@@ -635,8 +624,8 @@ def transcribeWaveforms
     (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
     : IO (Array ASRTranscription) := do
   let n := audios16k.size
-  let ctxs ← broadcastContexts n contexts
-  let langs ← broadcastLanguages n languages
+  let ctxs ← broadcastBatch n "context" contexts (pure (Array.replicate n ""))
+  let langs ← broadcastBatch n "language" languages (pure (Array.replicate n none))
   let mut out : Array ASRTranscription := Array.mkEmpty n
   let step := (effectiveBatchStep n maxInferenceBatchSize hBatch).val
   let mut off : Nat := 0
@@ -873,30 +862,6 @@ private def validateAlignLanguage (aligner : Qwen3ForcedAligner) (language : Str
   IO.ofExcept (validateLanguage aligner.cfg.supportLanguages ln)
   pure ln
 
-private def broadcastTexts (n : Nat) (texts : Array String) : IO (Array String) := do
-  if n == 0 then
-    pure #[]
-  else if texts.isEmpty then
-    throw <| IO.userError "Forced aligner requires non-empty text input"
-  else if texts.size == 1 then
-    pure (Array.replicate n (texts[0]!))
-  else if texts.size == n then
-    pure texts
-  else
-    throw <| IO.userError s!"Batch size mismatch: audio={n}, text={texts.size}"
-
-private def broadcastAlignLanguages (n : Nat) (languages : Array String) : IO (Array String) := do
-  if n == 0 then
-    pure #[]
-  else if languages.isEmpty then
-    throw <| IO.userError "Forced aligner requires non-empty language input"
-  else if languages.size == 1 then
-    pure (Array.replicate n (languages[0]!))
-  else if languages.size == n then
-    pure languages
-  else
-    throw <| IO.userError s!"Batch size mismatch: audio={n}, language={languages.size}"
-
 /-- Align one 16k mono waveform against transcript text/language. -/
 def alignWaveform
     (aligner : Qwen3ForcedAligner)
@@ -951,8 +916,10 @@ def alignWaveforms
     (hBatch : ∀ k ∈ maxInferenceBatchSize, 0 < k := by decide)
     : IO (Array ForcedAlignResult) := do
   let n := audios16k.size
-  let ts ← broadcastTexts n texts
-  let ls ← broadcastAlignLanguages n languages
+  let ts ← broadcastBatch n "text" texts
+    (throw <| IO.userError "Forced aligner requires non-empty text input")
+  let ls ← broadcastBatch n "language" languages
+    (throw <| IO.userError "Forced aligner requires non-empty language input")
   let step := (effectiveBatchStep n maxInferenceBatchSize hBatch).val
   let mut out : Array ForcedAlignResult := Array.mkEmpty n
   let mut off : Nat := 0
@@ -973,8 +940,10 @@ def alignAudioInputs
     (hBatch : ∀ k ∈ maxInferenceBatchSize, 0 < k := by decide)
     : IO (Array ForcedAlignResult) := do
   let n := audios.size
-  let ts ← broadcastTexts n texts
-  let ls ← broadcastAlignLanguages n languages
+  let ts ← broadcastBatch n "text" texts
+    (throw <| IO.userError "Forced aligner requires non-empty text input")
+  let ls ← broadcastBatch n "language" languages
+    (throw <| IO.userError "Forced aligner requires non-empty language input")
   let step := (effectiveBatchStep n maxInferenceBatchSize hBatch).val
   let mut out : Array ForcedAlignResult := Array.mkEmpty n
   let mut off : Nat := 0

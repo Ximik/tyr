@@ -72,7 +72,7 @@ def route {tokens : Nat}
     (cfg : Config) (hMoE : cfg.isMoE) (r : LagunaTopKRouter (device := device) cfg) (x : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] })
     : IO (Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := .Int64 } × Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.num_experts_per_tok] }) := do
   let logits0 : Tensor { dtype := .Float32, device := device, shape := #[tokens, cfg.num_experts] } :=
-    Tensor.linear (floatDynamic x) (floatDynamic r.weight.2)
+    Tensor.linear (Tensor.toFloat32 x) (Tensor.toFloat32 r.weight.2)
   let logits :=
     if cfg.moe_router_logit_softcapping > 0.0 then
       let c := cfg.moe_router_logit_softcapping
@@ -80,7 +80,7 @@ def route {tokens : Nat}
     else logits0
   let scores := Tensor.sigmoid logits
   let selectionScores := match r.eScoreCorrectionBias with
-    | some bias => Tensor.add scores (Tensor.broadcastTo (floatDynamic bias.2) #[tokens, cfg.num_experts])
+    | some bias => Tensor.add scores (Tensor.broadcastTo (Tensor.toFloat32 bias.2) #[tokens, cfg.num_experts])
     | none => scores
   let (_, topIdx) := Tensor.topKLast2d selectionScores cfg.num_experts_per_tok (cfg.expertsValid (of_decide_eq_true hMoE)).2
   let weights := Tensor.gather scores 1 topIdx
@@ -253,16 +253,16 @@ private def forwardDecode1
       let x3 : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.reshape (Tensor.broadcastTo (Tensor.reshape x #[1, 1, h]) #[k, 1, h]) #[k, 1, h]
       let g : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := Tensor.bmm x3 (transposeMatrixBatch gateW)
       let u : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := Tensor.bmm x3 (transposeMatrixBatch upW)
-      let hid : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := mulSame (Tensor.silu g) u
+      let hid : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := Tensor.mul (Tensor.silu g) u
       let o : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.bmm hid (transposeMatrixBatch downW)
       let ow : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.mul (Tensor.broadcastTo (Tensor.reshape flatW #[k, 1, 1]) #[k, 1, h]) o
       pure (show Tensor ⟨#[1, h], dtype, device⟩ from by
         simpa using (Tensor.reshape (Tensor.sumDim ow 0 false) #[1, h]))
   -- Dense shared expert (SwiGLU MLP, no gating score).
   let sharedH : Tensor { dtype := dtype, device := device, shape := #[1, cfg.shared_expert_intermediate_size] } :=
-    mulSame (Tensor.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
+    Tensor.mul (Tensor.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
   let sharedOut : Tensor { dtype := dtype, device := device, shape := #[1, h] } := Tensor.linear sharedH m.sharedDownProj
-  pure (Tensor.reshape (addSame (Tensor.mulScalar acc cfg.moe_routed_scaling_factor) sharedOut) #[1, h])
+  pure (Tensor.reshape (Tensor.add (Tensor.mulScalar acc cfg.moe_routed_scaling_factor) sharedOut) #[1, h])
 
 /-- MoE forward over a 2D `[tokens, hidden]` batch.
     Returns `moe_routed_scaling_factor · Σ_k w_k · expert_k(x) + sharedExpert(x)`
@@ -307,9 +307,9 @@ def forward2d {tokens : Nat}
       let routed : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := routedBF16.castDType dtype
       -- Dense shared expert (SwiGLU MLP, no gating score).
       let sharedH : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.shared_expert_intermediate_size] } :=
-        mulSame (Tensor.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
+        Tensor.mul (Tensor.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
       let sharedOut : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.linear sharedH m.sharedDownProj
-      pure (Tensor.reshape (addSame (Tensor.mulScalar routed cfg.moe_routed_scaling_factor) sharedOut) #[tokens, cfg.hidden_size])
+      pure (Tensor.reshape (Tensor.add (Tensor.mulScalar routed cfg.moe_routed_scaling_factor) sharedOut) #[tokens, cfg.hidden_size])
     else do
       -- Per-pair token row ids: [0..tokens) repeated k times each.
       -- NOTE: `arange` always allocates on CPU; move to the model device so
@@ -318,7 +318,7 @@ def forward2d {tokens : Nat}
         Tensor.reshape (Tensor.broadcastTo (Tensor.reshape ((Tensor.arange tokens).to device) #[tokens, 1]) #[tokens, k]) #[tokens * k]
       let pairIds := (Tensor.arange (tokens * k)).to device
       -- Accumulator in the model dtype (HF: torch.zeros_like(hidden_states)).
-      let mut acc : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.castLike x (zerosDynamic #[tokens, cfg.hidden_size] false device)
+      let mut acc : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.castLike x (Tensor.zeros #[tokens, cfg.hidden_size] false device)
       -- Per-unique-expert dispatch: materialize each hit expert once per forward.
       -- One CPU readback of the (small) dispatch list — <= tokens*k entries —
       -- instead of scanning all num_experts with a GPU mask + host sync per
@@ -339,7 +339,7 @@ def forward2d {tokens : Nat}
         -- SwiGLU expert MLP in BF16.
         let xE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.embedding1d tokE x
         let hid : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.moe_intermediate_size] } :=
-          mulSame (Tensor.silu (Tensor.linear xE gateW)) (Tensor.linear xE upW)
+          Tensor.mul (Tensor.silu (Tensor.linear xE gateW)) (Tensor.linear xE upW)
         let outE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.linear hid downW
         -- Routing weights multiply the expert OUTPUT (moe_apply_router_weight_on_input=false).
         let wCol := wE.reshape #[nE, 1]
@@ -349,11 +349,11 @@ def forward2d {tokens : Nat}
         acc := scatterAdd acc 0 idxRows outEW
       -- Dense shared expert (SwiGLU MLP, no gating score).
       let sharedH : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.shared_expert_intermediate_size] } :=
-        mulSame (Tensor.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
+        Tensor.mul (Tensor.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
       let sharedOut : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.linear sharedH m.sharedDownProj
       -- HF multiplies the routed output by the scaling factor, then adds the shared expert.
       let routed : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.mulScalar acc cfg.moe_routed_scaling_factor
-      pure (Tensor.reshape (addSame routed sharedOut) #[tokens, cfg.hidden_size])
+      pure (Tensor.reshape (Tensor.add routed sharedOut) #[tokens, cfg.hidden_size])
 
 end LagunaSparseMoeBlock
 

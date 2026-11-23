@@ -175,21 +175,21 @@ def load (path : String) (device : Device := .CPU) : IO (SileroVAD (device := de
   let finalConvWeight ← loadWeight (device := device) path "final_conv.weight" #[1, 128, 1]
   let finalConvBias ← loadWeight (device := device) path "final_conv.bias" #[1]
   pure {
-    stftConvWeight := reqGradFalse stftConvWeight
-    conv1Weight := reqGradFalse conv1Weight
-    conv1Bias := reqGradFalse conv1Bias
-    conv2Weight := reqGradFalse conv2Weight
-    conv2Bias := reqGradFalse conv2Bias
-    conv3Weight := reqGradFalse conv3Weight
-    conv3Bias := reqGradFalse conv3Bias
-    conv4Weight := reqGradFalse conv4Weight
-    conv4Bias := reqGradFalse conv4Bias
-    lstmWeightIH := reqGradFalse lstmWeightIH
-    lstmWeightHH := reqGradFalse lstmWeightHH
-    lstmBiasIH := reqGradFalse lstmBiasIH
-    lstmBiasHH := reqGradFalse lstmBiasHH
-    finalConvWeight := reqGradFalse finalConvWeight
-    finalConvBias := reqGradFalse finalConvBias
+    stftConvWeight := Tensor.detach stftConvWeight
+    conv1Weight := Tensor.detach conv1Weight
+    conv1Bias := Tensor.detach conv1Bias
+    conv2Weight := Tensor.detach conv2Weight
+    conv2Bias := Tensor.detach conv2Bias
+    conv3Weight := Tensor.detach conv3Weight
+    conv3Bias := Tensor.detach conv3Bias
+    conv4Weight := Tensor.detach conv4Weight
+    conv4Bias := Tensor.detach conv4Bias
+    lstmWeightIH := Tensor.detach lstmWeightIH
+    lstmWeightHH := Tensor.detach lstmWeightHH
+    lstmBiasIH := Tensor.detach lstmBiasIH
+    lstmBiasHH := Tensor.detach lstmBiasHH
+    finalConvWeight := Tensor.detach finalConvWeight
+    finalConvBias := Tensor.detach finalConvBias
   }
 
 private def lstmCellStep

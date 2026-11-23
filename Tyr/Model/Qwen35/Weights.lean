@@ -16,7 +16,7 @@ namespace torch.qwen35
 variable {device : Device}
 
 open torch.Log
-open torch.Model (reqGradFalse dequantizeFP8 dequantizeFP8Experts checkFP8Blocks)
+open torch.Model (dequantizeFP8 dequantizeFP8Experts checkFP8Blocks)
 open torch.safetensors (pushUnique Source)
 
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
@@ -122,10 +122,10 @@ private def loadAttention (src : Source) (cfg : Config) (layerIdx : Nat)
   let kNorm ← loadRMSNorm src s!"{p}.k_norm" cfg.head_dim device
 
   pure {
-    q_proj := reqGradFalse (← admitDType cast dtype qProj)
-    k_proj := reqGradFalse (← admitDType cast dtype kProj)
-    v_proj := reqGradFalse (← admitDType cast dtype vProj)
-    o_proj := reqGradFalse (← admitDType cast dtype oProj)
+    q_proj := Tensor.detach (← admitDType cast dtype qProj)
+    k_proj := Tensor.detach (← admitDType cast dtype kProj)
+    v_proj := Tensor.detach (← admitDType cast dtype vProj)
+    o_proj := Tensor.detach (← admitDType cast dtype oProj)
     q_norm := qNorm
     k_norm := kNorm
   }
@@ -158,16 +158,16 @@ private def loadLinearMixer (src : Source) (cfg : Config) (layerIdx : Nat)
   let outProj ← loadLinearWeight src s!"{p}.out_proj" cfg.hidden_size (Config.linearValueDim cfg) device
 
   pure {
-    in_proj_qkv := reqGradFalse (← admitDType cast dtype inQKV)
-    in_proj_z := reqGradFalse (← admitDType cast dtype inZ)
-    in_proj_b := reqGradFalse (← admitDType cast dtype inB)
-    in_proj_a := reqGradFalse (← admitDType cast dtype inA)
-    conv1d_weight := reqGradFalse (← admitDType cast dtype convW)
-    conv1d_bias := reqGradFalse (← admitDType cast dtype convB)
-    dt_bias := reqGradFalse dtBias.2.toFloat32
-    a_log := reqGradFalse aLog.2.toFloat32
+    in_proj_qkv := Tensor.detach (← admitDType cast dtype inQKV)
+    in_proj_z := Tensor.detach (← admitDType cast dtype inZ)
+    in_proj_b := Tensor.detach (← admitDType cast dtype inB)
+    in_proj_a := Tensor.detach (← admitDType cast dtype inA)
+    conv1d_weight := Tensor.detach (← admitDType cast dtype convW)
+    conv1d_bias := Tensor.detach (← admitDType cast dtype convB)
+    dt_bias := Tensor.detach dtBias.2.toFloat32
+    a_log := Tensor.detach aLog.2.toFloat32
     norm := norm
-    out_proj := reqGradFalse (← admitDType cast dtype outProj)
+    out_proj := Tensor.detach (← admitDType cast dtype outProj)
   }
 
 private def loadDenseMLP (src : Source) (cfg : Config) (layerIdx : Nat)
@@ -178,9 +178,9 @@ private def loadDenseMLP (src : Source) (cfg : Config) (layerIdx : Nat)
   let up ← loadLinearWeight src s!"{p}.up_proj" cfg.intermediate_size cfg.hidden_size device
   let down ← loadLinearWeight src s!"{p}.down_proj" cfg.hidden_size cfg.intermediate_size device
   pure {
-    gate_proj := reqGradFalse (← admitDType cast dtype gate)
-    up_proj := reqGradFalse (← admitDType cast dtype up)
-    down_proj := reqGradFalse (← admitDType cast dtype down)
+    gate_proj := Tensor.detach (← admitDType cast dtype gate)
+    up_proj := Tensor.detach (← admitDType cast dtype up)
+    down_proj := Tensor.detach (← admitDType cast dtype down)
   }
 
 private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
@@ -209,22 +209,22 @@ private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
   let sharedDownProj ← loadLinearWeight src s!"{p}.shared_expert.down_proj" cfg.hidden_size cfg.shared_expert_intermediate_size device
   let sharedExpertGate ← loadLinearWeight src s!"{p}.shared_expert_gate" 1 cfg.hidden_size device
 
-  let router : Qwen35TopKRouter (dtype := dtype) (device := device) cfg := { weight := reqGradFalse (← admitDType cast dtype routerW) }
+  let router : Qwen35TopKRouter (dtype := dtype) (device := device) cfg := { weight := Tensor.detach (← admitDType cast dtype routerW) }
   let experts : Qwen35MoeExperts (dtype := dtype) (device := device) cfg := {
-    gate_up_proj := reqGradFalse (← admitDType cast dtype gu)
-    down_proj := reqGradFalse (← admitDType cast dtype down)
+    gate_up_proj := Tensor.detach (← admitDType cast dtype gu)
+    down_proj := Tensor.detach (← admitDType cast dtype down)
   }
   let sharedExpert : Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.shared_expert_intermediate_size := {
-    gate_proj := reqGradFalse (← admitDType cast dtype sharedGateProj)
-    up_proj := reqGradFalse (← admitDType cast dtype sharedUpProj)
-    down_proj := reqGradFalse (← admitDType cast dtype sharedDownProj)
+    gate_proj := Tensor.detach (← admitDType cast dtype sharedGateProj)
+    up_proj := Tensor.detach (← admitDType cast dtype sharedUpProj)
+    down_proj := Tensor.detach (← admitDType cast dtype sharedDownProj)
   }
 
   pure {
     router := router
     experts := experts
     shared_expert := sharedExpert
-    shared_expert_gate := reqGradFalse (← admitDType cast dtype sharedExpertGate)
+    shared_expert_gate := Tensor.detach (← admitDType cast dtype sharedExpertGate)
   }
 
 private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
@@ -278,7 +278,7 @@ def load (path : String) (cfg : Config := Config.qwen35_9B)
   let norm ← loadRMSNorm src "model.norm" cfg.hidden_size device
 
   let model : Qwen35Model (dtype := dtype) (device := device) cfg := {
-    embed_tokens := reqGradFalse (← admitDType cast dtype embedTokens)
+    embed_tokens := Tensor.detach (← admitDType cast dtype embedTokens)
     layers := layers
     norm := norm
   }
@@ -288,10 +288,10 @@ def load (path : String) (cfg : Config := Config.qwen35_9B)
 
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse (← admitDType cast dtype w), false)
+    | some w => pure (Tensor.detach (← admitDType cast dtype w), false)
     | none => do
       log.onInfo "  lm_head.weight not found; tying to embeddings."
-      pure (reqGradFalse model.embed_tokens, true)
+      pure (Tensor.detach model.embed_tokens, true)
 
   log.onInfo "Loaded Qwen35ForCausalLM (device := device) weights."
   pure ⟨RealFloatingDType.ofDType dtype, { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }⟩

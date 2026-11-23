@@ -14,7 +14,6 @@ namespace torch.whisper
 
 variable {device : Device}
 open torch.Log
-open torch.Model (reqGradFalse)
 private def loadWeight (dtype : DType) (modelDir name : String) (shape : Shape)
     (device : Device) : IO (Tensor { shape, dtype := dtype, device }) := do
   let packed ← (← safetensors.Source.open modelDir).load name shape device
@@ -30,7 +29,7 @@ private def loadLayerNormSharded (modelDir : String) (namePrefix : String) (dim 
     (dtype : DType) (device : Device := .CPU) : IO (LayerNorm (device := device) dim dtype) := do
   let weight ← loadWeight (device := device) dtype modelDir s!"{namePrefix}.weight" #[dim]
   let bias ← loadWeight (device := device) dtype modelDir s!"{namePrefix}.bias" #[dim]
-  pure { weight := reqGradFalse weight, bias := reqGradFalse bias, eps := ⟨eps⟩ }
+  pure { weight := Tensor.detach weight, bias := Tensor.detach bias, eps := ⟨eps⟩ }
 
 private def loadAttentionSharded
     (modelDir : String)
@@ -60,14 +59,14 @@ private def loadAttentionSharded
     | some b => pure b
     | none => pure (Tensor.castLike outProjWeight (zerosFor (dtype := dtype) (device := device) #[dModel]))
   pure {
-    qProjWeight := reqGradFalse qProjWeight
-    qProjBias := reqGradFalse qProjBias
-    kProjWeight := reqGradFalse kProjWeight
-    kProjBias := reqGradFalse kProjBias
-    vProjWeight := reqGradFalse vProjWeight
-    vProjBias := reqGradFalse vProjBias
-    outProjWeight := reqGradFalse outProjWeight
-    outProjBias := reqGradFalse outProjBias
+    qProjWeight := Tensor.detach qProjWeight
+    qProjBias := Tensor.detach qProjBias
+    kProjWeight := Tensor.detach kProjWeight
+    kProjBias := Tensor.detach kProjBias
+    vProjWeight := Tensor.detach vProjWeight
+    vProjBias := Tensor.detach vProjBias
+    outProjWeight := Tensor.detach outProjWeight
+    outProjBias := Tensor.detach outProjBias
   }
 
 private def loadEncoderLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : WhisperConfig)
@@ -83,10 +82,10 @@ private def loadEncoderLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : 
   pure {
     selfAttn
     selfAttnLayerNorm
-    fc1Weight := reqGradFalse fc1Weight
-    fc1Bias := reqGradFalse fc1Bias
-    fc2Weight := reqGradFalse fc2Weight
-    fc2Bias := reqGradFalse fc2Bias
+    fc1Weight := Tensor.detach fc1Weight
+    fc1Bias := Tensor.detach fc1Bias
+    fc2Weight := Tensor.detach fc2Weight
+    fc2Bias := Tensor.detach fc2Bias
     finalLayerNorm
   }
 
@@ -107,10 +106,10 @@ private def loadDecoderLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : 
     selfAttnLayerNorm
     encoderAttn
     encoderAttnLayerNorm
-    fc1Weight := reqGradFalse fc1Weight
-    fc1Bias := reqGradFalse fc1Bias
-    fc2Weight := reqGradFalse fc2Weight
-    fc2Bias := reqGradFalse fc2Bias
+    fc1Weight := Tensor.detach fc1Weight
+    fc1Bias := Tensor.detach fc1Bias
+    fc2Weight := Tensor.detach fc2Weight
+    fc2Bias := Tensor.detach fc2Bias
     finalLayerNorm
   }
 
@@ -139,15 +138,15 @@ private def loadModelSharded (modelDir : String) (cfg : WhisperConfig) (dtype : 
   let decoderLayerNorm ← loadLayerNormSharded (dtype := dtype) (device := device) modelDir "model.decoder.layer_norm" cfg.dModel cfg.layerNormEps
 
   pure {
-    encoderConv1Weight := reqGradFalse encoderConv1Weight
-    encoderConv1Bias := reqGradFalse encoderConv1Bias
-    encoderConv2Weight := reqGradFalse encoderConv2Weight
-    encoderConv2Bias := reqGradFalse encoderConv2Bias
-    encoderPositionalEmbedding := reqGradFalse encoderPositionalEmbedding
+    encoderConv1Weight := Tensor.detach encoderConv1Weight
+    encoderConv1Bias := Tensor.detach encoderConv1Bias
+    encoderConv2Weight := Tensor.detach encoderConv2Weight
+    encoderConv2Bias := Tensor.detach encoderConv2Bias
+    encoderPositionalEmbedding := Tensor.detach encoderPositionalEmbedding
     encoderLayers
     encoderLayerNorm
-    decoderTokenEmbedding := reqGradFalse decoderTokenEmbedding
-    decoderPositionalEmbedding := reqGradFalse decoderPositionalEmbedding
+    decoderTokenEmbedding := Tensor.detach decoderTokenEmbedding
+    decoderPositionalEmbedding := Tensor.detach decoderPositionalEmbedding
     decoderLayers
     decoderLayerNorm
   }
@@ -179,7 +178,7 @@ def loadShardedAt (modelDir : String) (cfg : WhisperConfig := {}) (log : Handler
   let model ← loadModelSharded (dtype := dtype) (device := device) modelDir cfg encoderConv1Weight
   let projOut ←
     match (← loadOptional (device := device) dtype modelDir "proj_out.weight" #[cfg.vocabSize, cfg.dModel]) with
-    | some w => pure (reqGradFalse w)
+    | some w => pure (Tensor.detach w)
     | none =>
       log.onInfo "  proj_out.weight not found; tying output projection to decoder token embeddings."
       pure model.decoderTokenEmbedding

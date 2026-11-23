@@ -6,10 +6,6 @@ namespace torch.kittentts
 
 variable {device : Device}
 
-def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (y : Tensor { shape := t, dtype := d, device := device }) (dim : Nat)
-    (h : TensorSpec.catCompatible s t dim = true := by cat_shape) :
-    Tensor { shape := (TensorSpec.catShape s t dim), dtype := d, device := device } := Tensor.cat x y dim h
-
 def affine2d {batch input output : Nat}
     (x : Tensor { shape := #[batch, input], dtype := .Float32, device := device }) (w : Tensor { shape := #[output, input], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[output], dtype := .Float32, device := device }) : Tensor { shape := #[batch, output], dtype := .Float32, device := device } :=

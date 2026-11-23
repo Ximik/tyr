@@ -53,7 +53,6 @@ namespace torch.laguna
 
 variable {device : Device}
 open torch.Log
-open torch.Model (reqGradFalse)
 open torch.safetensors (pushUnique Source)
 
 /-- Candidate names for one checkpoint tensor, tolerant of common
@@ -103,11 +102,11 @@ private def loadAttention (src : Source) (cfg : Config) (layerIdx numHeads : Nat
   let qn ← src.load (← src.resolve (nameCandidates s!"{p}.q_norm.weight")) #[cfg.head_dim] device
   let kn ← src.load (← src.resolve (nameCandidates s!"{p}.k_norm.weight")) #[cfg.head_dim] device
   pure {
-    q_proj := reqGradFalse q
-    k_proj := reqGradFalse k
-    v_proj := reqGradFalse v
-    o_proj := reqGradFalse o
-    g_proj := reqGradFalse g
+    q_proj := Tensor.detach q
+    k_proj := Tensor.detach k
+    v_proj := Tensor.detach v
+    o_proj := Tensor.detach o
+    g_proj := Tensor.detach g
     q_norm := freezeStored qn
     k_norm := freezeStored kn
   }
@@ -123,9 +122,9 @@ private def loadDenseMLP (src : Source) (cfg : Config) (layerIdx : Nat)
   let down ← src.loadAs (← src.resolve (nameCandidates s!"{p}.down_proj.weight"))
     ⟨#[cfg.hidden_size, cfg.intermediate_size], dtype⟩ device
   pure {
-    gate_proj := reqGradFalse gate
-    up_proj := reqGradFalse up
-    down_proj := reqGradFalse down
+    gate_proj := Tensor.detach gate
+    up_proj := Tensor.detach up
+    down_proj := Tensor.detach down
   }
 
 /-- Unused placeholder packed banks for the dense-BF16 expert layout
@@ -135,7 +134,7 @@ private def placeholderPackedExperts (cfg : Config) (device : Device) : LagunaPa
   let mi := cfg.moe_intermediate_size
   let h := cfg.hidden_size
   -- Broadcast views keep the unused placeholders small while retaining true shapes.
-  let z := qwen35.zerosDynamic #[] false device
+  let z := Tensor.zeros #[] false device
   {
     gatePacked := ⟨.Float32, Tensor.broadcastTo z #[e, mi, h / 2]⟩
     gateScale := ⟨.Float32, Tensor.broadcastTo z #[e, mi, h / 16]⟩
@@ -219,9 +218,9 @@ private def loadPerExpertDenseBanks (src : Source) (p : String) (cfg : Config)
     ups := ups.push (Tensor.reshape u #[1, mi, h]).packShape
     downs := downs.push (Tensor.reshape d #[1, h, mi]).packShape
   pure {
-    gateProj := reqGradFalse (← stackBankAs dtype gates #[e, mi, h] device)
-    upProj := reqGradFalse (← stackBankAs dtype ups #[e, mi, h] device)
-    downProj := reqGradFalse (← stackBankAs dtype downs #[e, h, mi] device)
+    gateProj := Tensor.detach (← stackBankAs dtype gates #[e, mi, h] device)
+    upProj := Tensor.detach (← stackBankAs dtype ups #[e, mi, h] device)
+    downProj := Tensor.detach (← stackBankAs dtype downs #[e, h, mi] device)
   }
 
 /-- Load one sparse MoE block, auto-detecting the expert serialization:
@@ -259,9 +258,9 @@ private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
       let gate3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshape (Tensor.slice gu 1 0 mi) #[e, mi, h]
       let up3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshape (Tensor.slice gu 1 mi mi) #[e, mi, h]
       let dense : LagunaDenseExperts (device := device) cfg dtype := {
-        gateProj := reqGradFalse gate3
-        upProj := reqGradFalse up3
-        downProj := reqGradFalse down
+        gateProj := Tensor.detach gate3
+        upProj := Tensor.detach up3
+        downProj := Tensor.detach down
       }
       pure (placeholderPackedExperts cfg device, some dense)
     | none =>
@@ -277,9 +276,9 @@ private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
     router := { weight := freezeStored routerW, eScoreCorrectionBias := biasOpt.map freezeStored }
     experts := experts
     denseExperts := denseExperts
-    sharedGateProj := reqGradFalse sharedGate
-    sharedUpProj := reqGradFalse sharedUp
-    sharedDownProj := reqGradFalse sharedDown
+    sharedGateProj := Tensor.detach sharedGate
+    sharedUpProj := Tensor.detach sharedUp
+    sharedDownProj := Tensor.detach sharedDown
   }
 
 /-- Load decoder layer `layerIdx`, with the attention and FFN variants its
@@ -325,7 +324,7 @@ private def loadCore (src : Source) (desc : String) (cfg : Config)
   let normW ← src.load (← src.resolve (nameCandidates "model.norm.weight")) #[cfg.hidden_size] device
 
   let model : LagunaModel (device := device) cfg dtype := {
-    embed_tokens := reqGradFalse embedTokens.2
+    embed_tokens := Tensor.detach embedTokens.2
     layers := layers
     norm := freezeStored normW
   }
@@ -334,10 +333,10 @@ private def loadCore (src : Source) (desc : String) (cfg : Config)
     (src.loadAs · ⟨#[cfg.vocab_size, cfg.hidden_size], dtype⟩ device)
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse w, false)
+    | some w => pure (Tensor.detach w, false)
     | none => do
       log.onInfo "  lm_head.weight not found; tying to embeddings."
-      pure (reqGradFalse model.embed_tokens, true)
+      pure (Tensor.detach model.embed_tokens, true)
 
   log.onInfo "Loaded LagunaForCausalLM weights."
   pure ⟨⟨dtype, floating.down.valid⟩,

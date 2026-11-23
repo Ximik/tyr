@@ -14,7 +14,6 @@ namespace torch.gemma4
 variable {device : Device} {dtype : DType}
 
 open torch.Log
-open torch.Model (reqGradFalse)
 open torch.safetensors (pushUnique Source)
 
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
@@ -74,7 +73,7 @@ private def loadVisionLinear (src : Source) (name : String) (outDim inDim : Nat)
   let outputMin ← tryLoadVisionScalar src s!"{name}.output_min"
   let outputMax ← tryLoadVisionScalar src s!"{name}.output_max"
   pure ⟨w.1, {
-    weight := reqGradFalse w.2
+    weight := Tensor.detach w.2
     input_min := inputMin
     input_max := inputMax
     output_min := outputMin
@@ -131,7 +130,7 @@ private def loadVisionPatchEmbedder (src : Source) (cfg : VLConfig)
     src.load (← src.resolve (visionTensorNameCandidates "model.vision_tower.patch_embedder.position_embedding_table")) #[2, cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size] device
   pure ⟨inputProj.1, {
     input_proj := inputProj.2
-    position_embedding_table := reqGradFalse posEmbed.2.toFloat32
+    position_embedding_table := Tensor.detach posEmbed.2.toFloat32
   }⟩
 
 private def loadVisionModel (src : Source) (cfg : VLConfig) : IO (Σ dtype : RealFloatingDType, Gemma4VisionModel (device := device) cfg dtype.val) := do
@@ -147,8 +146,8 @@ private def loadVisionModel (src : Source) (cfg : VLConfig) : IO (Σ dtype : Rea
   pure ⟨RealFloatingDType.ofDType dtype, {
     patch_embedder := patchEmbedder.2
     blocks := blocks
-    std_bias := stdBias.map (reqGradFalse ·.2.toFloat32)
-    std_scale := stdScale.map (reqGradFalse ·.2.toFloat32)
+    std_bias := stdBias.map (Tensor.detach ·.2.toFloat32)
+    std_scale := stdScale.map (Tensor.detach ·.2.toFloat32)
   }⟩
 
 private def loadVisionProjector (src : Source) (cfg : VLConfig)
@@ -160,7 +159,7 @@ private def loadVisionProjector (src : Source) (cfg : VLConfig)
       "model.embed_vision.embedding_projection"
   let floating ← IO.ofExcept embedProj.1.realFloating?
   let _ := floating.down
-  pure ⟨RealFloatingDType.ofDType embedProj.1, { embedding_projection := reqGradFalse embedProj.2 }⟩
+  pure ⟨RealFloatingDType.ofDType embedProj.1, { embedding_projection := Tensor.detach embedProj.2 }⟩
 
 namespace Gemma4ForConditionalGeneration
 

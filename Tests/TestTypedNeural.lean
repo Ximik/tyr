@@ -101,8 +101,7 @@ example (_matrix : Tensor ⟨#[2, 3], .Float32, .CPU⟩) : True := by
     let expected := Tensor.mul (Tensor.castLike x normalized) (w.broadcastTo #[1, 2, 4])
     let outputs := #[norm.forward3d x,
       (norm.forward2d (x.reshape #[2, 4])).reshape #[1, 2, 4],
-      (norm.forward4d (x.reshape #[1, 1, 2, 4])).reshape #[1, 2, 4],
-      (norm.forward5d (x.reshape #[1, 1, 2, 4])).reshape #[1, 2, 4]]
+      (norm.forward4d (x.reshape #[1, 1, 2, 4])).reshape #[1, 2, 4]]
     for actual in outputs do
       LeanTest.assertEqual actual.actualSpec.dtype x.actualSpec.dtype
       LeanTest.assertEqual (← actual.toFloatArray) (← expected.toFloatArray)

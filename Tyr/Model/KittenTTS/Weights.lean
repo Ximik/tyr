@@ -37,9 +37,6 @@ def KittenTTSConfig.kokoroV1 : KittenTTSConfig :=
 
 private abbrev kokoro := KittenTTSConfig.kokoroV1
 
-private def reqGradFalse {s : Shape} (t : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } :=
-  Tensor.detach t
-
 private def getOrThrow {α} (xs : Array α) (idx : Nat) (msg : String) : IO α :=
   match xs[idx]? with
   | some x => pure x
@@ -50,30 +47,12 @@ private def warnShapeOverride (log : Handlers) (field : String) (cfgValue actual
     log.onWarn s!"Checkpoint overrides {field}: config={cfgValue}, checkpoint={actualValue}"
   pure ()
 
-private def normDim0_3d {d0 d1 d2 : Nat}
-    (x : Tensor { shape := #[d0, d1, d2], dtype := .Float32, device := device })
-    : Tensor { shape := #[d0], dtype := .Float32, device := device } :=
-  let sq : Tensor { shape := #[d0, d1, d2], dtype := .Float32, device := device } := x * x
-  let s2 : Tensor { shape := #[d0, d1, 1], dtype := .Float32, device := device } := Tensor.sumDim sq 2 true
-  let s1 : Tensor { shape := #[d0, 1, 1], dtype := .Float32, device := device } := Tensor.sumDim s2 1 true
-  Tensor.reshape (Tensor.sqrt (s1 + (1e-12 : Float))) #[d0]
-
-private def materializeWeightNormConv1d {outC inC kernel : Nat}
-    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
-    (weightG : Tensor { shape := #[outC], dtype := .Float32, device := device })
-    : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } :=
-  let denom : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape (normDim0_3d weightV) #[outC, 1, 1]
-  let denomE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.broadcastTo denom #[outC, inC, kernel]
-  let gain : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape weightG #[outC, 1, 1]
-  let gainE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.broadcastTo gain #[outC, inC, kernel]
-  Tensor.div (weightV * gainE) denomE
-
 private def linearFromTensors {inDim outDim : Nat}
     (weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[outDim], dtype := .Float32, device := device })
     : LinearNorm (device := device) inDim outDim := {
-      weight := reqGradFalse weight
-      bias := reqGradFalse bias
+      weight := Tensor.detach weight
+      bias := Tensor.detach bias
     }
 
 private def biLSTMFromTensors {inputSize hiddenSize : Nat}
@@ -86,14 +65,14 @@ private def biLSTMFromTensors {inputSize hiddenSize : Nat}
     (biasIHBackward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32, device := device })
     (biasHHBackward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32, device := device })
     : BiLSTM (device := device) inputSize hiddenSize := {
-      wxForward := reqGradFalse wxForward
-      whForward := reqGradFalse whForward
-      biasIHForward := reqGradFalse biasIHForward
-      biasHHForward := reqGradFalse biasHHForward
-      wxBackward := reqGradFalse wxBackward
-      whBackward := reqGradFalse whBackward
-      biasIHBackward := reqGradFalse biasIHBackward
-      biasHHBackward := reqGradFalse biasHHBackward
+      wxForward := Tensor.detach wxForward
+      whForward := Tensor.detach whForward
+      biasIHForward := Tensor.detach biasIHForward
+      biasHHForward := Tensor.detach biasHHForward
+      wxBackward := Tensor.detach wxBackward
+      whBackward := Tensor.detach whBackward
+      biasIHBackward := Tensor.detach biasIHBackward
+      biasHHBackward := Tensor.detach biasHHBackward
     }
 
 private def conv1dFromWeightNorm {inC outC kernel stride padding dilation : Nat}
@@ -101,8 +80,8 @@ private def conv1dFromWeightNorm {inC outC kernel stride padding dilation : Nat}
     (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : Conv1dParams (device := device) inC outC kernel stride padding dilation := {
-      weight := reqGradFalse <| materializeWeightNormConv1d weightV (Tensor.reshape weightG3 #[outC])
-      bias := reqGradFalse bias
+      weight := Tensor.detach <| applyWeightNormConv1d weightV (Tensor.reshape weightG3 #[outC])
+      bias := Tensor.detach bias
     }
 
 private def wnConv1dFromWeightNorm {inC outC kernel stride padding dilation : Nat}
@@ -110,9 +89,9 @@ private def wnConv1dFromWeightNorm {inC outC kernel stride padding dilation : Na
     (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : WNConv1dParams (device := device) inC outC kernel stride padding dilation := {
-      weightV := reqGradFalse weightV
-      weightG := reqGradFalse (Tensor.reshape weightG3 #[outC])
-      bias := reqGradFalse bias
+      weightV := Tensor.detach weightV
+      weightG := Tensor.detach (Tensor.reshape weightG3 #[outC])
+      bias := Tensor.detach bias
     }
 
 private def wnDepthwiseTransConv1dFromWeightNorm
@@ -121,9 +100,9 @@ private def wnDepthwiseTransConv1dFromWeightNorm
     (weightG3 : Tensor { shape := #[channels, 1, 1], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[channels], dtype := .Float32, device := device })
     : WNDepthwiseTransConv1dParams (device := device) channels kernel stride padding outputPadding dilation := {
-      weightV := reqGradFalse weightV
-      weightG := reqGradFalse (Tensor.reshape weightG3 #[channels])
-      bias := reqGradFalse bias
+      weightV := Tensor.detach weightV
+      weightG := Tensor.detach (Tensor.reshape weightG3 #[channels])
+      bias := Tensor.detach bias
     }
 
 private def wnConvTranspose1dFromWeightNorm
@@ -132,9 +111,9 @@ private def wnConvTranspose1dFromWeightNorm
     (weightG3 : Tensor { shape := #[inC, 1, 1], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : WNConvTranspose1dParams (device := device) inC outC kernel stride padding outputPadding dilation := {
-      weightV := reqGradFalse weightV
-      weightG := reqGradFalse (Tensor.reshape weightG3 #[inC])
-      bias := reqGradFalse bias
+      weightV := Tensor.detach weightV
+      weightG := Tensor.detach (Tensor.reshape weightG3 #[inC])
+      bias := Tensor.detach bias
     }
 
 private def adaLayerNormFromLinear {styleDim channels : Nat}
@@ -158,9 +137,9 @@ private def wnConv1dFromPlain {inC outC kernel stride padding dilation : Nat}
     (weight : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : WNConv1dParams (device := device) inC outC kernel stride padding dilation := {
-      weightV := reqGradFalse weight
-      weightG := reqGradFalse (normDim0_3d weight)
-      bias := reqGradFalse bias
+      weightV := Tensor.detach weight
+      weightG := Tensor.detach (normDim0_3d weight)
+      bias := Tensor.detach bias
     }
 
 private def loadGenResUnit {α β γ δ ε ζ : Type} {styleDim channels kernel dilation : Nat}
@@ -190,8 +169,8 @@ macro "loadGenResUnit%" blk:term "," name:term "," k:term : term => `(
     (fun node => do pure (wnConv1dFromWeightNorm (← onDevice node.weight_v) (← onDevice node.weight_g) (← onDevice node.bias)))
     (fun node => do adaIN1dFromLinear (← onDevice node.fc.weight) (← onDevice node.fc.bias))
     (fun node => do adaIN1dFromLinear (← onDevice node.fc.weight) (← onDevice node.fc.bias))
-    (fun alpha => do pure (reqGradFalse (← onDevice alpha)))
-    (fun alpha => do pure (reqGradFalse (← onDevice alpha)))
+    (fun alpha => do pure (Tensor.detach (← onDevice alpha)))
+    (fun alpha => do pure (Tensor.detach (← onDevice alpha)))
     $name $k)
 
 /-- Load a three-unit generator residual block from its checkpoint node arrays. -/
@@ -206,11 +185,11 @@ private def loadKittenAlbertFromCheckpoint
     (weights : KokoroCheckpoint.WeightsBert)
     : IO (KittenAlbert (device := device) kokoro.nToken kokoro.plbert) := do
   let embeddings : AlbertEmbeddings (device := device) kokoro.nToken kokoro.plbert := {
-    wordEmbeddings := reqGradFalse (← onDevice weights.embeddings.word_embeddings.weight)
-    positionEmbeddings := reqGradFalse (← onDevice weights.embeddings.position_embeddings.weight)
-    tokenTypeEmbeddings := reqGradFalse (← onDevice weights.embeddings.token_type_embeddings.weight)
-    layerNormWeight := reqGradFalse (← onDevice weights.embeddings.layernorm.weight)
-    layerNormBias := reqGradFalse (← onDevice weights.embeddings.layernorm.bias)
+    wordEmbeddings := Tensor.detach (← onDevice weights.embeddings.word_embeddings.weight)
+    positionEmbeddings := Tensor.detach (← onDevice weights.embeddings.position_embeddings.weight)
+    tokenTypeEmbeddings := Tensor.detach (← onDevice weights.embeddings.token_type_embeddings.weight)
+    layerNormWeight := Tensor.detach (← onDevice weights.embeddings.layernorm.weight)
+    layerNormBias := Tensor.detach (← onDevice weights.embeddings.layernorm.bias)
   }
   let groups : Array (KittenAlbertLayerGroup (device := device) kokoro.plbert) ←
     weights.encoder.albert_layer_groups.mapM fun group => do
@@ -220,11 +199,11 @@ private def loadKittenAlbertFromCheckpoint
           key := linearFromTensors (← onDevice layer.attention.key.weight) (← onDevice layer.attention.key.bias)
           value := linearFromTensors (← onDevice layer.attention.value.weight) (← onDevice layer.attention.value.bias)
           dense := linearFromTensors (← onDevice layer.attention.dense.weight) (← onDevice layer.attention.dense.bias)
-          layerNormWeight := reqGradFalse (← onDevice layer.attention.layernorm.weight)
-          layerNormBias := reqGradFalse (← onDevice layer.attention.layernorm.bias)
+          layerNormWeight := Tensor.detach (← onDevice layer.attention.layernorm.weight)
+          layerNormBias := Tensor.detach (← onDevice layer.attention.layernorm.bias)
         }
-        fullLayerNormWeight := reqGradFalse (← onDevice layer.full_layer_layer_norm.weight)
-        fullLayerNormBias := reqGradFalse (← onDevice layer.full_layer_layer_norm.bias)
+        fullLayerNormWeight := Tensor.detach (← onDevice layer.full_layer_layer_norm.weight)
+        fullLayerNormBias := Tensor.detach (← onDevice layer.full_layer_layer_norm.bias)
         ffn := linearFromTensors (← onDevice layer.ffn.weight) (← onDevice layer.ffn.bias)
         ffnOutput := linearFromTensors (← onDevice layer.ffn_output.weight) (← onDevice layer.ffn_output.bias)
       }
@@ -252,8 +231,8 @@ private def loadTextEncoderFromCheckpoint
   let convs : Array (TextConvLayer (device := device) kokoro) ←
     weights.cnn.mapM fun layer => do pure {
       conv := conv1dFromWeightNorm (← onDevice layer.i0.weight_v) (← onDevice layer.i0.weight_g) (← onDevice layer.i0.bias)
-      lnWeight := reqGradFalse (← onDevice layer.i1.gamma)
-      lnBias := reqGradFalse (← onDevice layer.i1.beta)
+      lnWeight := Tensor.detach (← onDevice layer.i1.gamma)
+      lnBias := Tensor.detach (← onDevice layer.i1.beta)
     }
   let lstm :=
     biLSTMFromTensors
@@ -266,7 +245,7 @@ private def loadTextEncoderFromCheckpoint
       (← onDevice weights.lstm.bias_ih_l0_reverse)
       (← onDevice weights.lstm.bias_hh_l0_reverse)
   pure {
-    embedding := reqGradFalse (← onDevice weights.embedding.weight)
+    embedding := Tensor.detach (← onDevice weights.embedding.weight)
     convs
     lstm
   }
@@ -403,12 +382,12 @@ private def loadProsodyPredictorFromCheckpoint
     nBlk1
     nBlk2
     f0Proj := {
-      weight := reqGradFalse (← onDevice weights.f0_proj.weight)
-      bias := reqGradFalse (← onDevice weights.f0_proj.bias)
+      weight := Tensor.detach (← onDevice weights.f0_proj.weight)
+      bias := Tensor.detach (← onDevice weights.f0_proj.bias)
     }
     nProj := {
-      weight := reqGradFalse (← onDevice weights.n_proj.weight)
-      bias := reqGradFalse (← onDevice weights.n_proj.bias)
+      weight := Tensor.detach (← onDevice weights.n_proj.weight)
+      bias := Tensor.detach (← onDevice weights.n_proj.bias)
     }
   }
 

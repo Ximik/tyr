@@ -33,10 +33,6 @@ def initBias (shape : Shape) (dtype : DType := .Float32) (device : Device := .CP
   IO.ofExcept (Shape.validateAllocation shape)
   Tensor.parameter (Tensor.zerosFor { shape, dtype, device })
 
-/-- Mark a loaded pretrained tensor as frozen (requires_grad=false). -/
-def reqGradFalse {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  Tensor.detach t
-
 /-- Blockwise FP8 scales cover whole 128x128 blocks; checked where the scales are loaded. -/
 def checkFP8Blocks (name : String) (outDim inDim : Nat) : IO (PLift (128 ∣ outDim ∧ 128 ∣ inDim)) :=
   if h : 128 ∣ outDim ∧ 128 ∣ inDim then pure ⟨h⟩

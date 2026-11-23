@@ -25,9 +25,6 @@ variable [DType.ConstantSupported dtype device]
 open torch
 open torch.Model torch.qwen35
 
-private def reqGradFalse {s : Shape} (t : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.detach t
-
 /-- Gemma 4 RMSNorm with standard learned scale. -/
 structure Gemma4RMSNorm (dim : Nat) where
   weight : SomeDTypeTensor #[dim] device
@@ -46,11 +43,11 @@ def forward2d {n dim : Nat}
     (m : Gemma4RMSNorm (device := device) dim)
     (x : Tensor { device := device, shape := #[n, dim], dtype := dtype })
     : Tensor { device := device, shape := #[n, dim], dtype := dtype } :=
-  let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
+  let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.toFloat32 x
   let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
-  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var m.eps)
+  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.rsqrt (Tensor.addScalar var m.eps)
   let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo inv #[n, dim]
-  let scale : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo (Tensor.reshape (floatDynamic m.weight.2) #[1, dim]) #[n, dim]
+  let scale : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo (Tensor.reshape (Tensor.toFloat32 m.weight.2) #[1, dim]) #[n, dim]
   Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) scale)
 
 def forward3d {batch seq dim : Nat}
@@ -75,17 +72,17 @@ private def capLogits {σ : StaticSpec} (cfg : Config) (logits : Tensor σ) : Te
   | some cap => softcap logits cap
   | none => logits
 
-private def rmsNormNoScale2d {n dim : Nat}
+def rmsNormNoScale2d {n dim : Nat}
     (x : Tensor { device := device, shape := #[n, dim], dtype := dtype })
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[n, dim], dtype := dtype } :=
-  let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
+  let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.toFloat32 x
   let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
-  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var eps)
+  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.rsqrt (Tensor.addScalar var eps)
   let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo inv #[n, dim]
   Tensor.castLike x (Tensor.mul xf inv)
 
-private def rmsNormNoScale4d {a b c dim : Nat}
+def rmsNormNoScale4d {a b c dim : Nat}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
@@ -101,16 +98,10 @@ private def rmsNormWeighted4dSlice {a b c dim maxDim : Nat} {weightDType : DType
   let w : Tensor { device := device, shape := #[dim], dtype := weightDType } := Tensor.slice weight 0 0 dim
   let xf : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshape x #[a * b * c, dim]
   let var : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := Tensor.meanDim (Tensor.mul xf xf) 1 true
-  let inv : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := rsqrtDynamic (Tensor.addScalar var eps)
+  let inv : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := Tensor.rsqrt (Tensor.addScalar var eps)
   let inv : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.broadcastTo inv #[a * b * c, dim]
-  let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.broadcastTo (Tensor.reshape (floatDynamic w) #[1, dim]) #[a * b * c, dim]
-  Tensor.castLike x (Tensor.reshape (Tensor.mul (floatDynamic (Tensor.mul xf inv)) scale) #[a, b, c, dim])
-
-private def rmsNormNoScale4dSlice {a b c dim : Nat}
-    (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
-    (eps : Float := 1e-6)
-    : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
-  rmsNormNoScale4d x eps
+  let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.broadcastTo (Tensor.reshape (Tensor.toFloat32 w) #[1, dim]) #[a * b * c, dim]
+  Tensor.castLike x (Tensor.reshape (Tensor.mul (Tensor.toFloat32 (Tensor.mul xf inv)) scale) #[a, b, c, dim])
 
 /-- Dense Gemma 4 MLP.
     Layers whose checkpoint width is smaller than `Config.maxIntermediateSize`
@@ -301,10 +292,10 @@ private def padSlidingKVForCache {batch seq : Nat}
     simp only [Config.maxKVHeads, Gemma4Config.maxKVHeads]; split <;> omega
   let padDim : Nat := Config.maxHeadDim cfg - cfg.head_dim
   let xDim : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, Config.maxHeadDim cfg], dtype := dtype } :=
-    (Tensor.cat x (Tensor.castLike x (zerosDynamicOn x.device dtype : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, padDim], dtype := dtype })) 3).reshape
+    (Tensor.cat x (Tensor.castLike x (Tensor.zerosFor _ : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, padDim], dtype := dtype })) 3).reshape
       #[batch, cfg.num_key_value_heads, seq, Config.maxHeadDim cfg] (by simp [padDim, Nat.add_sub_cancel' hDim])
   let padHeads : Nat := Config.maxKVHeads cfg - cfg.num_key_value_heads
-  (Tensor.cat xDim (Tensor.castLike x (zerosDynamicOn x.device dtype : Tensor { device := device, shape := #[batch, padHeads, seq, Config.maxHeadDim cfg], dtype := dtype })) 1).reshape
+  (Tensor.cat xDim (Tensor.castLike x (Tensor.zerosFor _ : Tensor { device := device, shape := #[batch, padHeads, seq, Config.maxHeadDim cfg], dtype := dtype })) 1).reshape
     #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] (by simp [padHeads, Nat.add_sub_cancel' hHeads])
 
 private def padFullKVForCache {batch seq : Nat}
@@ -317,10 +308,10 @@ private def padFullKVForCache {batch seq : Nat}
     simp only [Config.maxKVHeads, Gemma4Config.maxKVHeads, Config.fullNumKVHeads]; split <;> omega
   let padDim : Nat := Config.maxHeadDim cfg - Config.fullHeadDim cfg
   let xDim : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } :=
-    (Tensor.cat x (Tensor.castLike x (zerosDynamicOn x.device dtype : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, padDim], dtype := dtype })) 3).reshape
+    (Tensor.cat x (Tensor.castLike x (Tensor.zerosFor _ : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, padDim], dtype := dtype })) 3).reshape
       #[batch, Config.fullNumKVHeads cfg, seq, Config.maxHeadDim cfg] (by simp [padDim, Nat.add_sub_cancel' hDim])
   let padHeads : Nat := Config.maxKVHeads cfg - Config.fullNumKVHeads cfg
-  (Tensor.cat xDim (Tensor.castLike x (zerosDynamicOn x.device dtype : Tensor { device := device, shape := #[batch, padHeads, seq, Config.maxHeadDim cfg], dtype := dtype })) 1).reshape
+  (Tensor.cat xDim (Tensor.castLike x (Tensor.zerosFor _ : Tensor { device := device, shape := #[batch, padHeads, seq, Config.maxHeadDim cfg], dtype := dtype })) 1).reshape
     #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] (by simp [padHeads, Nat.add_sub_cancel' hHeads])
 
 private def cacheSliceSliding {batch kvLen cap : Nat}
@@ -379,7 +370,7 @@ private def attentionSlidingPrefillWithMask {batch seq cap : Nat}
   let k1 := rmsNormWeighted4dSlice m.k_norm.weight.2 kRaw m.k_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary q1 cos sin
   let k2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary k1 cos sin
-  let v2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+  let v2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4d vRaw cfg.rms_norm_eps
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
     Tensor.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention k2
@@ -425,7 +416,7 @@ private def attentionFullPrefillWithMask {batch seq cap : Nat}
   let k1 := rmsNormWeighted4dSlice m.k_norm.weight.2 kRaw m.k_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary q1 cos sin
   let k2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary k1 cos sin
-  let v2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+  let v2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4d vRaw cfg.rms_norm_eps
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
     Tensor.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention k2
@@ -464,7 +455,7 @@ private def attentionSlidingNoCache {batch seq : Nat}
   let k1 := rmsNormWeighted4dSlice m.k_norm.weight.2 k0 m.k_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary q1 cos sin
   let k2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary k1 cos sin
-  let v2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4dSlice v0 cfg.rms_norm_eps
+  let v2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4d v0 cfg.rms_norm_eps
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
     Tensor.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention k2
@@ -493,7 +484,7 @@ private def attentionFullNoCache {batch seq : Nat}
   let k1 := rmsNormWeighted4dSlice m.k_norm.weight.2 kRaw m.k_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary q1 cos sin
   let k2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary k1 cos sin
-  let v2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+  let v2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4d vRaw cfg.rms_norm_eps
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
     Tensor.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention k2
@@ -532,7 +523,7 @@ private def attentionSlidingWithCache {batch seq cap : Nat}
     let vRaw := vProjSliding cfg m x
     let k1 := rmsNormWeighted4dSlice m.k_norm.weight.2 kRaw m.k_norm.eps
     let k2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary k1 cos sin
-    let v2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+    let v2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4d vRaw cfg.rms_norm_eps
     let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention k2
     let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention v2
     let paddedK := padSlidingKVForCache cfg kh
@@ -587,7 +578,7 @@ private def attentionFullWithCache {batch seq cap : Nat}
         vProjFull cfg m x
     let k1 := rmsNormWeighted4dSlice m.k_norm.weight.2 kRaw m.k_norm.eps
     let k2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary k1 cos sin
-    let v2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+    let v2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4d vRaw cfg.rms_norm_eps
     let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention k2
     let vh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention v2
     let paddedK := padFullKVForCache cfg kh
@@ -644,7 +635,7 @@ private def attentionSlidingStep {batch cap len : Nat}
     let vRaw := vProjSliding cfg m x
     let k1 := rmsNormWeighted4dSlice m.k_norm.weight.2 kRaw m.k_norm.eps
     let k2 : Tensor { device := device, shape := #[batch, 1, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary k1 cos sin
-    let v2 : Tensor { device := device, shape := #[batch, 1, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+    let v2 : Tensor { device := device, shape := #[batch, 1, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4d vRaw cfg.rms_norm_eps
     let kNew : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim], dtype := dtype } := transposeAttention k2
     let vNew : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim], dtype := dtype } := transposeAttention v2
     let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, 1, Config.maxHeadDim cfg], dtype := dtype } := padSlidingKVForCache cfg kNew
@@ -710,7 +701,7 @@ private def attentionFullStep {batch cap len : Nat}
         vProjFull cfg m x
     let k1 := rmsNormWeighted4dSlice m.k_norm.weight.2 kRaw m.k_norm.eps
     let k2 : Tensor { device := device, shape := #[batch, 1, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary k1 cos sin
-    let v2 : Tensor { device := device, shape := #[batch, 1, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+    let v2 : Tensor { device := device, shape := #[batch, 1, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4d vRaw cfg.rms_norm_eps
     let kNew : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, 1, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention k2
     let vNew : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, 1, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention v2
     let paddedK := padFullKVForCache cfg kNew

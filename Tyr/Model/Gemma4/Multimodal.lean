@@ -37,9 +37,6 @@ abbrev ImageFeatures (cfg : VLConfig) (dtype : DType := .Float32) :=
 abbrev PerLayerInputs (cfg : VLConfig) (batch seq : Nat) (dtype : DType := .Float32) :=
   Option (Tensor { device := device, shape := #[batch, seq, cfg.text_config.num_hidden_layers, cfg.text_config.hidden_size_per_layer_input], dtype := dtype })
 
-private def reqGradFalse {s : Shape} (t : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.detach t
-
 private def clampMin {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) (lo : Float) : Tensor { device := device, shape := s, dtype := dtype } :=
   Tensor.clampFloat x lo (Float.ofBits 0x7ff0000000000000)
 
@@ -70,23 +67,6 @@ private def positionIds (patchRows patchCols : Nat) :
   let yIds : Array Int64 := Array.ofFn (n := patchRows * patchCols) fun i => (i.val / patchCols).toUInt64.toInt64
   ( Tensor.fromInt64ArrayShaped xIds #[patchRows * patchCols] (by simp [xIds])
   , Tensor.fromInt64ArrayShaped yIds #[patchRows * patchCols] (by simp [yIds]) )
-
-private def rmsNormNoScale2d {n dim : Nat}
-    (x : Tensor { device := device, shape := #[n, dim], dtype := dtype })
-    (eps : Float := 1e-6)
-    : Tensor { device := device, shape := #[n, dim], dtype := dtype } :=
-  let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
-  let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
-  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var eps)
-  let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo inv #[n, dim]
-  Tensor.castLike x (Tensor.mul xf inv)
-
-private def rmsNormNoScale4d {a b c dim : Nat}
-    (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
-    (eps : Float := 1e-6)
-    : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
-  let flat : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshape x #[a * b * c, dim]
-  Tensor.reshape (rmsNormNoScale2d flat eps) #[a, b, c, dim]
 
 private def apply2dRotaryEmb {nHead quarter : Nat}
     (patchRows patchCols : Nat)
@@ -167,7 +147,7 @@ def forward {patchRows patchCols : Nat}
   let yIds : Tensor { device := device, shape := #[tokens], dtype := .Int64 } := yIdsCpu.to hidden.device
   let xPos : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := .Float32 } := Tensor.embedding1d xIds xTable
   let yPos : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := .Float32 } := Tensor.embedding1d yIds yTable
-  Tensor.add (Tensor.add (floatDynamic hidden) xPos) yPos
+  Tensor.add (Tensor.add (Tensor.toFloat32 hidden) xPos) yPos
 
 end Gemma4VisionPatchEmbedder
 
@@ -257,10 +237,10 @@ def forward {patchRows patchCols : Nat}
     : Tensor { device := device, shape := #[patchRows * patchCols, cfg.hidden_size], dtype := .Float32 } :=
   let h1 := m.input_layernorm.forward2d x
   let attn := m.self_attn.forward (patchRows := patchRows) (patchCols := patchCols) cfg h1
-  let h2 := Tensor.add x (floatDynamic (m.post_attention_layernorm.forward2d attn))
+  let h2 := Tensor.add x (Tensor.toFloat32 (m.post_attention_layernorm.forward2d attn))
   let h3 := m.pre_feedforward_layernorm.forward2d h2
   let mlp := m.mlp.forward cfg h3
-  Tensor.add h2 (floatDynamic (m.post_feedforward_layernorm.forward2d mlp))
+  Tensor.add h2 (Tensor.toFloat32 (m.post_feedforward_layernorm.forward2d mlp))
 
 end Gemma4VisionBlock
 

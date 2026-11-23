@@ -1,7 +1,6 @@
 import Tyr.Typed.Neural
 import Tyr.TensorStruct
 
-/-! Typed GPT primitives built from the shared tensor operations. -/
 namespace torch.gpt
 
 variable {device : Device}
@@ -9,35 +8,4 @@ variable {device : Device}
 abbrev Activation (s : Shape) := Tensor { shape := s, dtype := .Float32, device := device }
 abbrev Tokens (s : Shape) := Tensor { shape := s, dtype := .Int64, device := device }
 
-namespace TensorOps
-
-def leaf {s : Shape} (t : Activation (device := device) s) : IO (Activation (device := device) s) :=
-  Tensor.parameter t
-
-def dropout {s : Shape} (t : Activation (device := device) s) (p : Float) (training : Bool) : IO (Activation (device := device) s) := do
-  Tensor.dropout t p training
-
-def layerNorm {b t n : Nat} (x : Activation (device := device) #[b,t,n])
-    (weight bias : Activation (device := device) #[n]) : Activation (device := device) #[b,t,n] :=
-  Tensor.layerNorm x weight bias
-
-def splitHeads {b t h d : Nat} (x : Activation (device := device) #[b,t,h,d]) : Activation (device := device) #[b,h,t,d] :=
-  Tensor.splitHeads x
-
-def joinHeads {b h t d : Nat} (x : Activation (device := device) #[b,h,t,d]) : Activation (device := device) #[b,t,h,d] :=
-  Tensor.joinHeads x
-
-def attention {b h t d : Nat} (q k v : Activation (device := device) #[b,h,t,d])
-    (dropout : Float) (training : Bool) : IO (Activation (device := device) #[b,h,t,d]) :=
-  Tensor.attentionIO q k v dropout training true
-
-def embedding {b t v e : Nat} (idx : Tokens (device := device) #[b,t])
-    (weight : Activation (device := device) #[v,e]) : Activation (device := device) #[b,t,e] :=
-  Tensor.embedding idx weight
-
-def embedding1d {t v e : Nat} (idx : Tokens (device := device) #[t])
-    (weight : Activation (device := device) #[v,e]) : Activation (device := device) #[t,e] :=
-  Tensor.embedding1d idx weight
-
-end TensorOps
 end torch.gpt

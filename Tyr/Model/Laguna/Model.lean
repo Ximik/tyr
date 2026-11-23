@@ -38,7 +38,7 @@
   - `forwardWithCache` is a PREFILL entry point: it writes the KV cache at
     offset 0 and assumes a fresh cache (chunked prefill is not supported).
   - The random-init path (`*.init`) synthesizes NVFP4 expert banks from int64
-    "bytes" + F32 scales (dequant only needs `toLong`/`floatDynamic`); checkpoint
+    "bytes" + F32 scales (dequant only needs `toLong`/`toFloat32`); checkpoint
     loading replaces them with real U8 / F8_E4M3 tensors (see Weights.lean).
   - Full prefill uses implicit causal GQA. Sliding attention bounds temporary
     masks and scores by query chunks and reachable window keys. The portable
@@ -78,11 +78,11 @@ private def rmsNormWeighted2d {n dim : Nat}
     (x : Tensor { dtype := dtype, device := device, shape := #[n, dim] })
     (eps : Float)
     : Tensor { dtype := dtype, device := device, shape := #[n, dim] } :=
-  let xf : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := floatDynamic x
+  let xf : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.toFloat32 x
   let var : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := Tensor.meanDim (Tensor.mul xf xf) 1 true
-  let inv : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := rsqrtDynamic (Tensor.addScalar var eps)
+  let inv : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := Tensor.rsqrt (Tensor.addScalar var eps)
   let inv : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.broadcastTo inv #[n, dim]
-  let w : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.broadcastTo (Tensor.reshape (floatDynamic weight.2) #[1, dim]) #[n, dim]
+  let w : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.broadcastTo (Tensor.reshape (Tensor.toFloat32 weight.2) #[1, dim]) #[n, dim]
   Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) w)
 
 /-- FP32 RMSNorm over the last dim of a 3D `[batch, seq, dim]` tensor. -/
@@ -117,9 +117,9 @@ structure LagunaMLP (cfg : Config) (dtype : DType := .Float32) where
 namespace LagunaMLP
 
 def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaMLP (device := device) (dtype := dtype) cfg) := do
-  let gate ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
-  let up ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
-  let down ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.hidden_size, cfg.intermediate_size] cfg.intermediate_size
+  let gate ← Model.initWeight (device := device) (dtype := dtype) #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
+  let up ← Model.initWeight (device := device) (dtype := dtype) #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
+  let down ← Model.initWeight (device := device) (dtype := dtype) #[cfg.hidden_size, cfg.intermediate_size] cfg.intermediate_size
   pure { gate_proj := gate, up_proj := up, down_proj := down }
 
 /-- `down_proj(silu(gate_proj(x)) * up_proj(x))` (`hidden_act = "silu"`). -/
@@ -171,13 +171,13 @@ abbrev KVCache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) 
   qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap len dtype
 
 def init (cfg : Config) (numHeads : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaAttention (device := device) (dtype := dtype) cfg numHeads) := do
-  let q ← initDynamicWeight (device := device) (dtype := dtype) #[numHeads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
-  let k ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
-  let v ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
-  let o ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.hidden_size, numHeads * cfg.head_dim] (numHeads * cfg.head_dim)
-  let g ← initDynamicWeight (device := device) (dtype := dtype) #[numHeads, cfg.hidden_size] cfg.hidden_size
-  let qn ← Tensor.parameter (onesDynamic (device := device) #[cfg.head_dim])
-  let kn ← Tensor.parameter (onesDynamic (device := device) #[cfg.head_dim])
+  let q ← Model.initWeight (device := device) (dtype := dtype) #[numHeads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
+  let k ← Model.initWeight (device := device) (dtype := dtype) #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
+  let v ← Model.initWeight (device := device) (dtype := dtype) #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
+  let o ← Model.initWeight (device := device) (dtype := dtype) #[cfg.hidden_size, numHeads * cfg.head_dim] (numHeads * cfg.head_dim)
+  let g ← Model.initWeight (device := device) (dtype := dtype) #[numHeads, cfg.hidden_size] cfg.hidden_size
+  let qn ← Tensor.parameter (Tensor.ones #[cfg.head_dim] (device := device))
+  let kn ← Tensor.parameter (Tensor.ones #[cfg.head_dim] (device := device))
   pure {
     q_proj := q
     k_proj := k
@@ -230,7 +230,7 @@ private def gateAndOut {batch seq numHeads : Nat}
     (attn : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } :=
   let gateRaw : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads] } := Tensor.linear3d xn m.g_proj
-  let gate : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads] } := Tensor.castLike xn (softplusDynamic (floatDynamic gateRaw))
+  let gate : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads] } := Tensor.castLike xn (softplusDynamic (Tensor.toFloat32 gateRaw))
   let gate4 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] } :=
     Tensor.broadcastTo (Tensor.unsqueeze gate 3) #[batch, seq, numHeads, cfg.head_dim]
   let gated : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads * cfg.head_dim] } :=
@@ -484,7 +484,7 @@ namespace LagunaLayer
 /-- Random-init NVFP4 expert bank stand-in for fresh (non-checkpoint) models.
     `packed` banks are int64 tensors with values in `[0, 256)` standing in for
     U8 byte pairs (dequant only applies `data.toLong`), and `scale` banks are
-    F32 (dequant's `floatDynamic` is a no-op). Checkpoint loading replaces these
+    F32 (dequant's `toFloat32` is a no-op). Checkpoint loading replaces these
     with real U8 / F8_E4M3 tensors of the same runtime shapes. -/
 private def initPackedExperts (cfg : Config) (device : Device := .CPU) : IO (LagunaPackedExperts (device := device) cfg) := do
   let e := cfg.num_experts
@@ -500,24 +500,24 @@ private def initPackedExperts (cfg : Config) (device : Device := .CPU) : IO (Lag
   pure {
     gatePacked := gatePacked.packDType
     gateScale := gateScale.packDType
-    gateGlobal := (onesDynamic (device := device) #[e]).packDType
+    gateGlobal := (Tensor.ones #[e] (device := device)).packDType
     upPacked := upPacked.packDType
     upScale := upScale.packDType
-    upGlobal := (onesDynamic (device := device) #[e]).packDType
+    upGlobal := (Tensor.ones #[e] (device := device)).packDType
     downPacked := downPacked.packDType
     downScale := downScale.packDType
-    downGlobal := (onesDynamic (device := device) #[e]).packDType
+    downGlobal := (Tensor.ones #[e] (device := device)).packDType
   }
 
 /-- Random-init sparse MoE block (random router + packed-expert stand-ins +
     random shared expert). For fresh models/tests; checkpoint loading
     constructs `LagunaSparseMoeBlock` directly from real tensors. -/
 def initSparseMoeBlock (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg) := do
-  let routerW ← initDynamicWeight (device := device) #[cfg.num_experts, cfg.hidden_size] cfg.hidden_size
+  let routerW ← Model.initWeight (device := device) #[cfg.num_experts, cfg.hidden_size] cfg.hidden_size
   let experts ← initPackedExperts (device := device) cfg
-  let sharedGate ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.shared_expert_intermediate_size, cfg.hidden_size] cfg.hidden_size
-  let sharedUp ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.shared_expert_intermediate_size, cfg.hidden_size] cfg.hidden_size
-  let sharedDown ← initDynamicWeight (device := device) (dtype := dtype) #[cfg.hidden_size, cfg.shared_expert_intermediate_size]
+  let sharedGate ← Model.initWeight (device := device) (dtype := dtype) #[cfg.shared_expert_intermediate_size, cfg.hidden_size] cfg.hidden_size
+  let sharedUp ← Model.initWeight (device := device) (dtype := dtype) #[cfg.shared_expert_intermediate_size, cfg.hidden_size] cfg.hidden_size
+  let sharedDown ← Model.initWeight (device := device) (dtype := dtype) #[cfg.hidden_size, cfg.shared_expert_intermediate_size]
     cfg.shared_expert_intermediate_size
   pure {
     router := { weight := routerW.packDType, eScoreCorrectionBias := none }
@@ -528,8 +528,8 @@ def initSparseMoeBlock (cfg : Config) (device : Device := .CPU) (dtype : DType :
   }
 
 def init (cfg : Config) (layerIdx : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaLayer (device := device) cfg dtype layerIdx) := do
-  let inputNorm ← Tensor.parameter (onesDynamic (device := device) #[cfg.hidden_size])
-  let postNorm ← Tensor.parameter (onesDynamic (device := device) #[cfg.hidden_size])
+  let inputNorm ← Tensor.parameter (Tensor.ones #[cfg.hidden_size] (device := device))
+  let postNorm ← Tensor.parameter (Tensor.ones #[cfg.hidden_size] (device := device))
   let attn ← Select.build (cfg.isFullAttentionLayer layerIdx)
     (LagunaAttention.init (device := device) (dtype := dtype) cfg cfg.num_attention_heads_sliding)
     (LagunaAttention.init (device := device) (dtype := dtype) cfg cfg.num_attention_heads)
@@ -659,7 +659,7 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
   let embRaw ← randnDynamic (device := device) (dtype := dtype) #[cfg.vocab_size, cfg.hidden_size]
   let embedTokens ← Tensor.parameter (Tensor.mulScalar embRaw 0.02)
   let layers ← IndexedList.ofFnM (fun i => LagunaLayer.init (device := device) (dtype := dtype) cfg i) 0 cfg.num_hidden_layers
-  let norm ← Tensor.parameter (onesDynamic (device := device) #[cfg.hidden_size])
+  let norm ← Tensor.parameter (Tensor.ones #[cfg.hidden_size] (device := device))
   pure { embed_tokens := embedTokens, layers := layers, norm := norm.packDType }
 
 /-- Allocate a fresh per-layer KV cache with capacity `maxLen` on `device`. -/
@@ -800,7 +800,7 @@ def init (cfg : Config) (tieWordEmbeddings : Bool := false) (device : Device := 
     if tieWordEmbeddings then
       pure model.embed_tokens
     else
-      initDynamicWeight (device := device) (dtype := dtype) #[cfg.vocab_size, cfg.hidden_size] cfg.hidden_size
+      Model.initWeight (device := device) (dtype := dtype) #[cfg.vocab_size, cfg.hidden_size] cfg.hidden_size
   pure { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }
 
 def embedTokens {batch seq : Nat}

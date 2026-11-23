@@ -161,12 +161,12 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   let indices := (Tensor.fromInt64Array #[2, 0, 1, 2]).reshape #[2, 2]
   let weights := (Tensor.fromFloatArray #[0.7, 0.3, 0.2, 0.8]).reshape #[2, 2]
   let actual := routedTextExpertsForward x gate down weights indices
-  let mut expected := qwen35.zerosDynamic #[2, 4]
+  let mut expected := Tensor.zeros #[2, 4]
   let expertIds ← indices.toUInt64Array
   let scales ← weights.toFloatArray
   for ht : token in [:2] do
     let row := x.slice! 0 token 1
-    let mut sum := qwen35.zerosDynamic #[1, 4]
+    let mut sum := Tensor.zeros #[1, 4]
     for slot in [:2] do
       let e := expertIds[token * 2 + slot]!.toNat
       let gu := (gate.slice! 0 e 1).reshape #[12, 4]
