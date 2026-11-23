@@ -103,7 +103,7 @@ def parseArgs (args : List String) : Args :=
           go rest { acc with localRank := (v.toNat?).getD acc.localRank }
         else
           go rest acc
-  go args default
+  go args {}
 
 /-- Get local rank from typed env state (for torchrun). -/
 def getLocalRankFromEnv (env : TrainEnvState) : Nat :=
