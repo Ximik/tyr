@@ -550,15 +550,14 @@ def forward {seq : Nat}
 end KittenAlbertLayer
 
 structure KittenAlbertLayerGroup (cfg : AlbertConfig) where
-  layers : Array (KittenAlbertLayer (device := device) cfg)
+  layers : Vector (KittenAlbertLayer (device := device) cfg) cfg.innerGroupNum
   deriving TensorStruct
 
 namespace KittenAlbertLayerGroup
 
 def init (cfg : AlbertConfig) (device : Device := .CPU) : IO (KittenAlbertLayerGroup (device := device) cfg) := do
-  let mut layers : Array (KittenAlbertLayer (device := device) cfg) := #[]
-  for _ in [:cfg.innerGroupNum] do
-    layers := layers.push (← KittenAlbertLayer.init (device := device) cfg)
+  let layers ← Vector.ofFnM fun (_ : Fin cfg.innerGroupNum) =>
+    KittenAlbertLayer.init (device := device) cfg
   pure { layers }
 
 def forward {seq : Nat}
