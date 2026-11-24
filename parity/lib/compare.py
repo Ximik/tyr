@@ -21,8 +21,9 @@ class LmTokens:
     """Greedy tokens must match and the forced run's logits must be within
     `logits_atol` of the reference at every step; on CPU, which runs in fp32,
     within `CPU_LOGITS_ATOL` instead. Where the tokens first differ, the case is
-    a TIE if the reference's top-1/top-2 logit gap there is below `margin` and
-    the logits are within `logits_atol`; on CPU there are no ties.
+    a TIE if the reference's logit of tyr's token there is less than `margin`
+    below its top logit and the logits are within `logits_atol`; on CPU there
+    are no ties.
 
     Reads `tokens` from both `result.json` files, `logits` (`[batch, steps,
     vocab]`) from both tensor files and `margin` (`[batch, steps]`) from the
@@ -55,14 +56,17 @@ class LmTokens:
                 entry["verdict"] = "PASS" if entry["max_logit_diff"] <= limit else "FAIL"
             else:
                 step = int(differ[0])
-                margin = float(ref_tensors["margin"][row, step])
-                tie = device != "cpu" and margin < self.margin and max_diff <= self.logits_atol
+                reference_token, tyr_token = int(ref_tokens[row, step]), int(tyr_tokens[row, step])
+                at_step = ref_logits[row, step].astype(np.float64)
+                gap = float(at_step[reference_token] - at_step[tyr_token])
+                tie = device != "cpu" and gap < self.margin and max_diff <= self.logits_atol
                 entry.update(
                     verdict="TIE" if tie else "FAIL",
                     step=step,
-                    reference_token=int(ref_tokens[row, step]),
-                    tyr_token=int(tyr_tokens[row, step]),
-                    margin=margin,
+                    reference_token=reference_token,
+                    tyr_token=tyr_token,
+                    margin=float(ref_tensors["margin"][row, step]),
+                    tyr_token_gap=gap,
                 )
             rows.append(entry)
         return {"verdict": worst(r["verdict"] for r in rows), "max_logit_diff": max_diff, "rows": rows}
@@ -91,8 +95,8 @@ class TensorsClose:
 
 @dataclass(frozen=True)
 class IntsEqual:
-    """Each named integer list in both `result.json` files is the same; on a
-    difference, the first differing flat index and both values."""
+    """Each named integer list in both `result.json` files is the same and not
+    empty; on a difference, the first differing flat index and both values."""
 
     keys: tuple[str, ...]
     name: str = "ints"
@@ -104,6 +108,8 @@ class IntsEqual:
         for key in self.keys:
             a = np.asarray(ref[key]).ravel()
             b = np.asarray(tyr[key]).ravel()
+            if a.size == 0 and b.size == 0:
+                raise ValueError(f"{key}: empty in the reference and in tyr")
             entry = {"verdict": "PASS", "count": int(a.size)}
             if a.shape != b.shape:
                 entry.update(verdict="FAIL", reference_count=int(a.size), tyr_count=int(b.size))
@@ -146,9 +152,10 @@ class ListsEqual:
 
 @dataclass(frozen=True)
 class IntsTiedWhereUnstable:
-    """The integer list `key` in both `result.json` files is the same, except that off
-    the CPU a difference where the reference's own `unstable` list (the same
-    computation on the CPU) differs from its `key` is a tie."""
+    """The integer list `key` in both `result.json` files is the same and not
+    empty, except that off the CPU a difference where the reference's own
+    `unstable` list (the same computation on the CPU) differs from its `key` is
+    a tie."""
 
     key: str
     unstable: str
@@ -159,6 +166,8 @@ class IntsTiedWhereUnstable:
         tyr, _ = probe.read(case_dir / "tyr")
         a = np.asarray(ref[self.key]).ravel()
         b = np.asarray(tyr[self.key]).ravel()
+        if a.size == 0 and b.size == 0:
+            raise ValueError(f"{self.key}: empty in the reference and in tyr")
         if a.shape != b.shape:
             return {"verdict": "FAIL", "reference_count": int(a.size), "tyr_count": int(b.size)}
         differ = np.flatnonzero(a != b)

@@ -21,7 +21,7 @@ FAIL or ERROR. `--envs-only`, `--weights-only` and `--build-only` do only steps
 1, 2 and 3.
 
 A test module in `tests/` defines `TEST` (`lib.test.Test`), `CHECKS` (callables
-`(case_dir, device) -> {"verdict", ...}`) and
+`(case_dir, device) -> {"verdict", ...}` with distinct `name`s) and
 `reference(case, weights, device, dtype, out)` and `tyr(...)` with the same
 arguments; `tyr` may read the reference output in `out.parent / "reference"`."""
 
@@ -67,6 +67,20 @@ def load_tests() -> dict:
         for path in sorted((PARITY / "tests").glob("*.py"))
         if path.stem != "__init__"
     }
+
+
+def malformed(tests: dict) -> list[str]:
+    """What would let a test pass without checking anything."""
+    problems = []
+    for name, module in tests.items():
+        names = [check.name for check in module.CHECKS]
+        if not module.TEST.cases:
+            problems.append(f"{name}: no cases")
+        if not names:
+            problems.append(f"{name}: no checks")
+        if len(set(names)) != len(names):
+            problems.append(f"{name}: checks share a name, so one result would replace another")
+    return problems
 
 
 def run_stage(args) -> None:
@@ -138,6 +152,13 @@ def run_case(module, python: Path, case: str, device: str, dtype: str, weights: 
         return {"verdict": "ERROR", "error": traceback.format_exc(), "seconds": seconds}
 
 
+def run_check(check, case_dir: Path, device: str) -> dict:
+    try:
+        return check(case_dir, device)
+    except Exception:
+        return {"verdict": "ERROR", "error": traceback.format_exc()}
+
+
 def run_stages(module, python: Path, case: str, device: str, dtype: str, weights: Path, case_dir: Path,
                seconds: dict[str, float]) -> dict:
     for stage in STAGES:
@@ -154,7 +175,7 @@ def run_stages(module, python: Path, case: str, device: str, dtype: str, weights
         if code != 0:
             raise RuntimeError(f"{stage} exited with {code}; see {stage}.log")
     start = time.monotonic()
-    checks = {check.name: check(case_dir, device) for check in module.CHECKS}
+    checks = {check.name: run_check(check, case_dir, device) for check in module.CHECKS}
     seconds["checks"] = round(time.monotonic() - start, 1)
     return {"verdict": worst(c["verdict"] for c in checks.values()), "checks": checks}
 
@@ -223,6 +244,9 @@ def main() -> int:
             print(f"unknown tests: {', '.join(unknown)}", file=sys.stderr)
             return 2
         tests = {n: tests[n] for n in names}
+    if problems := malformed(tests):
+        print("\n".join(problems), file=sys.stderr)
+        return 2
 
     if args.build_only:
         errors, log = build_probes(tests)

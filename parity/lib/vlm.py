@@ -42,12 +42,15 @@ def reference(case: Path, weights: Path, device: str, dtype: str, out: Path, cha
                                    output_logits=True, return_dict_in_generate=True)
     logits = [step.float() for step in generated.logits]
     tokens = generated.sequences[:, inputs["input_ids"].shape[1]:]
+    stacked = torch.stack(logits, 1)
+    if not torch.equal(stacked.gather(-1, tokens[..., None]).squeeze(-1), stacked.max(-1).values):
+        raise RuntimeError("`generate` chose a token that is not the argmax of its unprocessed logits")
     margins = [step.topk(2, dim=-1).values for step in logits]
     margins = [top2[:, 0] - top2[:, 1] for top2 in margins]
 
     out.mkdir(parents=True, exist_ok=True)
     (out / "result.json").write_text(json.dumps({"tokens": tokens.tolist(), "inputs": saved_inputs}))
-    save_file({"logits": torch.stack(logits, 1).cpu().contiguous(),
+    save_file({"logits": stacked.cpu().contiguous(),
                "margin": torch.stack(margins, 1).cpu().contiguous(), **floats},
               str(out / "tensors.safetensors"))
 
