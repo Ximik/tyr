@@ -4,15 +4,18 @@
     python parity/modal/run_modal.py status <sandbox id>
     python parity/modal/run_modal.py download <sandbox id> [--tests a,b] [--tensors]
 
-`start` builds the commit's image, which fetches HEAD from the remote that has
-it and runs `parity/modal/build.sh`, fills the volume `tyr-parity-weights`
-with `run.py --weights-only`, then starts `run.py` on a CPU machine and on an
-H100 and prints the two sandboxes' ids; it does not wait for them. Each writes
-its results under its id in the volume `tyr-parity-out`, as `run.py` lays them
-out (`<id>/<sha>/<device>/`), committed every minute. `status` shows whether a
-sandbox is running or its exit code, and the verdicts written so far;
-`download` copies its results, without the tensor files unless `--tensors`, to
-`output/parity/<id>/`.
+`start` builds the image, which holds the toolchain, the native dependencies
+and the venvs but no commit. A build sandbox then fetches HEAD from the remote
+that has it into the tree of the last build in the volume `tyr-parity-build`,
+runs `parity/modal/build.sh`, so only what changed is rebuilt, and stores the
+tree there under the commit. `start` then fills the volume `tyr-parity-weights`
+with `run.py --weights-only`, starts `run.py` on a CPU machine and on an H100,
+each on a copy of that tree, and prints the two sandboxes' ids; it does not
+wait for them. Each writes its results under its id in the volume
+`tyr-parity-out`, as `run.py` lays them out (`<id>/<sha>/<device>/`), committed
+every minute. `status` shows whether a sandbox is running or its exit code, and
+the verdicts written so far; `download` copies its results, without the tensor
+files unless `--tensors`, to `output/parity/<id>/`.
 
 Runs itself in `parity/modal/.venv`, created on first use with
 `parity/modal/requirements.txt`. `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (a
@@ -44,6 +47,9 @@ CHECKOUT = "/opt/tyr"
 ENVS = "/opt/parity-envs"
 WEIGHTS = "/weights"
 OUT = "/out"
+BUILD = "/build"
+# Builds the build volume keeps; the runs of a build copy it right after it is stored.
+KEEP_BUILDS = 3
 TIMEOUT = 6 * 3600
 RUNS = (("cpu", "cpu", {"cpu": 16.0, "memory": 65536}), ("gpu", "cuda", {"gpu": "H100", "cpu": 8.0, "memory": 65536}))
 
@@ -78,13 +84,13 @@ def checked_commit() -> tuple[str, str]:
     return sha, https_url(git("remote", "get-url", remote).strip())
 
 
-def build_image(sha: str, url: str) -> modal.Image:
+def build_image() -> modal.Image:
     toolchain = (REPO / "lean-toolchain").read_text().strip()
     return (
         modal.Image.from_registry(BASE_IMAGE, add_python="3.12")
         # The base image's entrypoint prints a banner and a missing-driver warning on CPU machines.
         .entrypoint([])
-        .apt_install("ca-certificates", "git", "curl", "unzip", "make", "g++")
+        .apt_install("ca-certificates", "git", "curl", "unzip", "make", "g++", "rsync")
         .run_commands("curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh"
                       " | sh -s -- -y --default-toolchain none")
         .env({"PATH": "/root/.elan/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"})
@@ -97,10 +103,6 @@ def build_image(sha: str, url: str) -> modal.Image:
         .add_local_file(REPO / "parity/lib/venv.py", "/opt/parity-src/lib/venv.py", copy=True)
         .add_local_file(REPO / "parity/modal/prepare_envs.py", "/opt/parity-src/modal/prepare_envs.py", copy=True)
         .run_commands(f"python3 /opt/parity-src/modal/prepare_envs.py {ENVS} && rm -rf /opt/parity-src")
-        .run_commands(
-            f"git init -q {CHECKOUT} && cd {CHECKOUT} && git fetch -q --depth 1 {url} {sha}"
-            " && git checkout -q --detach FETCH_HEAD && parity/modal/build.sh"
-        )
     )
 
 
@@ -112,15 +114,51 @@ def sandbox(command: str, mount: str, **options) -> modal.Sandbox:
     return modal.Sandbox.create("bash", "-c", script, workdir=CHECKOUT, timeout=TIMEOUT, **options)
 
 
-def fetch_weights(selection: str, weights: modal.Volume, **options) -> int:
-    """Run `run.py --weights-only`, printing its output, and wait for it."""
-    fetch = sandbox(f"python3 parity/run.py --envs {ENVS} --weights-only --weights {WEIGHTS}{selection}", WEIGHTS,
-                    volumes={WEIGHTS: weights}, cpu=4.0, **options)
-    reader = threading.Thread(target=lambda: [print(f"[weights] {line}", end="", flush=True) for line in fetch.stdout])
+def checkout(sha: str) -> str:
+    """The command that copies the tree built for `sha` into the checkout. The
+    image's `external/` is not in the build volume."""
+    return f"rsync -a {BUILD}/builds/{sha}/ {CHECKOUT}/"
+
+
+def wait(run: modal.Sandbox, label: str) -> int:
+    """Print the sandbox's output and return its exit code."""
+    reader = threading.Thread(target=lambda: [print(f"[{label}] {line}", end="", flush=True) for line in run.stdout])
     reader.start()
-    fetch.wait(raise_on_termination=False)
+    run.wait(raise_on_termination=False)
     reader.join()
-    return fetch.returncode if fetch.returncode is not None else 1
+    return run.returncode if run.returncode is not None else 1
+
+
+def build(sha: str, url: str, cache: modal.Volume, **options) -> int:
+    """Build `sha` from the tree of the last stored build and store the result
+    under `builds/<sha>`, then point `latest` at it. Probe build failures do
+    not fail this step: `run.py` records them per test."""
+    builds = f"{BUILD}/builds"
+    script = " && ".join([
+        f"latest=$(cat {BUILD}/latest 2>/dev/null || true)",
+        f'if [ -n "$latest" ] && [ -d {builds}/$latest ]; then rsync -a {builds}/$latest/ ./; fi',
+        "if [ ! -d .git ]; then git init -q; fi",
+        f"git fetch -q --depth 1 {url} {sha}",
+        "git checkout -q --force --detach FETCH_HEAD",
+        "{ parity/modal/build.sh || echo 'some probes failed to build'; }",
+        f"rm -rf {builds}/{sha}.partial",
+        f"mkdir -p {builds}",
+        f"rsync -a --exclude=/external ./ {builds}/{sha}.partial/",
+        f"rm -rf {builds}/{sha}",
+        f"mv {builds}/{sha}.partial {builds}/{sha}",
+        f"echo {sha} > {BUILD}/latest.partial",
+        f"mv {BUILD}/latest.partial {BUILD}/latest",
+        f"(cd {builds} && ls -1t | grep -v '\\.partial$' | tail -n +{KEEP_BUILDS + 1} | xargs -r rm -rf)",
+    ])
+    return wait(sandbox(script, BUILD, volumes={BUILD: cache}, cpu=16.0, memory=65536, **options), "build")
+
+
+def fetch_weights(sha: str, selection: str, weights: modal.Volume, cache: modal.Volume, **options) -> int:
+    """Run `run.py --weights-only`, printing its output, and wait for it."""
+    fetch = sandbox(f"{checkout(sha)} && python3 parity/run.py --envs {ENVS} --weights-only --weights {WEIGHTS}"
+                    f"{selection}", WEIGHTS, volumes={WEIGHTS: weights, BUILD: cache.read_only()}, cpu=4.0,
+                    **options)
+    return wait(fetch, "weights")
 
 
 def start(args) -> int:
@@ -128,18 +166,23 @@ def start(args) -> int:
     app = modal.App.lookup("tyr-parity", create_if_missing=True)
     weights = modal.Volume.from_name("tyr-parity-weights", create_if_missing=True)
     out = modal.Volume.from_name("tyr-parity-out", create_if_missing=True)
-    common = {"app": app, "image": build_image(sha, url)}
+    cache = modal.Volume.from_name("tyr-parity-build", create_if_missing=True)
+    common = {"app": app, "image": build_image()}
     hf_secret = [modal.Secret.from_dict({"HF_TOKEN": os.environ["HF_TOKEN"]})] if "HF_TOKEN" in os.environ else []
     selection = f" --tests {args.tests}" if args.tests else ""
 
     with modal.enable_output():
-        if fetch_weights(selection, weights, secrets=hf_secret, **common) != 0:
+        if build(sha, url, cache, **common) != 0:
+            print("building failed", file=sys.stderr)
+            return 1
+        if fetch_weights(sha, selection, weights, cache, secrets=hf_secret, **common) != 0:
             print("fetching weights failed", file=sys.stderr)
             return 1
     for device, kind, resources in RUNS:
-        run = sandbox(f"python3 parity/run.py --envs {ENVS} --device {kind} --weights {WEIGHTS}"
+        run = sandbox(f"{checkout(sha)} && python3 parity/run.py --envs {ENVS} --device {kind} --weights {WEIGHTS}"
                       f" --out {OUT}/$MODAL_SANDBOX_ID{selection}",
-                      OUT, volumes={WEIGHTS: weights.read_only(), OUT: out}, **resources, **common)
+                      OUT, volumes={WEIGHTS: weights.read_only(), OUT: out, BUILD: cache.read_only()},
+                      **resources, **common)
         run.set_tags({"sha": sha, "device": device, "tests": args.tests or ""})
         print(f"{device}: {run.object_id}")
     return 0
