@@ -430,7 +430,7 @@ structure ModdedGPTParams (cfg : Config) where
   /-- Smear gate (forward-shift tokens) -/
   smearGate : CastedLinear (device := device) 12 1
   /-- Value embeddings (3 separate layers) -/
-  valueEmbeds : Array (Tensor { shape := #[cfg.vocabSize, cfg.modelDim], dtype := .Float32, device := device })
+  valueEmbeds : Vector (Tensor { shape := #[cfg.vocabSize, cfg.modelDim], dtype := .Float32, device := device }) cfg.numValueEmbeds
   /-- Transformer blocks -/
   blocks : Vector (Block (device := device) cfg.modelDim cfg.headDim cfg.nHead) cfg.nLayer
   /-- Language model head (weight-tied with embed in forward) -/
@@ -449,11 +449,9 @@ def ModdedGPTParams.init (cfg : Config) (device : Device := .CPU) : IO (ModdedGP
   let smearGate ← CastedLinear.init (device := device) 12 1 0.02
 
   -- Value embeddings (3 layers)
-  let mut valueEmbeds := #[]
-  for _ in [:cfg.numValueEmbeds] do
+  let valueEmbeds ← Vector.ofFnM fun (_ : Fin cfg.numValueEmbeds) => do
     let ve ← Tensor.randn (device := device) #[cfg.vocabSize, cfg.modelDim] false
-    let ve ← Tensor.parameter (Tensor.mulScalar ve 0.02)
-    valueEmbeds := valueEmbeds.push ve
+    Tensor.parameter (Tensor.mulScalar ve 0.02)
 
   -- Transformer blocks
   let blocks ← Vector.ofFnM fun (i : Fin cfg.nLayer) =>
@@ -505,7 +503,7 @@ def forward {cfg : Config} {batch seq : Nat}
   let x0 := Tensor.rmsNorm (tokEmb + (tokEmb * smearGateExpanded))
 
   -- Precompute token value embeddings and global scalar controls.
-  let valueEmbeds := params.valueEmbeds.map (Tensor.embedding inputSeq ·)
+  let valueEmbeds := (params.valueEmbeds.map (Tensor.embedding inputSeq ·)).toArray
   let valueMix := scalarSigmoidAt params.scalars.values (cfg.nLayer * 4)
   let skipMix := scalarSigmoidAt params.scalars.values (cfg.nLayer * 4 + 1)
   let finalScale := scalarSigmoidAt params.scalars.values (cfg.nLayer * 4 + 2)

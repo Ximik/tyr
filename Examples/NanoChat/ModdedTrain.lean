@@ -201,7 +201,7 @@ structure MuonBlockState (cfg : moddedGpt.Config) where
 /-- Full dual-optimizer parameter state (DistAdam + Muon). -/
 structure DualParamState (cfg : moddedGpt.Config) where
   embed : DistAdam.ParamState ⟨#[cfg.vocabSize, cfg.modelDim], .Float32, device⟩
-  valueEmbeds : Array (DistAdam.ParamState ⟨#[cfg.vocabSize, cfg.modelDim], .Float32, device⟩)
+  valueEmbeds : Vector (DistAdam.ParamState ⟨#[cfg.vocabSize, cfg.modelDim], .Float32, device⟩) cfg.numValueEmbeds
   lmHead : DistAdam.ParamState ⟨#[cfg.vocabSize, cfg.modelDim], .Float32, device⟩
   scalars : DistAdam.ParamState ⟨#[cfg.nLayer * 4 + 8], .Float32, device⟩
   smearGate : NorMuon.ParamState ⟨#[1, 12], .Float32, device⟩
@@ -535,7 +535,7 @@ private def checkpointStateMetadata {cfg : moddedGpt.Config} (ckpt : Checkpoint 
     (trainingMetadata : Bool) :
     CheckpointStateMetadata := Id.run do
   let state := ckpt.optState.dualState
-  let adamSteps := #[state.embed.step] ++ state.valueEmbeds.map (·.step) ++
+  let adamSteps := #[state.embed.step] ++ (state.valueEmbeds.map (·.step)).toArray ++
     #[state.lmHead.step, state.scalars.step]
   let mut muonStates := #[muonStateLayout state.smearGate]
   for block in state.blocks do
@@ -966,13 +966,10 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let (embed', embedState') ← runAdamStep
     params.embed grads.embed optState.dualState.embed lrEmbed
 
-  let mut newValueEmbeds : Array (Tensor { shape := #[cfg.vocabSize, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut newValueEmbedStates : Array (DistAdam.ParamState ⟨#[cfg.vocabSize, cfg.modelDim], .Float32, device⟩) := #[]
-  for ve in params.valueEmbeds, veGrad in grads.valueEmbeds, i in [:params.valueEmbeds.size] do
-    let veState := optState.dualState.valueEmbeds[i]?.getD (DistAdam.initParamState ve)
-    let (ve', veState') ← runAdamStep ve veGrad veState lrEmbed
-    newValueEmbeds := newValueEmbeds.push ve'
-    newValueEmbedStates := newValueEmbedStates.push veState'
+  let valueEmbedSteps ← (Vector.finRange cfg.numValueEmbeds).mapM fun i =>
+    runAdamStep params.valueEmbeds[i] grads.valueEmbeds[i] optState.dualState.valueEmbeds[i] lrEmbed
+  let newValueEmbeds := valueEmbedSteps.map (·.1)
+  let newValueEmbedStates := valueEmbedSteps.map (·.2)
 
   let (lmHeadW', lmHeadState') ← runAdamStep
     params.lmHead.weight grads.lmHead.weight optState.dualState.lmHead lrUnembed
@@ -987,7 +984,6 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let smearGateW' := smearGateWs[0]?.getD params.smearGate.weight
   let smearGateState' := smearGateStates[0]?.getD optState.dualState.smearGate
 
-  let mut blockStatesIn : Array (MuonBlockState (device := device) cfg) := #[]
   let mut cFcParams : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
   let mut cFcGrads : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
   let mut cFcStates : Array (NorMuon.ParamState ⟨#[4 * cfg.modelDim, cfg.modelDim], .Float32, device⟩) := #[]
@@ -1008,20 +1004,10 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let mut oGrads : Array (Tensor { shape := #[cfg.modelDim, cfg.nHead * cfg.headDim], dtype := .Float32, device := device }) := #[]
   let mut oStates : Array (NorMuon.ParamState ⟨#[cfg.modelDim, cfg.nHead * cfg.headDim], .Float32, device⟩) := #[]
 
-  for block in params.blocks, blockGrad in grads.blocks, i in [:params.blocks.size] do
-    let defaultBlockState : MuonBlockState (device := device) cfg := {
-      attn := block.attn.map fun attn =>
-        {
-          wQ := NorMuon.initParamState attn.wQ
-          wK := NorMuon.initParamState attn.wK
-          wV := NorMuon.initParamState attn.wV
-          wO := NorMuon.initParamState attn.wO
-        }
-      cFc := NorMuon.initParamState block.mlp.cFc
-      cProj := NorMuon.initParamState block.mlp.cProj
-    }
-    let blockState := optState.dualState.blocks[i]?.getD defaultBlockState
-    blockStatesIn := blockStatesIn.push blockState
+  for h : i in [:cfg.nLayer] do
+    let block := params.blocks[i]'h.upper
+    let blockGrad := grads.blocks[i]'h.upper
+    let blockState := optState.dualState.blocks[i]'h.upper
 
     cFcParams := cFcParams.push block.mlp.cFc
     cFcGrads := cFcGrads.push blockGrad.mlp.cFc
@@ -1064,18 +1050,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
     let block := params.blocks[idx]
     let blockGrad := grads.blocks[idx]
     let attnCursor ← get
-    let defaultBlockState : MuonBlockState (device := device) cfg := {
-      attn := block.attn.map fun attn =>
-        {
-          wQ := NorMuon.initParamState attn.wQ
-          wK := NorMuon.initParamState attn.wK
-          wV := NorMuon.initParamState attn.wV
-          wO := NorMuon.initParamState attn.wO
-        }
-      cFc := NorMuon.initParamState block.mlp.cFc
-      cProj := NorMuon.initParamState block.mlp.cProj
-    }
-    let blockState := blockStatesIn[i]?.getD defaultBlockState
+    let blockState := optState.dualState.blocks[idx]
     let cFc' := cFcParams'[i]?.getD block.mlp.cFc
     let cProj' := cProjParams'[i]?.getD block.mlp.cProj
     let cFcState' := cFcStates'[i]?.getD (NorMuon.initParamState cFc')
