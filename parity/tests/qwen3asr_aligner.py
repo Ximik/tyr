@@ -1,12 +1,8 @@
 import json
-import wave
-from pathlib import Path
 
-from lib import probe
+from lib import audio, probe
 from lib.compare import IntsEqual, TensorsClose
 from lib.test import Test
-
-CASES = Path(__file__).resolve().parents[1] / "cases"
 
 TEST = Test(
     name="qwen3asr_aligner",
@@ -24,23 +20,17 @@ CHECKS = [
 ]
 
 
-def audio_path(case: Path) -> Path:
-    return CASES / json.loads(case.read_text())["audio"]
-
-
 def reference(case, weights, device, dtype, out):
     """`transformers`' Qwen3-ASR token classifier on the converted `-hf` checkpoint."""
-    import numpy as np
     import torch
     from safetensors.torch import save_file
     from transformers import AutoProcessor, Qwen3ASRForTokenClassification
 
     spec = json.loads(case.read_text())
-    with wave.open(str(audio_path(case))) as f:
-        audio = np.frombuffer(f.readframes(f.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+    _, samples = audio.read(audio.case_audio(case))
     processor = AutoProcessor.from_pretrained(weights)
     inputs, word_lists = processor.prepare_forced_aligner_inputs(
-        audio, spec["transcript"], language=spec["language"], return_tensors="pt")
+        samples, spec["transcript"], language=spec["language"], return_tensors="pt")
     torch_dtype = getattr(torch, dtype)
     model = Qwen3ASRForTokenClassification.from_pretrained(weights, dtype=torch_dtype).to(device).eval()
     marker = model.config.timestamp_token_id
@@ -64,5 +54,5 @@ def reference(case, weights, device, dtype, out):
 
 def tyr(case, weights, device, dtype, out):
     ref = json.loads((out.parent / "reference" / "result.json").read_text())
-    request = {"dtype": dtype, "audio": str(audio_path(case)), "prompt": ref["prompt"], "words": ref["words"]}
+    request = {"dtype": dtype, "audio": str(audio.case_audio(case)), "prompt": ref["prompt"], "words": ref["words"]}
     probe.run(TEST.probe, request, weights, device, out)
