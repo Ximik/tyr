@@ -4,7 +4,7 @@ from lib import audio, probe
 from lib.compare import IntsEqual
 from lib.test import Test
 
-MAX_FRAMES = 64
+MAX_FRAMES = 512
 
 TEST = Test(
     name="qwen3tts_talker",
