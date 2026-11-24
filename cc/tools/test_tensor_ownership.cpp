@@ -91,11 +91,13 @@ void testShapesAndMetadata(lean_object* tensor) {
     {"zerosLike", lean_torch_zeros_like}, {"onesLike", lean_torch_ones_like},
     {"abs", lean_torch_abs}, {"sqrt", lean_torch_sqrt}, {"rsqrt", lean_torch_rsqrt},
     {"relu", lean_torch_tensor_relu}, {"exp", lean_torch_tensor_exp},
-    {"detach", lean_torch_detach}, {"toFloat", lean_torch_to_float},
-    {"toBFloat16", lean_torch_to_bfloat16}, {"toLong", lean_torch_to_long}
+    {"detach", lean_torch_detach}
   };
   for (const auto& entry : calls) {
     LeanObject result(entry.second(tensor), lean_dec);
+  }
+  for (auto dtype : {tyr::lean::DType::Float32, tyr::lean::DType::BFloat16, tyr::lean::DType::Int64}) {
+    LeanObject result(lean_torch_cast_dtype(tensor, static_cast<uint8_t>(dtype)), lean_dec);
   }
   (void)lean_torch_get_dtype_enum(tensor);
   lean_dec(lean_torch_get_values(tensor, Nat(4)));

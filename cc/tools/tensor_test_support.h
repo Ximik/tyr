@@ -64,8 +64,7 @@ Object cast(lean_object* input, tyr::lean::DType dtype) {
 using Binary = lean_object* (*)(lean_object*, lean_object*);
 using Unary = lean_object* (*)(lean_object*);
 const std::vector<std::pair<const char*, Binary>> matrixOps = {
-  {"mm", lean_torch_mm}, {"matmul", lean_torch_matmul}, {"linear", lean_torch_linear},
-  {"linear3d", lean_torch_linear3d}, {"matmul3d", lean_torch_matmul3d_2d}, {"bmm4d", lean_torch_bmm4d}};
+  {"mm", lean_torch_mm}, {"matmul", lean_torch_matmul}, {"linear", lean_torch_linear}};
 const std::vector<std::pair<const char*, Unary>> unaryOps = {
   {"exp", lean_torch_tensor_exp}, {"sqrt", lean_torch_sqrt}, {"rsqrt", lean_torch_rsqrt},
   {"sigmoid", lean_torch_tensor_sigmoid}, {"tanh", lean_torch_tensor_tanh}, {"gelu", lean_torch_tensor_gelu},

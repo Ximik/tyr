@@ -167,7 +167,7 @@ def embedding {batch seq vocab embed : Nat} {d : DType} {dev : Device}
 def embedding1d {seq vocab embed : Nat} {d : DType} {dev : Device}
     (tokens : Tensor ⟨#[seq], .Int64, dev⟩)
     (weight : Tensor ⟨#[vocab, embed], d, dev⟩) : Tensor ⟨#[seq, embed], d, dev⟩ :=
-  Tensor.ofRaw! (RawTensor.embedding1d tokens.raw weight.raw)
+  Tensor.ofRaw! (RawTensor.embedding tokens.raw weight.raw)
 
 /-- Matrix exponential with a checked dtype/device-preserving result. -/
 def matrixExp {n : Nat} {d : DType} {dev : Device}
@@ -282,13 +282,13 @@ def nuclearNorm {m n : Nat} {d : DType} {dev : Device}
 /-! ## Casts -/
 
 def toFloat32 {σ : StaticSpec} (t : Tensor σ) : Tensor (σ.withDType .Float32) :=
-  Tensor.ofRaw! (RawTensor.toFloat32 t.raw)
+  Tensor.ofRaw! (RawTensor.castDType t.raw .Float32)
 
 def toBFloat16 {σ : StaticSpec} (t : Tensor σ) : Tensor (σ.withDType .BFloat16) :=
-  Tensor.ofRaw! (RawTensor.toBFloat16 t.raw)
+  Tensor.ofRaw! (RawTensor.castDType t.raw .BFloat16)
 
 def toInt64 {σ : StaticSpec} (t : Tensor σ) : Tensor (σ.withDType .Int64) :=
-  Tensor.ofRaw! (RawTensor.toInt64 t.raw)
+  Tensor.ofRaw! (RawTensor.castDType t.raw .Int64)
 
 /-! ## Elementwise binary (same shape and device, witnessed promotion)
 
@@ -583,7 +583,7 @@ def linear3d! {batch seq inDim outDim : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩)
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) :
     Tensor ⟨#[batch, seq, outDim], d, dev⟩ :=
-  Tensor.ofRaw! (RawTensor.linear3d! x.raw weight.raw)
+  Tensor.ofRaw! (RawTensor.linear! x.raw weight.raw)
 
 def linear3d {batch seq inDim outDim : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩)
@@ -594,7 +594,7 @@ def linear3d {batch seq inDim outDim : Nat} {d : DType} {dev : Device} [DType.Fl
 def matmul3d! {batch seq k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[batch, seq, k], d, dev⟩) (b : Tensor ⟨#[k, n], d, dev⟩) :
     Tensor ⟨#[batch, seq, n], d, dev⟩ :=
-  Tensor.ofRaw! (RawTensor.matmul3d! a.raw b.raw)
+  Tensor.ofRaw! (RawTensor.matmul! a.raw b.raw)
 
 def matmul3d {batch seq k n : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (a : Tensor ⟨#[batch, seq, k], d, dev⟩) (b : Tensor ⟨#[k, n], d, dev⟩) :
@@ -614,7 +614,7 @@ def bmm {b m k n : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
 def bmm4d! {b h m k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[b, h, m, k], d, dev⟩) (x : Tensor ⟨#[b, h, k, n], d, dev⟩) :
     Tensor ⟨#[b, h, m, n], d, dev⟩ :=
-  Tensor.ofRaw! (RawTensor.bmm4d! a.raw x.raw)
+  Tensor.ofRaw! (RawTensor.matmul! a.raw x.raw)
 
 def bmm4d {b h m k n : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (a : Tensor ⟨#[b, h, m, k], d, dev⟩) (x : Tensor ⟨#[b, h, k, n], d, dev⟩) :
