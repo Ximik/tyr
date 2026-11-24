@@ -1013,18 +1013,6 @@ lean_object* lean_torch_linear(
   return fromTorchTensor(y_);
 }
 
-// Linear projection for 3D input: [batch, seq, in] @ [out, in]^T -> [batch, seq, out]
-lean_object* lean_torch_linear3d(
-  b_lean_obj_arg x,
-  b_lean_obj_arg weight
-) {
-  auto x_ = borrowTensor(x);
-  auto weight_ = borrowTensor(weight);
-  // torch::linear does x @ weight.T, which is what we want
-  auto y_ = torch::linear(x_, weight_);
-  return fromTorchTensor(y_);
-}
-
 // Affine for 3D input: linear + bias with broadcasting
 lean_object* lean_torch_affine3d(
   b_lean_obj_arg x,
@@ -1203,39 +1191,7 @@ lean_object* lean_torch_group_norm(
   return fromTorchTensor(output_);
 }
 
-// Embedding for 2D input: [batch, seq] -> [batch, seq, embed]
 lean_object* lean_torch_embedding(
-  b_lean_obj_arg input,
-  b_lean_obj_arg weight,
-  lean_obj_arg padding_idx,
-  uint8_t scale_grad_by_freq,
-  uint8_t sparse
-) {
-  OwnedLeanObject padding_idx_owner(padding_idx, lean_dec);
-  auto input_ = borrowTensor(input);
-  auto weight_ = borrowTensor(weight);
-
-  int64_t padding_idx_val = -1;
-  if (!lean_is_scalar(padding_idx)) {
-    lean_object* idx = lean_ctor_get(padding_idx, 0);
-    padding_idx_val = static_cast<int64_t>(tyr::natTo<int64_t>(idx, "paddingIdx"));
-  }
-
-  padding_idx_owner.reset();
-
-  auto output_ = torch::embedding(
-    weight_,
-    input_,
-    padding_idx_val,
-    scale_grad_by_freq,
-    sparse
-  );
-
-  return fromTorchTensor(output_);
-}
-
-// Embedding for 1D input: [seq] -> [seq, embed]
-lean_object* lean_torch_embedding_1d(
   b_lean_obj_arg input,
   b_lean_obj_arg weight,
   lean_obj_arg padding_idx,
@@ -1280,18 +1236,6 @@ lean_object* lean_torch_bmm(
   auto input_ = borrowTensor(input);
   auto mat2_ = borrowTensor(mat2);
   auto result_ = torch::bmm(input_, mat2_);
-  return fromTorchTensor(result_);
-}
-
-// 4D batched matmul for multi-head attention: [b,h,m,k] @ [b,h,k,n] -> [b,h,m,n]
-lean_object* lean_torch_bmm4d(
-    b_lean_obj_arg input,
-    b_lean_obj_arg mat2
-) {
-  auto input_ = borrowTensor(input);
-  auto mat2_ = borrowTensor(mat2);
-  // torch::matmul handles 4D broadcasting correctly
-  auto result_ = torch::matmul(input_, mat2_);
   return fromTorchTensor(result_);
 }
 
@@ -1966,13 +1910,6 @@ lean_object* lean_torch_unbind(
   return result;
 }
 
-// Convert tensor to Long (int64) dtype
-lean_object* lean_torch_to_long(b_lean_obj_arg input) {
-  auto input_ = borrowTensor(input);
-  auto result_ = input_.to(torch::kLong);
-  return fromTorchTensor(result_);
-}
-
 // Backward pass that only requires the loss (assumes gradient of 1.0)
 lean_object* lean_torch_backward_loss(b_lean_obj_arg loss,
     uint8_t retain_graph, uint8_t create_graph) {
@@ -1989,17 +1926,6 @@ lean_object* lean_torch_backward_loss(b_lean_obj_arg loss,
   });
 }
 
-// Shape-aware matmul for 3D @ 2D: [batch, seq, k] @ [k, n] -> [batch, seq, n]
-lean_object* lean_torch_matmul3d_2d(
-  b_lean_obj_arg a,
-  b_lean_obj_arg b
-) {
-  auto a_ = borrowTensor(a);
-  auto b_ = borrowTensor(b);
-  auto result_ = torch::matmul(a_, b_);
-  return fromTorchTensor(result_);
-}
-
 // Transpose 2D tensor: [m, n] -> [n, m]
 lean_object* lean_torch_transpose_2d(
   b_lean_obj_arg input
@@ -2009,22 +1935,11 @@ lean_object* lean_torch_transpose_2d(
   return fromTorchTensor(result_);
 }
 
-// Transpose for attention: [batch, seq, n_head, head_dim] -> [batch, n_head, seq, head_dim]
-lean_object* lean_torch_transpose_for_attention(
+// Swaps the sequence and head axes in either direction, returning a contiguous tensor.
+lean_object* lean_torch_transpose_heads(
   b_lean_obj_arg input
 ) {
   auto input_ = borrowTensor(input);
-  // [batch, seq, n_head, head_dim] -> [batch, n_head, seq, head_dim]
-  auto result_ = input_.permute({0, 2, 1, 3}).contiguous();
-  return fromTorchTensor(result_);
-}
-
-// Transpose from attention: [batch, n_head, seq, head_dim] -> [batch, seq, n_head, head_dim]
-lean_object* lean_torch_transpose_from_attention(
-  b_lean_obj_arg input
-) {
-  auto input_ = borrowTensor(input);
-  // [batch, n_head, seq, head_dim] -> [batch, seq, n_head, head_dim]
   auto result_ = input_.permute({0, 2, 1, 3}).contiguous();
   return fromTorchTensor(result_);
 }
@@ -2998,30 +2913,6 @@ lean_object* lean_torch_sdpa_gqa_mask_qkv_io(
   });
 }
 
-// Scaled dot-product attention with GQA where query and KV sequence lengths may differ.
-// Q: [batch, n_head, q_seq, head_dim]
-// K, V: [batch, n_kv_head, kv_seq, head_dim]
-lean_object* lean_torch_sdpa_gqa_qkv(
-    b_lean_obj_arg query,
-    b_lean_obj_arg key,
-    b_lean_obj_arg value,
-    uint8_t is_causal,
-    uint8_t enable_gqa) {
-  return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0));
-}
-
-lean_object* lean_torch_sdpa_gqa_qkv_io(
-    b_lean_obj_arg query,
-    b_lean_obj_arg key,
-    b_lean_obj_arg value,
-    double dropout_p,
-    uint8_t is_causal,
-    uint8_t enable_gqa) {
-  return tyr::ioCall("attentionGQAQKVIO", [&] {
-    return lean_io_result_mk_ok(fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, dropout_p, is_causal != 0, enable_gqa != 0)));
-  });
-}
-
 // ============================================================================
 // Comparison and conditional operations for diffusion
 // ============================================================================
@@ -3106,20 +2997,6 @@ lean_object* lean_torch_logical_and(b_lean_obj_arg a, b_lean_obj_arg b) {
   auto a_ = borrowTensor(a);
   auto b_ = borrowTensor(b);
   auto result_ = torch::logical_and(a_, b_);
-  return fromTorchTensor(result_);
-}
-
-// Convert to float dtype
-lean_object* lean_torch_to_float(b_lean_obj_arg input) {
-  auto input_ = borrowTensor(input);
-  auto result_ = input_.to(torch::kFloat32);
-  return fromTorchTensor(result_);
-}
-
-// Convert to bfloat16 dtype
-lean_object* lean_torch_to_bfloat16(b_lean_obj_arg input) {
-  auto input_ = borrowTensor(input);
-  auto result_ = input_.to(torch::kBFloat16);
   return fromTorchTensor(result_);
 }
 

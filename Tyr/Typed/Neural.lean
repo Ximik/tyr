@@ -36,7 +36,7 @@ def castLike {σ τ : StaticSpec} (reference : Tensor τ) (t : Tensor σ) :
 
 /-- RMS normalization accumulated in Float32, with the output dtype indexed. -/
 def rmsNorm {σ : StaticSpec} (x : Tensor σ) (eps : Float := 1e-6) : Tensor (σ.withDType .Float32) :=
-  let xf := RawTensor.toFloat32 x.raw
+  let xf := RawTensor.castDType x.raw .Float32
   let variance := RawTensor.mean! (RawTensor.mul! xf xf)
     (some #[(σ.shape.size - 1)]) true
   (Tensor.ofRaw! (RawTensor.mul! xf (RawTensor.rsqrt! (RawTensor.addScalar! variance eps))))
@@ -141,11 +141,11 @@ def conv2dBias {batch cin cout height width kh kw : Nat} {d : DType} {dev : Devi
 
 def splitHeads {batch seq heads dim : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  Tensor.ofRaw! (RawTensor.splitHeads t.raw)
+  Tensor.ofRaw! (RawTensor.transposeHeads t.raw)
 
 def joinHeads {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩ :=
-  Tensor.ofRaw! (RawTensor.joinHeads t.raw)
+  Tensor.ofRaw! (RawTensor.transposeHeads t.raw)
 
 private def attentionCheckIO {α : Type} (operation : String)
     (result : Except String α) : IO α :=
@@ -277,7 +277,7 @@ def attentionGQAQKV! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
     (causal : Bool := false) (gqa : Bool := false) : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  Tensor.ofRaw! (RawTensor.attentionGQAQKV! q.raw k.raw v.raw causal gqa)
+  Tensor.ofRaw! (RawTensor.attentionGQA! q.raw k.raw v.raw causal gqa)
 
 /-- Zero-dropout grouped-query attention with separate query and key/value lengths. -/
 def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -294,7 +294,7 @@ def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {de
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
     (dropout : Float) (training : Bool) (causal : Bool := false) (gqa : Bool := false) : IO (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
   let effective ← attentionCheckIO "attentionGQAQKVIO" (attentionDropout? dropout training)
-  let raw ← RawTensor.attentionGQAQKVIO
+  let raw ← RawTensor.attentionGQAIO
     q.raw k.raw v.raw effective causal gqa
   pure (Tensor.ofRaw! raw)
 

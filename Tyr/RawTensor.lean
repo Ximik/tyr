@@ -16,12 +16,6 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_ones_like"] opaque onesLike (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_to_float"] opaque toFloat32 (t : @& RawTensor) : RawTensor
-
-@[extern "lean_torch_to_bfloat16"] opaque toBFloat16 (t : @& RawTensor) : RawTensor
-
-@[extern "lean_torch_to_long"] opaque toInt64 (t : @& RawTensor) : RawTensor
-
 @[extern "lean_torch_to"] opaque toDevice (t : @& RawTensor) (device : Device) : RawTensor
 
 /-- Convert dtype and device together, with native failures returned through IO.
@@ -88,13 +82,7 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_linear"] opaque linear! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_linear3d"] opaque linear3d! (a b : @& RawTensor) : RawTensor
-
-@[extern "lean_torch_matmul3d_2d"] opaque matmul3d! (a b : @& RawTensor) : RawTensor
-
 @[extern "lean_torch_bmm"] opaque bmm! (a b : @& RawTensor) : RawTensor
-
-@[extern "lean_torch_bmm4d"] opaque bmm4d! (a b : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_add_scalar"] opaque addScalar! (t : @& RawTensor) (value : Float) : RawTensor
 
@@ -134,18 +122,13 @@ The source shape is checked before conversion and never reshaped. -/
     (t : @& RawTensor) (p : Float) (training : Bool) : IO RawTensor
 @[extern "lean_torch_layer_norm_3d"] opaque layerNorm
     (x weight bias : @& RawTensor) (eps : Float := 1e-5) : RawTensor
-@[extern "lean_torch_transpose_for_attention"] opaque splitHeads
-    (x : @& RawTensor) : RawTensor
-@[extern "lean_torch_transpose_from_attention"] opaque joinHeads
+@[extern "lean_torch_transpose_heads"] opaque transposeHeads
     (x : @& RawTensor) : RawTensor
 @[extern "lean_torch_sdpa_4d"] opaque attention!
     (q k v : @& RawTensor) (causal : Bool := true) : RawTensor
 @[extern "lean_torch_sdpa_4d_io"] opaque attentionIO
     (q k v : @& RawTensor) (dropout : Float) (causal : Bool := true) : IO RawTensor
 @[extern "lean_torch_embedding"] opaque embedding
-    (idx weight : @& RawTensor) (paddingIdx : Option Nat := none)
-    (scaleGradByFreq : Bool := false) (sparse : Bool := false) : RawTensor
-@[extern "lean_torch_embedding_1d"] opaque embedding1d
     (idx weight : @& RawTensor) (paddingIdx : Option Nat := none)
     (scaleGradByFreq : Bool := false) (sparse : Bool := false) : RawTensor
 /-- Mean cross entropy. An invalid label or a native failure aborts through

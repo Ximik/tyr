@@ -28,10 +28,6 @@ namespace torch.RawTensor
 @[extern "lean_torch_masked_scatter"] opaque maskedScatter
     (input mask source : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_sdpa_gqa_qkv"] opaque attentionGQAQKV!
-    (q k v : @& RawTensor) (causal gqa : Bool) : RawTensor
-@[extern "lean_torch_sdpa_gqa_qkv_io"] opaque attentionGQAQKVIO
-    (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
 @[extern "lean_torch_slice_scatter_along_dim"] opaque sliceScatter
     (input : RawTensor) (dim start : @& Nat) (source : @& RawTensor) : RawTensor
 @[extern "lean_torch_apply_rotary_emb"] opaque applyRotary

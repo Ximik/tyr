@@ -57,7 +57,7 @@ void indexSelect(Object indices) {
 }
 
 void attention(Object q) {
-  Object result(lean_torch_sdpa_gqa_qkv(q.get(), q.get(), q.get(), 0, 0), lean_dec);
+  Object result(lean_torch_sdpa_gqa(q.get(), q.get(), q.get(), 0, 0), lean_dec);
 }
 
 void affineDType(bool weight) {
