@@ -89,6 +89,14 @@ def build_image(sha: str, url: str) -> modal.Image:
                       " | sh -s -- -y --default-toolchain none")
         .env({"PATH": "/root/.elan/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"})
         .run_commands(f"elan toolchain install {toolchain}")
+        .add_local_dir(REPO / "deps", f"{CHECKOUT}/deps", copy=True)
+        .run_commands(f"cd {CHECKOUT} && TYR_DEPS_CACHE=/tmp/wheels deps/fetch.sh cuda && rm -rf /tmp/wheels deps")
+        .add_local_file(REPO / "parity/requirements.txt", "/opt/parity-src/requirements.txt", copy=True)
+        .add_local_dir(REPO / "parity/envs", "/opt/parity-src/envs", copy=True)
+        .add_local_file(REPO / "parity/lib/__init__.py", "/opt/parity-src/lib/__init__.py", copy=True)
+        .add_local_file(REPO / "parity/lib/venv.py", "/opt/parity-src/lib/venv.py", copy=True)
+        .add_local_file(REPO / "parity/modal/prepare_envs.py", "/opt/parity-src/modal/prepare_envs.py", copy=True)
+        .run_commands(f"python3 /opt/parity-src/modal/prepare_envs.py {ENVS} && rm -rf /opt/parity-src")
         .run_commands(
             f"git init -q {CHECKOUT} && cd {CHECKOUT} && git fetch -q --depth 1 {url} {sha}"
             " && git checkout -q --detach FETCH_HEAD && parity/modal/build.sh"
