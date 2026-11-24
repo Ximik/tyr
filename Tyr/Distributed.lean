@@ -135,22 +135,30 @@ def xxt {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
   pure (Tensor.ofRaw! (← xxtImpl A.raw))
 
-/-- `beta * A + alpha * (A @ Aᵀ)`, spec-preserving. -/
-def baPlusCaa {σ : StaticSpec} [DType.RealFloating σ.dtype] (A : Tensor σ) (alpha beta : Float) : IO (Tensor σ) := do
+/-- `beta * A + alpha * (A @ Aᵀ)` for a matrix or a batch of matrices, spec-preserving.
+    The native operation rejects non-square matrices. -/
+def baPlusCaa {σ : StaticSpec} [DType.RealFloating σ.dtype] (A : Tensor σ) (alpha beta : Float)
+    (_rank : σ.shape.size = 2 ∨ σ.shape.size = 3 := by first | exact Or.inl rfl | exact Or.inr rfl) :
+    IO (Tensor σ) := do
   pure (Tensor.ofRaw! (← baPlusCaaImpl A.raw alpha beta))
 
-/-- Single Newton-Schulz iteration step, spec-preserving. -/
-def newtonSchulzStep {σ : StaticSpec} [DType.RealFloating σ.dtype] (X : Tensor σ) (a b c : Float) : IO (Tensor σ) := do
+/-- Single Newton-Schulz iteration step for a matrix or a batch of matrices, spec-preserving. -/
+def newtonSchulzStep {σ : StaticSpec} [DType.RealFloating σ.dtype] (X : Tensor σ) (a b c : Float)
+    (_rank : σ.shape.size = 2 ∨ σ.shape.size = 3 := by first | exact Or.inl rfl | exact Or.inr rfl) :
+    IO (Tensor σ) := do
   pure (Tensor.ofRaw! (← newtonSchulzStepImpl X.raw a b c))
 
-/-- Polar Express orthogonalization via Newton-Schulz iterations,
-    spec-preserving. -/
-def polarExpress {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5) : IO (Tensor σ) := do
+/-- Polar Express orthogonalization via Newton-Schulz iterations for a matrix
+    or a batch of matrices, spec-preserving. -/
+def polarExpress {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5)
+    (_rank : σ.shape.size = 2 ∨ σ.shape.size = 3 := by first | exact Or.inl rfl | exact Or.inr rfl) :
+    IO (Tensor σ) := do
   pure (Tensor.ofRaw! (← polarExpressImpl G.raw numIters))
 
 /-- Muon orthogonalization runs and returns BF16, including for Float32 inputs.
     Shape and placement are preserved; the output dtype is explicit. -/
-def muonOrthogonalize {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5) :
+def muonOrthogonalize {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5)
+    (_rank : 2 ≤ σ.shape.size := by simp) :
     IO (Tensor (σ.withDType .BFloat16)) := do
   pure (Tensor.ofRaw! (← muonOrthogonalizeImpl G.raw numIters))
 

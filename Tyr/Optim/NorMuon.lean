@@ -111,7 +111,9 @@ def aspectRatioScale (shape : Shape) : Float :=
        `param ← param - effectiveLr * weightDecay * wdMul * param`
 -/
 def stepSingle {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
-    (cfg : Config) (lrMul wdMul : Float) : IO (Tensor σ × ParamState σ) := do
+    (cfg : Config) (lrMul wdMul : Float)
+    (hRank : 2 ≤ σ.shape.size := by simp) :
+    IO (Tensor σ × ParamState σ) := do
   -- Match nanochat ordering:
   -- 1) momentum buffer update on raw gradients
   -- 2) Nesterov blend
@@ -136,7 +138,7 @@ def stepSingle {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor �
   let update ← if nesterovAbsMax == 0.0 then
       pure nesterovGrad
     else do
-      let orthGrad ← PolarExpress.muonOrthogonalize nesterovGrad cfg.numIters
+      let orthGrad ← PolarExpress.muonOrthogonalize nesterovGrad cfg.numIters hRank
       -- Match native Muon: scale in BF16, then restore the parameter dtype
       -- for subtraction. Never claim the BF16 kernel result has the input dtype.
       pure (Tensor.castLike param (Tensor.mulScalar (Tensor.detach orthGrad) effectiveLr))
@@ -160,15 +162,16 @@ def stepSingle {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor �
 -/
 def stepDistributedOwner {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ)
     (state : ParamState σ)
-    (cfg : Config) (lrMul wdMul : Float) (ownerRank : Nat) :
+    (cfg : Config) (lrMul wdMul : Float) (ownerRank : Nat)
+    (hRank : 2 ≤ σ.shape.size := by simp) :
     IO (Tensor σ × ParamState σ) := do
   let isDist ← dist.isInitialized
   if !cfg.distributed || !isDist then
-    return (← stepSingle param grad state cfg lrMul wdMul)
+    return (← stepSingle param grad state cfg lrMul wdMul hRank)
 
   let worldSize ← dist.getWorldSize
   if worldSize <= 1 then
-    return (← stepSingle param grad state cfg lrMul wdMul)
+    return (← stepSingle param grad state cfg lrMul wdMul hRank)
 
   let rank ← dist.getRank
   let gradAvg := Tensor.detach grad
@@ -176,7 +179,7 @@ def stepDistributedOwner {σ : StaticSpec} [DType.RealFloating σ.dtype] (param 
 
   let (ownerParam, ownerState) ←
     if rank == ownerRank then
-      stepSingle param gradAvg state cfg lrMul wdMul
+      stepSingle param gradAvg state cfg lrMul wdMul hRank
     else
       pure (param, state)
 
@@ -204,6 +207,7 @@ private def stepGroupLocal {σ : StaticSpec} [DType.RealFloating σ.dtype]
     (grads : Array (Tensor σ))
     (states : Array (ParamState σ))
     (cfg : Config) (lrMul wdMul : Float)
+    (hRank : 2 ≤ σ.shape.size := by simp)
     : IO (Array (Tensor σ) × Array (ParamState σ)) := do
   let mut outParams : Array (Tensor σ) := #[]
   let mut outStates : Array (ParamState σ) := #[]
@@ -211,7 +215,7 @@ private def stepGroupLocal {σ : StaticSpec} [DType.RealFloating σ.dtype]
     let p := params[i]
     let g := grads[i]?.getD (Tensor.zerosLike p)
     let st := states[i]?.getD (initParamState p)
-    let (p', st') ← stepSingle p g st cfg lrMul wdMul
+    let (p', st') ← stepSingle p g st cfg lrMul wdMul hRank
     outParams := outParams.push p'
     outStates := outStates.push st'
   return (outParams, outStates)
@@ -229,16 +233,17 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
     (grads : Array (Tensor σ))
     (states : Array (ParamState σ))
     (cfg : Config) (lrMul wdMul : Float := 1.0)
+    (hRank : 2 ≤ σ.shape.size := by simp)
     : IO (Array (Tensor σ) × Array (ParamState σ)) := do
   let some template := params[0]? | return (params, states)
 
   let isDist ← dist.isInitialized
   if !cfg.distributed || !isDist then
-    return (← stepGroupLocal params grads states cfg lrMul wdMul)
+    return (← stepGroupLocal params grads states cfg lrMul wdMul hRank)
 
   let worldSize ← dist.getWorldSize
   if worldSize <= 1 then
-    return (← stepGroupLocal params grads states cfg lrMul wdMul)
+    return (← stepGroupLocal params grads states cfg lrMul wdMul hRank)
 
   let rank ← dist.getRank
   let zeroBuf := Tensor.zerosLike template
@@ -262,7 +267,7 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
     let mut ownerParam := if h : ownerIdx < params.size then params[ownerIdx] else zeroBuf
     let mut ownerState := states[ownerIdx]?.getD (initParamState ownerParam)
     if ownerIdx < params.size then
-      let (p', st') ← stepSingle ownerParam gradOwner ownerState cfg lrMul wdMul
+      let (p', st') ← stepSingle ownerParam gradOwner ownerState cfg lrMul wdMul hRank
       ownerParam := p'
       ownerState := st'
 

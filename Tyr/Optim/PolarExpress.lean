@@ -39,8 +39,10 @@ structure Config where
 
     Returns: Orthogonalized gradient of the same spec
 -/
-def apply {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ) := do
-  dist.polarExpress G cfg.numIters
+def apply {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (cfg : Config := {})
+    (hRank : σ.shape.size = 2 ∨ σ.shape.size = 3 := by first | exact Or.inl rfl | exact Or.inr rfl) :
+    IO (Tensor σ) := do
+  dist.polarExpress G cfg.numIters hRank
 
 /-- Muon-style orthogonalization that handles tall vs wide matrices.
 
@@ -50,8 +52,9 @@ def apply {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (cfg :
 
     This ensures the orthogonalization is always applied to the "short" dimension.
 -/
-def muonOrthogonalize {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5) :
+def muonOrthogonalize {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5)
+    (hRank : 2 ≤ σ.shape.size := by simp) :
     IO (Tensor (σ.withDType .BFloat16)) := do
-  dist.muonOrthogonalize G numIters
+  dist.muonOrthogonalize G numIters hRank
 
 end torch.Optim.PolarExpress
