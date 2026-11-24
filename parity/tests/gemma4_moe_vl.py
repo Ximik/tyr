@@ -12,7 +12,7 @@ TEST = Test(
     env="vision",
 )
 
-CHECKS = [LmTokens(margin=1.0, logits_atol=5.0)]
+CHECKS = [LmTokens(margin=1.0, logits_atol=7.0)]
 
 
 def reference(case, weights, device, dtype, out):

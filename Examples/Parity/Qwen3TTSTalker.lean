@@ -2,12 +2,12 @@
   Examples/Parity/Qwen3TTSTalker.lean
 
   Parity probe for `parity/tests/qwen3tts_talker.py`. Request:
-  `{"dtype", "tensors": <safetensors path>, "max_frames"}`, the file holding the
-  reference's talker inputs: `inputs_embeds` (`[1, seq, hidden]`),
-  `trailing_text_hidden` (`[1, steps, hidden]`) and `tts_pad_embed`
-  (`[1, 1, hidden]`). Generates greedily, with the reference's codec-token
-  suppression and no repetition penalty, until EOS or `max_frames`; writes the
-  codes before EOS (`codes`, `[frames, groups]`).
+  `{"dtype", "tensors": <safetensors path>, "max_frames", "repetition_penalty"}`,
+  the file holding the reference's talker inputs: `inputs_embeds`
+  (`[1, seq, hidden]`), `trailing_text_hidden` (`[1, steps, hidden]`) and
+  `tts_pad_embed` (`[1, 1, hidden]`). Generates greedily, with the reference's
+  codec-token suppression and the request's repetition penalty, until EOS or
+  `max_frames`; writes the codes before EOS (`codes`, `[frames, groups]`).
 -/
 import Examples.Parity.Common
 import Tyr.Model.Qwen3TTS
@@ -21,6 +21,7 @@ structure Request where
   dtype : String
   tensors : String
   max_frames : Nat
+  repetition_penalty : Float
   deriving FromJson
 
 def probe (args : Args) (device : Device) (json : Json) : IO Output := do
@@ -47,7 +48,7 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let out ← TalkerForConditionalGeneration.generateCodesWithLengths cfg.talkerConfig model.talker
     (inputs.castDType dtypes.talker.val) request.max_frames (minNewTokens := 2)
     (temperature := 1.0) (topK := top1) (subtalkerTemperature := 1.0) (subtalkerTopK := top1)
-    (repetitionPenalty := 1.0) (suppressTail := 1024)
+    (repetitionPenalty := request.repetition_penalty) (suppressTail := 1024)
     (trailingTextHidden := some ⟨steps, trailing.castDType dtypes.talker.val⟩)
     (ttsPadEmbed := some (pad.castDType dtypes.talker.val))
   let groups := cfg.talkerConfig.numCodeGroups

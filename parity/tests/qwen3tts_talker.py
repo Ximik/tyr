@@ -5,6 +5,7 @@ from lib.compare import IntsEqual
 from lib.test import Test
 
 MAX_FRAMES = 512
+REPETITION_PENALTY = 1.05
 
 TEST = Test(
     name="qwen3tts_talker",
@@ -21,8 +22,9 @@ CHECKS = [IntsEqual(keys=("codes",))]
 
 def reference(case, weights, device, dtype, out):
     """The `qwen-tts` package's voice clone from the case's audio (speaker vector
-    only), greedy in both talkers, without repetition penalty. The talker's
-    inputs and the codes it returns are taken from inside its `generate`."""
+    only), greedy in both talkers, with the package's default repetition
+    penalty. The talker's inputs and the codes it returns are taken from inside
+    its `generate`."""
     import torch
     from safetensors.torch import save_file
     from qwen_tts import Qwen3TTSModel
@@ -51,7 +53,7 @@ def reference(case, weights, device, dtype, out):
     core.generate = capture_codes
     tts.generate_voice_clone(text=spec["text"], language=spec["language"], ref_audio=(samples, rate),
                              x_vector_only_mode=True, do_sample=False, subtalker_dosample=False,
-                             repetition_penalty=1.0, max_new_tokens=MAX_FRAMES)
+                             repetition_penalty=REPETITION_PENALTY, max_new_tokens=MAX_FRAMES)
 
     out.mkdir(parents=True, exist_ok=True)
     (out / "result.json").write_text(json.dumps({"codes": captured.pop("codes")}))
@@ -61,5 +63,5 @@ def reference(case, weights, device, dtype, out):
 def tyr(case, weights, device, dtype, out):
     # The reference fills a frame's residual codes one step after sampling it, so its last frame is dropped.
     request = {"dtype": dtype, "tensors": str(out.parent / "reference" / "tensors.safetensors"),
-               "max_frames": MAX_FRAMES - 1}
+               "max_frames": MAX_FRAMES - 1, "repetition_penalty": REPETITION_PENALTY}
     probe.run(TEST.probe, request, weights, device, out)

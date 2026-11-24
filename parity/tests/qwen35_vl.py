@@ -7,12 +7,12 @@ TEST = Test(
     weights="qwen3.5-0.8b",
     probe="Qwen35VL",
     devices=("cpu", "cuda"),
-    gpu_dtype="bfloat16",
+    gpu_dtype="float32",
     cases=["vision/describe", "vision/wide", "vision/tall"],
     env="vision",
 )
 
-CHECKS = [LmTokens(margin=0.25, logits_atol=1.0)]
+CHECKS = [LmTokens(margin=1e-3, logits_atol=1e-3)]
 
 
 def reference(case, weights, device, dtype, out):
