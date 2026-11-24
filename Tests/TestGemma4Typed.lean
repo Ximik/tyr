@@ -199,7 +199,7 @@ private def multimodalModel (dtype : DType := .Float32) : Gemma4ForConditionalGe
     patch_embedder := {
       input_proj := visionLinear 8 12 0.2 dtype
       position_embedding_table := weight #[2, 8, 8] 0.3 }
-    blocks := #[{
+    blocks := #v[{
       input_layernorm := norm 8 dtype, post_attention_layernorm := norm 8 dtype
       pre_feedforward_layernorm := norm 8 dtype, post_feedforward_layernorm := norm 8 dtype
       self_attn := {

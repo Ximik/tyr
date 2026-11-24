@@ -138,9 +138,8 @@ private def loadVisionModel (src : Source) (cfg : VLConfig) : IO (Σ dtype : Rea
   let dtype := patchEmbedder.1
   let floating ← IO.ofExcept dtype.realFloating?
   let _ := floating.down
-  let mut blocks : Array (Gemma4VisionBlock (dtype := dtype) (device := device) cfg.vision_config) := #[]
-  for i in [:cfg.vision_config.num_hidden_layers] do
-    blocks := blocks.push (← loadVisionBlock src cfg.vision_config i)
+  let blocks ← Vector.ofFnM fun (i : Fin cfg.vision_config.num_hidden_layers) =>
+    loadVisionBlock src cfg.vision_config i
   let stdBias ← tryLoadVisionParameter (s := #[cfg.vision_config.hidden_size]) src "model.vision_tower.std_bias"
   let stdScale ← tryLoadVisionParameter (s := #[cfg.vision_config.hidden_size]) src "model.vision_tower.std_scale"
   pure ⟨RealFloatingDType.ofDType dtype, {

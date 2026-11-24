@@ -246,7 +246,7 @@ end Gemma4VisionBlock
 
 structure Gemma4VisionModel (cfg : VLConfig) (dtype : DType := .Float32) where
   patch_embedder : Gemma4VisionPatchEmbedder (dtype := dtype) (device := device) cfg
-  blocks : Array (Gemma4VisionBlock (dtype := dtype) (device := device) cfg.vision_config)
+  blocks : Vector (Gemma4VisionBlock (dtype := dtype) (device := device) cfg.vision_config) cfg.vision_config.num_hidden_layers
   std_bias : Option (Tensor { device := device, shape := #[cfg.vision_config.hidden_size], dtype := .Float32 }) := none
   std_scale : Option (Tensor { device := device, shape := #[cfg.vision_config.hidden_size], dtype := .Float32 }) := none
   deriving TensorStruct
@@ -280,12 +280,8 @@ def forward {patchRows patchCols : Nat}
         cfg.vision_config.hidden_size], dtype := .Float32 } :=
   Id.run do
     let mut hidden := m.patch_embedder.forward cfg patchGrid
-    for i in [:m.blocks.size] do
-      match m.blocks[i]? with
-      | some blk =>
-        hidden := blk.forward (patchRows := patchRows) (patchCols := patchCols) cfg.vision_config hidden
-      | none =>
-        pure ()
+    for blk in m.blocks do
+      hidden := blk.forward (patchRows := patchRows) (patchCols := patchCols) cfg.vision_config hidden
     let pooled := poolFeatures cfg hidden
     match m.std_bias, m.std_scale with
     | some bias, some scale =>
