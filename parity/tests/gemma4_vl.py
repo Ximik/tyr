@@ -7,12 +7,12 @@ TEST = Test(
     weights="gemma-4-e2b-it",
     probe="Gemma4VL",
     devices=("cpu", "cuda"),
-    gpu_dtype="bfloat16",
+    gpu_dtype="float32",
     cases=["vision/describe", "vision/wide", "vision/tall"],
     env="vision",
 )
 
-CHECKS = [LmTokens(margin=0.25, logits_atol=1.0)]
+CHECKS = [LmTokens(margin=1e-3, logits_atol=1e-3)]
 
 
 def reference(case, weights, device, dtype, out):
