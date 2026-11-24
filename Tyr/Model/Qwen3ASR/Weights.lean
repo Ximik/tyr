@@ -100,10 +100,8 @@ private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfi
   let convOutWeight ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir "thinker.audio_tower.conv_out.weight"
     #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg]
 
-  let mut layers : Array (AudioEncoderLayer (device := device) (dtype := dtype) cfg) := #[]
-  for i in [:cfg.encoderLayers] do
-    let layer ← loadAudioLayerSharded (dtype := dtype) (cast := cast) (device := device) modelDir i cfg
-    layers := layers.push layer
+  let layers ← Vector.ofFnM fun (i : Fin cfg.encoderLayers) =>
+    loadAudioLayerSharded (dtype := dtype) (cast := cast) (device := device) modelDir i cfg
 
   let lnPost ← loadLayerNormSharded (dtype := dtype) (cast := cast) (device := device) modelDir "thinker.audio_tower.ln_post" cfg.dModel
 
