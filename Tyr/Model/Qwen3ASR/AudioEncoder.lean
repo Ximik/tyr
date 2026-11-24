@@ -236,7 +236,7 @@ structure AudioEncoder (cfg : AudioEncoderConfig) (dtype : DType := .Float32) wh
   conv2d3Weight : Tensor { dtype := dtype, device := device, shape := #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] }
   conv2d3Bias : Tensor { dtype := dtype, device := device, shape := #[cfg.downsampleHiddenSize] }
   convOutWeight : Tensor { dtype := dtype, device := device, shape := #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg] }
-  layers : Array (AudioEncoderLayer (device := device) (dtype := dtype) cfg)
+  layers : Vector (AudioEncoderLayer (device := device) (dtype := dtype) cfg) cfg.encoderLayers
   lnPost : LayerNorm (device := device) cfg.dModel dtype
   proj1Weight : Tensor { dtype := dtype, device := device, shape := #[cfg.dModel, cfg.dModel] }
   proj1Bias : Tensor { dtype := dtype, device := device, shape := #[cfg.dModel] }
@@ -264,10 +264,8 @@ def init (cfg : AudioEncoderConfig) (device : Device := .CPU) (dtype : DType := 
 
   let convOutWeight ← initWeight (dtype := dtype) (device := device) #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg] (AudioEncoderConfig.convOutInDim cfg)
 
-  let mut layers : Array (AudioEncoderLayer (device := device) (dtype := dtype) cfg) := #[]
-  for _ in [:cfg.encoderLayers] do
-    let layer ← AudioEncoderLayer.init (device := device) (dtype := dtype) cfg
-    layers := layers.push layer
+  let layers ← Vector.ofFnM fun (_ : Fin cfg.encoderLayers) =>
+    AudioEncoderLayer.init (device := device) (dtype := dtype) cfg
 
   let lnPost ← initLayerNorm (dtype := dtype) (device := device) cfg.dModel 1e-5
   let proj1Weight ← initWeight (dtype := dtype) (device := device) #[cfg.dModel, cfg.dModel] cfg.dModel
