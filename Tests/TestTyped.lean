@@ -51,7 +51,6 @@ example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : 
   have _ := (_x.unsqueeze 1).squeeze 1
   have _ := _x.transpose 0 1
   have _ := _x.unbind 1
-  have _ := (Tensor.full #[] 5).squeeze 0
   fail_if_success
     have _axisOutOfRange := _x.unsqueeze 3
   fail_if_success
@@ -67,11 +66,10 @@ example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) (_
     have _wrongDType := Tensor.mm _x _w
   trivial
 
-example (scalar : Tensor ⟨#[], .Float64, .CPU⟩)
+example (scalar : Tensor ⟨#[], .Float32, .CPU⟩) (_double : Tensor ⟨#[], .Float64, .CPU⟩)
     (vector : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
-  have _correct : Tensor ⟨#[2], .Float32, .CPU⟩ := scalar.addB vector
-  fail_if_success
-    have _wrongPrecision : Tensor ⟨#[2], .Float64, .CPU⟩ := scalar.addB vector
+  have _sameDType : Tensor ⟨#[2], .Float32, .CPU⟩ := scalar.addB vector
+  fail_if_success have _mixedDType := _double.addB vector
   trivial
 
 @[test]
@@ -179,43 +177,6 @@ def testTypedDtypePromotionMatrix : IO Unit := do
 precision wins within that category. Exercise both argument orders against
 native arithmetic, including integer/bool and f16/bf16 category boundaries. -/
 @[test]
-def testTypedScalarDtypePromotionMatrix : IO Unit := do
-  let dtypes : Array DType := #[.Bool, .UInt8, .Int8, .Int16, .Int32, .Int64,
-    .Float16, .BFloat16, .Float32, .Float64]
-  for vectorDType in dtypes do
-    let vector : Tensor ⟨#[2], vectorDType, .CPU⟩ := (Tensor.ones #[2]).castDType vectorDType
-    for scalarDType in dtypes do
-      let scalar : Tensor ⟨#[], scalarDType, .CPU⟩ := (Tensor.full #[] 2).castDType scalarDType
-      match h : DType.promoteScalar? vectorDType scalarDType with
-      | none => LeanTest.fail s!"Expected ordinary scalar promotion for {vectorDType}/{scalarDType}"
-      | some result =>
-          letI vectorScalarPromotion : TensorSpec.Promotes
-              ⟨#[2], vectorDType⟩ ⟨#[], scalarDType⟩ result := ⟨h⟩
-          letI scalarVectorPromotion : TensorSpec.Promotes
-              ⟨#[], scalarDType⟩ ⟨#[2], vectorDType⟩ result := ⟨h⟩
-          do
-            assertValid (vector.addB scalar) s!"{vectorDType} vector + {scalarDType} scalar"
-            assertValid (scalar.addB vector) s!"{scalarDType} scalar + {vectorDType} vector"
-            assertValid (vector.mulB scalar) s!"{vectorDType} vector * {scalarDType} scalar"
-            assertValid (scalar.divB vector) s!"{scalarDType} scalar / {vectorDType} vector"
-      let lhs := (Tensor.ones #[]).castDType vectorDType
-      match h : DType.promote? vectorDType scalarDType with
-      | none => LeanTest.fail s!"Expected ordinary scalar/scalar promotion for {vectorDType}/{scalarDType}"
-      | some result => do
-          letI : TensorSpec.Promotes ⟨#[], vectorDType⟩ ⟨#[], scalarDType⟩ result := ⟨h⟩
-          assertValid (lhs.addB scalar) s!"{vectorDType} scalar + {scalarDType} scalar"
-  let scalar := (Tensor.full #[] 2).castDType .Float64
-  let vector := Tensor.ones #[2]
-  assertValid (scalar.subB vector) "Float64 scalar - Float32 vector"
-  LeanTest.assertEqual (← (scalar.addB vector).toFloatArray) #[3, 3]
-  let scalarSpec : TensorSpec := ⟨#[], .Float64⟩
-  let vectorSpec : TensorSpec := ⟨#[2], .Float32⟩
-  LeanTest.assertTrue (TensorSpec.pointwise? scalarSpec vectorSpec == some ⟨#[2], .Float32⟩)
-  LeanTest.assertTrue (TensorSpec.division? scalarSpec vectorSpec == some ⟨#[2], .Float32⟩)
-
-/-- Exercise complex dtype indices through actual Tyr native operations, not
-only the metadata-only libtorch promotion oracle. -/
-@[test]
 def testTypedComplexArithmetic : IO Unit := do
   let complex := (Tensor.fromFloatArray #[-2, 3]).castDType .Complex64
   let double := (Tensor.fromFloatArray #[4, 6]).castDType .Float64
@@ -239,31 +200,11 @@ def testTypedComplexArithmetic : IO Unit := do
   LeanTest.assertEqual (← magnitude128.toFloatArray) #[8, 18]
 
 @[test]
-def testTypedComplexScalarPromotion : IO Unit := do
-  let vector := Tensor.fromFloatArray #[1, 2]
-  let scalar := (Tensor.full #[] 2).castDType .Complex128
-  let forward : Tensor ⟨#[2], .Complex64, .CPU⟩ := vector.addB scalar
-  let reverse : Tensor ⟨#[2], .Complex64, .CPU⟩ := scalar.addB vector
-  assertValid forward "complex scalar raises category but preserves vector precision"
-  assertValid reverse "reversed complex scalar broadcasting"
-  LeanTest.assertTrue (Tensor.allclose forward reverse)
-  LeanTest.assertTrue (Tensor.allclose forward ((Tensor.fromFloatArray #[3, 4]).castDType .Complex64))
-  let complexVector := vector.castDType .Complex64
-  let doubleScalar := (Tensor.full #[] 2).castDType .Float64
-  let preserved : Tensor ⟨#[2], .Complex64, .CPU⟩ := complexVector.mulB doubleScalar
-  assertValid preserved "Float64 scalar does not widen a Complex64 vector"
-  let complexScalar := (Tensor.full #[] 2).castDType .Complex64
-  let widened : Tensor ⟨#[2], .Complex128, .CPU⟩ := complexScalar.mulB (vector.castDType .Float64)
-  assertValid widened "Float64 vector raises a Complex64 scalar to Complex128"
-  LeanTest.assertTrue (Tensor.allclose widened ((Tensor.fromFloatArray #[2, 4]).castDType .Complex128))
-
-@[test]
 def testTypedRuntimeShapeResults : IO Unit := do
   let matrix := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[2, 3]
   assertValid (matrix.permute #[1, 0]) "runtime permutation"
   assertValid (matrix.transpose 0 1) "runtime transpose"
   assertValid ((matrix.unsqueeze 1).squeeze 1) "runtime unsqueeze/squeeze"
-  assertValid ((Tensor.full #[] 5).squeeze 0) "scalar squeeze axis 0"
   assertValid ((Tensor.full #[] 5).unsqueeze 0) "scalar unsqueeze axis 0"
   assertValid (matrix.sumDim 1) "runtime axis reduction"
   assertValid ((Tensor.ones #[1, 3]).broadcastTo #[2, 3]) "runtime expansion"
@@ -283,18 +224,6 @@ example (_input : Tensor ⟨#[2, 1], .Float32, .CPU⟩) (_weight : Tensor ⟨#[1
   fail_if_success have _ := Tensor.rmsNormWeighted _input _wide
   trivial
 
-@[test]
-def testTypedRMSNormWeightContract : IO Unit := do
-  let input := (Tensor.ones #[2, 3]).castDType .Float64
-  let weight := (Tensor.full #[] 2).castDType .Float64
-  let output : Tensor ⟨#[2, 3], .Float32, .CPU⟩ := input.rmsNormWeighted weight 0
-  assertValid output "scalar RMS weight has weak Float64 precision"
-  LeanTest.assertEqual (← output.toFloatArray) #[2, 2, 2, 2, 2, 2]
-
-/-- The typed wrappers re-index the phantom dtype according to the promotion
-    algebra in `Tyr.Typed.DType`. These tests run the real ops and assert the
-    runtime dtype agrees with the type-level claim, so the algebra cannot
-    silently diverge from libtorch's behavior. -/
 @[test]
 def testTypedOpsDtypeParity : IO Unit := do
   -- same-dtype elementwise: preserve

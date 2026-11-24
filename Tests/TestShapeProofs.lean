@@ -95,11 +95,9 @@ def softmaxLast {b s d : Nat} (x : DTensor #[b, s, d] .Float32) : DTensor #[b, s
 def softmaxAxis {b s d : Nat} (x : DTensor #[b, s, d] .Float32) : DTensor #[b, s, d] .Float32 :=
   x.softmax 1
 
-def softmaxScalar (x : DTensor #[] .Float32) : DTensor #[] .Float32 :=
-  x.softmax
-
-def logSoftmaxGeneric {σ : StaticSpec} [DType.RealFloating σ.dtype] (x : Tensor σ) : Tensor σ :=
-  x.logSoftmax
+def logSoftmaxGeneric {σ : StaticSpec} [DType.RealFloating σ.dtype] (x : Tensor σ)
+    (rank : 0 < σ.shape.size) : Tensor σ :=
+  x.logSoftmax (_axis := by omega)
 
 set_option linter.unusedVariables false in
 example (x : DTensor #[2, 3] .Float32) : True := by

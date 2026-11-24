@@ -155,7 +155,7 @@ inputs retain their dtype; kernel availability is a separate precondition. -/
   | lhs, rhs => promoteIntegral lhs rhs
 
 /-- Constructor equality that reduces during promotion instance synthesis. -/
-@[reducible] private def sameKnownDType : DType → DType → _root_.Bool
+@[reducible] def sameKnownDType : DType → DType → _root_.Bool
   | .UInt8, .UInt8 => true
   | .Int8, .Int8 => true
   | .Int16, .Int16 => true

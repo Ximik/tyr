@@ -35,8 +35,6 @@ example (_complex : Tensor ⟨#[1, 1, 2], .Complex64, .CPU⟩)
   let (empty, emptyIndices) := Tensor.topKLast2d (Tensor.zeros #[2, 0]) 0
   LeanTest.assertEqual empty.runtimeShape #[2, 0]
   LeanTest.assertEqual emptyIndices.raw.dtype .Int64
-  let scalar := Tensor.argmax (Tensor.ones #[]) 0
-  LeanTest.assertEqual (← scalar.toFloatArray) #[0]
 
 @[test] def testGreedySamplingEmptyVocabularyIsRecoverable : IO Unit := do
   let failed ← try

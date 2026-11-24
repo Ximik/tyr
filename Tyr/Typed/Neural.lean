@@ -34,8 +34,9 @@ def castLike {σ τ : StaticSpec} (reference : Tensor τ) (t : Tensor σ) :
     Tensor (σ.withDType τ.dtype) :=
   castLike! reference t
 
-/-- RMS normalization accumulated in Float32, with the output dtype indexed. -/
-def rmsNorm {σ : StaticSpec} (x : Tensor σ) (eps : Float := 1e-6) : Tensor (σ.withDType .Float32) :=
+/-- RMS normalization over the last axis, accumulated in Float32, with the output dtype indexed. -/
+def rmsNorm {σ : StaticSpec} (x : Tensor σ) (eps : Float := 1e-6)
+    (_rank : 0 < σ.shape.size := by simp) : Tensor (σ.withDType .Float32) :=
   let xf := RawTensor.castDType x.raw .Float32
   let variance := RawTensor.mean! (RawTensor.mul! xf xf)
     (some #[(σ.shape.size - 1)]) true
@@ -43,9 +44,10 @@ def rmsNorm {σ : StaticSpec} (x : Tensor σ) (eps : Float := 1e-6) : Tensor (σ
 
 /-- RMS normalization with Float32 accumulation and explicit restoration of the input dtype. -/
 def rmsNormPreserving {σ : StaticSpec} {w : Shape}
-    (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6) : Tensor σ :=
+    (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6)
+    (rank : 0 < σ.shape.size := by simp) : Tensor σ :=
   -- HF checkpoints round the normalized activation before multiplying weights.
-  let restored := Tensor.castLike x (rmsNorm x eps)
+  let restored := Tensor.castLike x (rmsNorm x eps rank)
   Tensor.ofRaw! (RawTensor.mul! restored.raw weight.raw)
 
 /-- Package a tensor's shape existentially; this does not erase its shape claim. -/
@@ -98,7 +100,7 @@ def meanDim! {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := fa
   Tensor.ofRaw! (RawTensor.mean! t.raw (some #[dim]) keepdim)
 
 def meanDim {σ : StaticSpec} [DType.Mean σ.dtype] (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
-    (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    (_axis : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) :
     Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
   meanDim! t dim keepdim
 
@@ -555,12 +557,12 @@ def topKLast2d {rows cols : Nat} {d : DType} {dev : Device} [DType.Ordered d]
     Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
   topKLast2d! input k
 
-/-- End-exclusive integer range, with overflow-safe length computation. -/
+/-- Length of the end-exclusive range from `start` to `stop` by `step`. -/
 def rangeLength (start stop step : Nat) : Nat :=
-  if step == 0 || stop <= start then 0
-  else ((stop - start + step - 1) / step)
+  (stop - start + step - 1) / step
 
-def arangeFrom (start stop : Nat) (step : Nat := 1) :
+def arangeFrom (start stop : Nat) (step : Nat := 1)
+    (_step : 0 < step := by first | exact of_decide_eq_true rfl | omega) :
     Tensor { shape := #[rangeLength start stop step], dtype := .Int64, device := .CPU } :=
   (Tensor.ofRaw! (RawTensor.arange start stop step))
 

@@ -75,7 +75,7 @@ private def mapRows {rows inDim outDim : Nat} {d : DType} {dev : Device}
     for h : i in [:rows] do
       acc := acc.push (f (rowAt matrix ⟨i, h.upper⟩))
     pure acc
-  let stacked := Tensor.stack1d mapped
+  let stacked := Tensor.stack1d! mapped
   Tensor.reshape stacked #[rows, outDim]
 
 /-- Materialize the dense input Jacobian for debugging/tests. -/
