@@ -31,8 +31,9 @@ def testArangeLengthAndScalarWidths : IO Unit := do
   let cases : Array (Nat × Nat × Nat) :=
     #[(0, 5, 2), (0, 6, 2), (2, 2, 1), (0, 1, 4), (4294967296, 4294967299, 1)]
   for (start, stop, step) in cases do
-    let x := Tensor.arangeFrom start stop step
-    LeanTest.assertEqual x.runtimeShape #[Tensor.rangeLength start stop step]
+    if h : 0 < step then
+      let x := Tensor.arangeFrom start stop step h
+      LeanTest.assertEqual x.runtimeShape #[Tensor.rangeLength start stop step]
   LeanTest.assertEqual (← values (Tensor.arangeFrom 0 5 2)) #[0.0, 2.0, 4.0]
   -- Host arrays use float32 conversion; item preserves these int64 values.
   let wide := Tensor.arangeFrom 4294967296 4294967299

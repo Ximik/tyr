@@ -529,7 +529,7 @@ def softmax! {σ : StaticSpec} (t : Tensor σ) (dim : Nat := σ.shape.size - 1) 
 
 def softmax {σ : StaticSpec} (t : Tensor σ) (dim : Nat := σ.shape.size - 1)
     (_domain : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide)
-    (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) : Tensor σ :=
+    (_axis : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) : Tensor σ :=
   softmax! t dim
 
 /-! ## Matmul family (operands must share dtype and device) -/
@@ -638,7 +638,7 @@ def addB! {σ₁ σ₂ : StaticSpec} {result : DType}
 
 /-- Broadcasting elementwise addition (`a +ᵇ b`). -/
 def addB {σ₁ σ₂ : StaticSpec} {result : DType}
-    [Device.PointwiseCompatible σ₁ σ₂]
+    [Device.SameDeviceCompatible σ₁.device σ₂.device]
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result]
     (a : Tensor σ₁) (b : Tensor σ₂)
     (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
@@ -652,7 +652,7 @@ def subB! {σ₁ σ₂ : StaticSpec} {result : DType}
 
 /-- Broadcasting elementwise subtraction (`a -ᵇ b`). -/
 def subB {σ₁ σ₂ : StaticSpec} {result : DType}
-    [Device.PointwiseCompatible σ₁ σ₂]
+    [Device.SameDeviceCompatible σ₁.device σ₂.device]
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result] [DType.NonBool σ₁.dtype] [DType.NonBool σ₂.dtype]
     (a : Tensor σ₁) (b : Tensor σ₂)
     (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
@@ -666,7 +666,7 @@ def mulB! {σ₁ σ₂ : StaticSpec} {result : DType}
 
 /-- Broadcasting elementwise multiplication (`a *ᵇ b`). -/
 def mulB {σ₁ σ₂ : StaticSpec} {result : DType}
-    [Device.PointwiseCompatible σ₁ σ₂]
+    [Device.SameDeviceCompatible σ₁.device σ₂.device]
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result]
     (a : Tensor σ₁) (b : Tensor σ₂)
     (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
@@ -680,7 +680,7 @@ def divB! {σ₁ σ₂ : StaticSpec} {result : DType}
 
 /-- Broadcasting elementwise division (`a /ᵇ b`). -/
 def divB {σ₁ σ₂ : StaticSpec} {result : DType}
-    [Device.PointwiseCompatible σ₁ σ₂]
+    [Device.SameDeviceCompatible σ₁.device σ₂.device]
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result]
     (a : Tensor σ₁) (b : Tensor σ₂)
     (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
@@ -731,7 +731,7 @@ def sumDim! {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := fal
 
 /-- Reduce one axis using libtorch's accumulation dtype. -/
 def sumDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
-    (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    (_axis : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) :
     Tensor (σ.sumSpec.withShape (reduceShape σ.shape dim keepdim)) :=
   sumDim! t dim keepdim
 
@@ -775,16 +775,15 @@ def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat)
     Tensor (σ.withShape (TensorSpec.permuteShape σ.shape permutation)) :=
   Tensor.ofRaw! (RawTensor.permute t.raw permutation)
 
-def transpose! {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
-    (h0 : dim0 < max 1 σ.shape.size) (h1 : dim1 < max 1 σ.shape.size) :
-    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1 h0 h1)) :=
+def transpose! {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat) :
+    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1)) :=
   Tensor.ofRaw! (RawTensor.transpose! t.raw dim0 dim1)
 
 def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
-    (h0 : dim0 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
-    (h1 : dim1 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
-    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1 h0 h1)) :=
-  transpose! t dim0 dim1 h0 h1
+    (_h0 : dim0 < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
+    (_h1 : dim1 < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1)) :=
+  transpose! t dim0 dim1
 
 def transpose2d {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[n, m], d, dev⟩ :=
@@ -796,8 +795,8 @@ def unsqueeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat)
   Tensor.ofRaw! (RawTensor.unsqueeze t.raw dim)
 
 def squeeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat)
-    (h : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
-    Tensor (σ.withShape (squeezeShape σ.shape dim h)) :=
+    (_h : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    Tensor (σ.withShape (squeezeShape σ.shape dim)) :=
   Tensor.ofRaw! (RawTensor.squeeze t.raw dim)
 
 /-- Discharges `catCompatible` for shapes with symbolic dimensions; fails hard on
@@ -817,12 +816,18 @@ def cat {s1 s2 : Shape} {d : DType} {dev : Device}
     Tensor ⟨TensorSpec.catShape s1 s2 dim, d, dev⟩ :=
   cat! t1 t2 dim
 
-/-- Stack a runtime list of equal vectors along a new leading axis; the result
-    shape records the actual list length. -/
-def stack1d {cols : Nat} {d : DType} {dev : Device}
+def stack1d! {cols : Nat} {d : DType} {dev : Device}
     (tensors : Array (Tensor ⟨#[cols], d, dev⟩)) :
     Tensor ⟨#[tensors.size, cols], d, dev⟩ :=
   Tensor.ofRaw! (RawTensor.stack1d (tensors.map Tensor.toTensor) 0)
+
+/-- Stack a nonempty runtime list of equal vectors along a new leading axis; the
+    result shape records the actual list length. -/
+def stack1d {cols : Nat} {d : DType} {dev : Device}
+    (tensors : Array (Tensor ⟨#[cols], d, dev⟩))
+    (_nonempty : 0 < tensors.size := by first | exact of_decide_eq_true rfl | simp | omega) :
+    Tensor ⟨#[tensors.size, cols], d, dev⟩ :=
+  stack1d! tensors
 
 /-- Vector-Jacobian product, checked against `x`'s spec. Saved intermediates
 are released by default. As in PyTorch, omitted retention follows `createGraph`.
@@ -869,12 +874,11 @@ def argmax! {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) 
     Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
   Tensor.ofRaw! (RawTensor.argmax! t.raw dim)
 
-/-- Argmax along a valid nonempty axis of an ordered tensor. Scalar input
-permits axis zero. Runtime shapes and dtypes use `argmax!`. -/
+/-- Argmax along a valid nonempty axis of an ordered tensor. Runtime dtypes use `argmax!`. -/
 def argmax {s : Shape} {d : DType} {dev : Device} [DType.Ordered d]
     (t : Tensor ⟨s, d, dev⟩) (dim : Nat)
-    (_axis : dim < max 1 s.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
-    (_nonempty : 0 < s[dim]?.getD 1 := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
+    (axis : dim < s.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range"))
+    (_nonempty : 0 < s[dim]'axis := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
   argmax! t dim
 
@@ -987,7 +991,7 @@ def logSoftmax! {σ : StaticSpec} (t : Tensor σ) (dim : Nat := σ.shape.size - 
 /-- Log-softmax for standard real floating tensors. -/
 def logSoftmax {σ : StaticSpec} (t : Tensor σ) (dim : Nat := σ.shape.size - 1)
     (_real : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide)
-    (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) : Tensor σ :=
+    (_axis : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) : Tensor σ :=
   logSoftmax! t dim
 
 /-- Backward from a scalar loss (gradient = 1.0). Saved intermediates are released

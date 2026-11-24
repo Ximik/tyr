@@ -97,16 +97,18 @@ def broadcastList? : List Shape → Option Shape
   | _, [] => lhs
   | _, _ => (broadcastShapes? lhs rhs).getD #[]
 
-/-- Dtype promotion distinguishes zero-dimensional tensor operands from
-non-scalars, whose precision takes precedence within a dtype category.
-Unsupported dtype combinations have no result. -/
+/-- Result dtype of a pointwise operation. A zero-dimensional operand next to a
+non-scalar must have the same dtype: libtorch's weaker promotion for it is not
+admitted. Unsupported dtype combinations have no result. -/
 @[reducible] def pointwiseDType? (lhs rhs : TensorSpec) : Option DType :=
   match lhs.shape.toList, rhs.shape.toList with
-  | [], _ :: _ => DType.promoteScalar? rhs.dtype lhs.dtype
-  | _ :: _, [] => DType.promoteScalar? lhs.dtype rhs.dtype
+  | [], _ :: _ | _ :: _, [] =>
+      match DType.sameKnownDType lhs.dtype rhs.dtype with
+      | true => DType.promote? lhs.dtype rhs.dtype
+      | false => none
   | _, _ => DType.promote? lhs.dtype rhs.dtype
 
-/-- Evidence of the pointwise dtype result, including weak scalar promotion.
+/-- Evidence of the pointwise dtype result.
 This does not establish shape compatibility or native kernel availability. -/
 class Promotes (lhs rhs : TensorSpec) (result : outParam DType) : Prop where
   valid : pointwiseDType? lhs rhs = some result
@@ -129,30 +131,13 @@ def division? (lhs rhs : TensorSpec) : Option TensorSpec := do
   let dtype ← pointwiseDType? lhs rhs
   pure { shape, dtype := DType.divideResult dtype }
 
+/-- Matrix multiplication of operands of rank at least 2, with broadcast batch axes. -/
 @[simp] def matmulShape? (lhs rhs : Shape) : Option Shape :=
   match lhs.size, rhs.size with
-  | 0, _ => none
-  | _, 0 => none
-  | 1, 1 =>
-      if lhs.getD 0 0 == rhs.getD 0 0 then some #[] else none
-  | 1, 2 =>
-      if lhs.getD 0 0 == rhs.getD 0 0 then some #[rhs.getD 1 0] else none
-  | 2, 1 =>
-      if lhs.getD 1 0 == rhs.getD 0 0 then some #[lhs.getD 0 0] else none
   | 2, 2 =>
       if lhs.getD 1 0 == rhs.getD 0 0 then some #[lhs.getD 0 0, rhs.getD 1 0] else none
-  | 1, n₂ =>
-      if lhs.getD 0 0 == rhs.getD (n₂ - 2) 0 then
-        some <| rhs.extract 0 (n₂ - 2) ++ #[rhs.getD (n₂ - 1) 0]
-      else
-        none
-  | n₁, 1 =>
-      if lhs.getD (n₁ - 1) 0 == rhs.getD 0 0 then
-        some <| lhs.extract 0 (n₁ - 2) ++ #[lhs.getD (n₁ - 2) 0]
-      else
-        none
   | n₁, n₂ =>
-      if lhs.getD (n₁ - 1) 0 != rhs.getD (n₂ - 2) 0 then
+      if n₁ < 2 || n₂ < 2 || lhs.getD (n₁ - 1) 0 != rhs.getD (n₂ - 2) 0 then
         none
       else
         match broadcastShapes? (lhs.extract 0 (n₁ - 2)) (rhs.extract 0 (n₂ - 2)) with

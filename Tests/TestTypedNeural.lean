@@ -85,9 +85,6 @@ example (_matrix : Tensor ⟨#[2, 3], .Float32, .CPU⟩) : True := by
     have _ := _matrix.transpose 0 18446744073709551615
   trivial
 
-@[test] def testTypedScalarTranspose : IO Unit := do
-  LeanTest.assertEqual (← ((Tensor.full #[] 5).transpose 0 0).toFloatArray) #[5]
-
 @[test] def testTypedRMSNormBFloat16Rounding : IO Unit := do
   let values := (Tensor.fromFloatArray
     #[0.17, -0.41, 0.83, 1.27, 0.9, 0.5, -0.7, 1.1]).reshape #[1, 2, 4]

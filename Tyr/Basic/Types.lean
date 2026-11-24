@@ -294,33 +294,17 @@ deriving Repr, BEq
 @[simp] def unsqueezeShape (s : Shape) (dim : Nat) (h : dim ≤ s.size) : Shape :=
   s.insertIdx dim 1 h
 
-/-- Compute output shape for squeeze: remove dimension at `dim` if it has size 1 -/
-@[simp] def squeezeShape (s : Shape) (dim : Nat) (h : dim < max 1 s.size) : Shape :=
-  -- A 0-dim tensor accepts axis 0 and stays a scalar.
-  if hs : s.size = 0 then s
-  else
-    have h : dim < s.size := by omega
-    if s[dim]'h = 1 then s.eraseIdx dim h else s
+/-- Shape after squeeze: the axis `dim` is removed if it has extent 1. -/
+@[simp] def squeezeShape (s : Shape) (dim : Nat) : Shape :=
+  if s[dim]? = some 1 then s.eraseIdxIfInBounds dim else s
 
-/-- Compute output shape for transpose: swap dimensions dim0 and dim1 -/
-@[simp] def transposeShape (s : Shape) (dim0 dim1 : Nat)
-    (h0 : dim0 < max 1 s.size) (h1 : dim1 < max 1 s.size) : Shape :=
-  -- A 0-dim tensor accepts axes 0 and 0 and stays a scalar.
-  if hs : s.size = 0 then s
-  else
-    have h0 : dim0 < s.size := by omega
-    have h1 : dim1 < s.size := by omega
-    let v0 := s[dim0]'h0
-    let v1 := s[dim1]'h1
-    let s' := s.set (Fin.mk dim0 h0) v1
-    have h1' : dim1 < s'.size := by rw [Array.size_set]; exact h1
-    s'.set (Fin.mk dim1 h1') v0
+/-- Shape after transpose: the extents at `dim0` and `dim1` are swapped. -/
+@[simp] def transposeShape (s : Shape) (dim0 dim1 : Nat) : Shape :=
+  (s.setIfInBounds dim0 (s.getD dim1 0)).setIfInBounds dim1 (s.getD dim0 0)
 
 /-- Compute output shape for reduction along a dimension -/
 @[simp] def reduceShape (s : Shape) (dim : Nat) (keepdim : Bool) : Shape :=
-  if h : dim < s.size then
-    if keepdim then s.set (Fin.mk dim h) 1 else s.eraseIdx dim h
-  else s
+  if keepdim then s.setIfInBounds dim 1 else s.eraseIdxIfInBounds dim
 
 /-- Compute output shape for unbinding: remove dimension at `dim` -/
 @[simp] def unbindShape (s : Shape) (dim : Nat) (h : dim < s.size) : Shape :=
@@ -343,33 +327,14 @@ private def broadcastBatchShapes (s1 s2 : Shape) : Shape :=
       let d2 := s2.getD j2 1
       if d1 = 1 then d2 else if d2 = 1 then d1 else max d1 d2
 
-/-- Compute output shape for matrix multiplication following PyTorch broadcasting rules.
-    - 1D @ 1D: dot product -> scalar []
-    - 2D @ 2D: [m,k] @ [k,n] -> [m,n]
-    - 1D @ 2D: [k] @ [k,n] -> [n]
-    - 2D @ 1D: [m,k] @ [k] -> [m]
-    - ND @ ND: broadcast batch dims, matmul last 2 dims -/
+/-- Output shape of matrix multiplication of two operands of rank at least 2:
+    `[..., m, k] @ [..., k, n] -> [broadcast(...), m, n]`. Other ranks give `#[]`;
+    `Tensor.matmul` rules them out with `TensorSpec.matmulShape?`. -/
 @[simp] def matmulShape (s1 s2 : Shape) : Shape :=
   match s1.size, s2.size with
-  | 0, _ => #[]  -- scalar, invalid but return empty
-  | _, 0 => #[]  -- scalar, invalid but return empty
-  | 1, 1 => #[]  -- [k] @ [k] -> scalar (dot product)
-  | 1, 2 => #[s2.getD 1 0]  -- [k] @ [k,n] -> [n]
-  | 2, 1 => #[s1.getD 0 0]  -- [m,k] @ [k] -> [m]
-  | 2, 2 => #[s1.getD 0 0, s2.getD 1 0]  -- [m,k] @ [k,n] -> [m,n]
-  | 1, n2 =>
-    -- [k] @ [..., k, n] -> [..., n]
-    let batch := s2.extract 0 (n2 - 2)
-    batch ++ #[s2.getD (n2 - 1) 0]
-  | n1, 1 =>
-    -- [..., m, k] @ [k] -> [..., m]
-    let batch := s1.extract 0 (n1 - 2)
-    batch ++ #[s1.getD (n1 - 2) 0]
+  | 2, 2 => #[s1.getD 0 0, s2.getD 1 0]
   | n1, n2 =>
-    -- General case: broadcast batch dims, matmul last 2
-    let batch1 := s1.extract 0 (n1 - 2)
-    let batch2 := s2.extract 0 (n2 - 2)
-    let batchOut := broadcastBatchShapes batch1 batch2
-    let m := s1.getD (n1 - 2) 0
-    let n := s2.getD (n2 - 1) 0
-    batchOut ++ #[m, n]
+    if n1 < 2 || n2 < 2 then #[]
+    else
+      let batchOut := broadcastBatchShapes (s1.extract 0 (n1 - 2)) (s2.extract 0 (n2 - 2))
+      batchOut ++ #[s1.getD (n1 - 2) 0, s2.getD (n2 - 1) 0]

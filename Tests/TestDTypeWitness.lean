@@ -39,9 +39,11 @@ example {tensor scalar result : DType}
     DType.promoteScalar? tensor scalar = some (DType.promoteScalar tensor scalar) :=
   h.valid
 
--- Scalar precision is weak in either operand order; two scalars promote normally.
-example : TensorSpec.Promotes ⟨#[], .Float64⟩ ⟨#[2], .Float32⟩ .Float32 := inferInstance
-example : TensorSpec.Promotes ⟨#[2], .Float32⟩ ⟨#[], .Float64⟩ .Float32 := inferInstance
+-- A scalar next to a non-scalar needs the same dtype; two scalars promote normally.
+example : TensorSpec.Promotes ⟨#[], .Float32⟩ ⟨#[2], .Float32⟩ .Float32 := inferInstance
+example : True := by
+  fail_if_success have _ : TensorSpec.Promotes ⟨#[], .Float64⟩ ⟨#[2], .Float32⟩ .Float32 := inferInstance
+  trivial
 example : TensorSpec.Promotes ⟨#[], .Float64⟩ ⟨#[], .Float32⟩ .Float64 := inferInstance
 
 example {lhs rhs : TensorSpec} {result : DType} [h : TensorSpec.Promotes lhs rhs result] :
@@ -84,9 +86,6 @@ example (a : Tensor ⟨#[2], .Complex64, .CPU⟩) (b : Tensor ⟨#[2], .Float64,
 example (a : Tensor ⟨#[2, 1], .Float16, .CPU⟩) (b : Tensor ⟨#[3], .BFloat16, .CPU⟩) :
     Tensor ⟨#[2, 3], .Float32, .CPU⟩ := a.addB b
 
-example (a : Tensor ⟨#[], .Float64, .CPU⟩) (b : Tensor ⟨#[2], .Float32, .CPU⟩) :
-    Tensor ⟨#[2], .Float32, .CPU⟩ := a.addB b
-
 -- Computed dtype indices must remain transparent to promotion inference. These
 -- definitions deliberately omit an expected result type, as normal composed
 -- model expressions do. The following examples separately check their indices.
@@ -121,17 +120,12 @@ private def addComplexMagnitudes (x : Tensor ⟨#[2], .Complex64, .CPU⟩) :=
 
 -- Scalar broadcasting keeps the vector's symbolic shape visible to the next
 -- operation; both operand orders must compose without an intermediate cast.
-private def addWeakScalarThenVector {n : Nat}
-    (vector : Tensor ⟨#[n], .Float32, .CPU⟩) (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
+private def addScalarThenVector {n : Nat}
+    (vector : Tensor ⟨#[n], .Float32, .CPU⟩) (scalar : Tensor ⟨#[], .Float32, .CPU⟩) :=
   vector.addB scalar + vector
 
-private def addReversedWeakScalarThenVector {n : Nat}
-    (vector : Tensor ⟨#[n], .Float32, .CPU⟩) (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
-  scalar.addB vector + vector
-
-private def addCPUSignalAfterScalar {n : Nat}
-    (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
-    (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
+private def addReversedScalarThenVector {n : Nat}
+    (vector : Tensor ⟨#[n], .Float32, .CPU⟩) (scalar : Tensor ⟨#[], .Float32, .CPU⟩) :=
   scalar.addB vector + vector
 
 example (x : Tensor ⟨#[2], .Float32, .CPU⟩) : Tensor ⟨#[], .Float32, .CPU⟩ :=
@@ -153,14 +147,11 @@ example (x : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU�
 example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   addComplexMagnitudes x
 example {n : Nat} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
-    (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
-  addWeakScalarThenVector vector scalar
+    (scalar : Tensor ⟨#[], .Float32, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
+  addScalarThenVector vector scalar
 example {n : Nat} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
-    (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
-  addReversedWeakScalarThenVector vector scalar
-example {n : Nat} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
-    (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
-  addCPUSignalAfterScalar vector scalar
+    (scalar : Tensor ⟨#[], .Float32, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
+  addReversedScalarThenVector vector scalar
 
 example {shape : Shape} {lhs rhs result : DType} {device : Device}
     [DType.Promotes lhs rhs result]

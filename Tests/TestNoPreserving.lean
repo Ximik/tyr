@@ -21,18 +21,18 @@ example {σ : StaticSpec} [DType.RealFloating σ.dtype] (x : Tensor σ) : Tensor
   Tensor.mulScalar (Tensor.addScalar x 1) 2
 example {σ : StaticSpec} [DType.RealFloating σ.dtype] (x : Tensor σ) : Tensor σ :=
   Tensor.sqrt (Tensor.exp (Tensor.log (Tensor.sin (Tensor.cos (Tensor.atan x)))))
-example {σ : StaticSpec} [DType.RealFloating σ.dtype] (x : Tensor σ) : Tensor σ :=
-  Tensor.softmax (Tensor.gelu (Tensor.silu (Tensor.sigmoid (Tensor.tanh (Tensor.elu x)))))
+example {σ : StaticSpec} [DType.RealFloating σ.dtype] (x : Tensor σ) (rank : 0 < σ.shape.size) : Tensor σ :=
+  Tensor.softmax (Tensor.gelu (Tensor.silu (Tensor.sigmoid (Tensor.tanh (Tensor.elu x))))) (_axis := by omega)
 example {σ : StaticSpec} [DType.RealFloating σ.dtype] (x y : Tensor σ) : Tensor σ := by
   simpa using Tensor.div x y
 example {σ : StaticSpec} [DType.RealFloating σ.dtype] (x : Tensor σ) : Tensor σ := by
   simpa using Tensor.abs x
 example {s : Shape} {dtype : DType} {device : Device} [DType.RealFloating dtype]
-    (x : Tensor ⟨s, dtype, device⟩) (dim : Nat) (axis : dim < max 1 s.size) :
+    (x : Tensor ⟨s, dtype, device⟩) (dim : Nat) (axis : dim < s.size) :
     Tensor ⟨reduceShape s dim false, dtype, device⟩ := by
   simpa using Tensor.sumDim x dim false axis
 example {s : Shape} {dtype : DType} {device : Device} [DType.RealFloating dtype]
-    (x : Tensor ⟨s, dtype, device⟩) (dim : Nat) (axis : dim < max 1 s.size) :
+    (x : Tensor ⟨s, dtype, device⟩) (dim : Nat) (axis : dim < s.size) :
     Tensor ⟨reduceShape s dim false, dtype, device⟩ := Tensor.meanDim x dim false axis
 
 example (_x : Tensor ⟨#[2], .Int32, .CPU⟩) : True := by
