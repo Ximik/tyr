@@ -246,17 +246,6 @@ lean_object* lean_tyr_audio_input_stop() {
   return lean_io_result_mk_ok(lean_box(0));
 }
 
-lean_object* lean_tyr_audio_rms(b_lean_obj_arg arr) {
-  size_t n = lean_array_size(arr);
-  if (n == 0) return lean_io_result_mk_ok(lean_box_float(0.0));
-  double sum_sq = 0.0;
-  for (size_t i = 0; i < n; ++i) {
-    double x = lean_unbox_float(lean_array_uget(arr, i));
-    sum_sq += x * x;
-  }
-  return lean_io_result_mk_ok(lean_box_float(std::sqrt(sum_sq / static_cast<double>(n))));
-}
-
 } // extern "C"
 
 #else
@@ -283,17 +272,6 @@ lean_object* lean_tyr_audio_input_read_buffer(b_lean_obj_arg, lean_obj_arg block
 
 lean_object* lean_tyr_audio_input_stop() {
   return tyr::ioErrorResult("audio_input", "only supported on macOS");
-}
-
-lean_object* lean_tyr_audio_rms(b_lean_obj_arg arr) {
-  size_t n = lean_array_size(arr);
-  if (n == 0) return lean_io_result_mk_ok(lean_box_float(0.0));
-  double sum_sq = 0.0;
-  for (size_t i = 0; i < n; ++i) {
-    double x = lean_unbox_float(lean_array_uget(arr, i));
-    sum_sq += x * x;
-  }
-  return lean_io_result_mk_ok(lean_box_float(std::sqrt(sum_sq / static_cast<double>(n))));
 }
 
 } // extern "C"
