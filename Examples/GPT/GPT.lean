@@ -65,7 +65,7 @@ structure GPTParams (cfg : Config) where
   wte : Activation (device := device) #[cfg.vocab_size, cfg.n_embd]    -- token embeddings
   wpe : Activation (device := device) #[cfg.block_size, cfg.n_embd]   -- position embeddings
   -- Transformer blocks
-  blocks : Array (BlockParams (device := device) cfg.n_embd)
+  blocks : Vector (BlockParams (device := device) cfg.n_embd) cfg.n_layer
   -- Final layer norm
   ln_f_weight : Activation (device := device) #[cfg.n_embd]
   ln_f_bias : Activation (device := device) #[cfg.n_embd]
@@ -102,10 +102,7 @@ def BlockParams.init (n_embd : Nat) (scale : Float := 0.02) (device : Device := 
 def GPTParams.init (cfg : Config) (device : Device := Device.CPU) : IO (GPTParams (device := device) cfg) := do
   let wte ← Tensor.randn #[cfg.vocab_size, cfg.n_embd] false device
   let wpe ← Tensor.randn #[cfg.block_size, cfg.n_embd] false device
-  let mut blocks := #[]
-  for _ in [:cfg.n_layer] do
-    let block ← BlockParams.init cfg.n_embd 0.02 device
-    blocks := blocks.push block
+  let blocks ← Vector.ofFnM fun (_ : Fin cfg.n_layer) => BlockParams.init cfg.n_embd 0.02 device
   return {
     wte := ← Tensor.parameter (Tensor.mulScalar wte 0.02)
     wpe := ← Tensor.parameter (Tensor.mulScalar wpe 0.02)
