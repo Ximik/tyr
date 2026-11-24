@@ -41,12 +41,6 @@ static lean_object* mk_string_array(const std::vector<std::string>& strings) {
     return arr;
 }
 
-// Create IO error result
-static lean_object* mk_io_error(const std::string& msg) {
-    lean_object* err = lean_mk_io_user_error(lean_mk_string(msg.c_str()));
-    return lean_io_result_mk_error(err);
-}
-
 // Create IO success result
 static lean_object* mk_io_ok(lean_object* value) {
     return lean_io_result_mk_ok(value);
@@ -80,6 +74,22 @@ static lean_object* mk_row_group_data(const std::vector<std::string>& documents)
     return obj;
 }
 
+static std::unique_ptr<parquet::arrow::FileReader> openParquetReader(const std::string& path) {
+    auto maybe_infile = arrow::io::ReadableFile::Open(path);
+    if (!maybe_infile.ok()) {
+        throw std::runtime_error("Failed to open file: " + maybe_infile.status().message());
+    }
+    std::unique_ptr<parquet::arrow::FileReader> reader;
+    auto status = parquet::arrow::FileReader::Make(
+        arrow::default_memory_pool(),
+        parquet::ParquetFileReader::Open(*maybe_infile),
+        &reader);
+    if (!status.ok()) {
+        throw std::runtime_error("Failed to open parquet file: " + status.message());
+    }
+    return reader;
+}
+
 // ============================================================================
 // FFI Implementation: lean_parquet_list_files
 // Lists all .parquet files in a directory, sorted by name.
@@ -91,11 +101,11 @@ lean_object* lean_parquet_list_files(b_lean_obj_arg dir_path) {
 
     // Check if directory exists
     if (!fs::exists(path)) {
-        return mk_io_error("Directory does not exist: " + path);
+        return tyr::ioErrorResult("Parquet.listFiles", "Directory does not exist: " + path);
     }
 
     if (!fs::is_directory(path)) {
-        return mk_io_error("Path is not a directory: " + path);
+        return tyr::ioErrorResult("Parquet.listFiles", "Path is not a directory: " + path);
     }
 
     // Collect parquet files
@@ -107,7 +117,7 @@ lean_object* lean_parquet_list_files(b_lean_obj_arg dir_path) {
             }
         }
     } catch (const std::exception& e) {
-        return mk_io_error(std::string("Error listing directory: ") + e.what());
+        return tyr::ioErrorResult("Parquet.listFiles", std::string("Error listing directory: ") + e.what());
     }
 
     // Sort for deterministic ordering
@@ -126,22 +136,7 @@ lean_object* lean_parquet_get_metadata(b_lean_obj_arg file_path) {
     return tyr::ioCall("Parquet.getMetadata", [&] {
     std::string path = lean_string_cstr(file_path);
 
-    // Open file
-    auto maybe_infile = arrow::io::ReadableFile::Open(path);
-    if (!maybe_infile.ok()) {
-        return mk_io_error("Failed to open file: " + maybe_infile.status().message());
-    }
-    auto infile = *maybe_infile;
-
-    // Create parquet reader
-    std::unique_ptr<parquet::arrow::FileReader> reader;
-    auto status = parquet::arrow::FileReader::Make(
-        arrow::default_memory_pool(),
-        parquet::ParquetFileReader::Open(infile),
-        &reader);
-    if (!status.ok()) {
-        return mk_io_error("Failed to open parquet file: " + status.message());
-    }
+    auto reader = openParquetReader(path);
 
     // Get metadata from the parquet file reader
     auto parquet_reader = reader->parquet_reader();
@@ -173,28 +168,13 @@ lean_object* lean_parquet_read_row_group(b_lean_obj_arg file_path, b_lean_obj_ar
     std::string path = lean_string_cstr(file_path);
     std::string column_name = lean_string_cstr(text_column);
 
-    // Open file
-    auto maybe_infile = arrow::io::ReadableFile::Open(path);
-    if (!maybe_infile.ok()) {
-        return mk_io_error("Failed to open file: " + maybe_infile.status().message());
-    }
-    auto infile = *maybe_infile;
-
-    // Create parquet reader
-    std::unique_ptr<parquet::arrow::FileReader> reader;
-    auto status = parquet::arrow::FileReader::Make(
-        arrow::default_memory_pool(),
-        parquet::ParquetFileReader::Open(infile),
-        &reader);
-    if (!status.ok()) {
-        return mk_io_error("Failed to open parquet file: " + status.message());
-    }
+    auto reader = openParquetReader(path);
 
     // Check row group index is valid
     auto parquet_reader = reader->parquet_reader();
     auto file_metadata = parquet_reader->metadata();
     if (row_group_idx >= static_cast<uint64_t>(file_metadata->num_row_groups())) {
-        return mk_io_error("Row group index out of range: " + std::to_string(row_group_idx) +
+        return tyr::ioErrorResult("Parquet.readRowGroup", "Row group index out of range: " + std::to_string(row_group_idx) +
                           " >= " + std::to_string(file_metadata->num_row_groups()));
     }
 
@@ -209,14 +189,14 @@ lean_object* lean_parquet_read_row_group(b_lean_obj_arg file_path, b_lean_obj_ar
     }
 
     if (column_idx < 0) {
-        return mk_io_error("Column not found: " + column_name);
+        return tyr::ioErrorResult("Parquet.readRowGroup", "Column not found: " + column_name);
     }
 
     // Read the specific row group
     std::shared_ptr<arrow::Table> table;
-    status = reader->ReadRowGroup(static_cast<int>(row_group_idx), {column_idx}, &table);
+    auto status = reader->ReadRowGroup(static_cast<int>(row_group_idx), {column_idx}, &table);
     if (!status.ok()) {
-        return mk_io_error("Failed to read row group: " + status.message());
+        return tyr::ioErrorResult("Parquet.readRowGroup", "Failed to read row group: " + status.message());
     }
 
     // Extract text column data
@@ -244,7 +224,7 @@ lean_object* lean_parquet_read_row_group(b_lean_obj_arg file_path, b_lean_obj_ar
                 }
             }
         } else {
-            return mk_io_error("Column is not a string type");
+            return tyr::ioErrorResult("Parquet.readRowGroup", "Column is not a string type");
         }
     }
 
@@ -401,40 +381,8 @@ static std::string arrow_value_to_json(const std::shared_ptr<arrow::Array>& arr,
     }
 }
 
-// ============================================================================
-// FFI Implementation: lean_parquet_read_as_json
-// Reads all rows from a parquet file and returns them as JSON strings.
-// Returns Array String where each string is a JSON object for one row.
-// ============================================================================
-
-lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path) {
-    return tyr::ioCall("Parquet.readAsJson", [&] {
-    std::string path = lean_string_cstr(file_path);
-
-    // Open file
-    auto maybe_infile = arrow::io::ReadableFile::Open(path);
-    if (!maybe_infile.ok()) {
-        return mk_io_error("Failed to open file: " + maybe_infile.status().message());
-    }
-    auto infile = *maybe_infile;
-
-    // Create parquet reader
-    std::unique_ptr<parquet::arrow::FileReader> reader;
-    auto status = parquet::arrow::FileReader::Make(
-        arrow::default_memory_pool(),
-        parquet::ParquetFileReader::Open(infile),
-        &reader);
-    if (!status.ok()) {
-        return mk_io_error("Failed to open parquet file: " + status.message());
-    }
-
-    // Read entire table
-    std::shared_ptr<arrow::Table> table;
-    status = reader->ReadTable(&table);
-    if (!status.ok()) {
-        return mk_io_error("Failed to read parquet table: " + status.message());
-    }
-
+// Each row of `table` as a JSON object keyed by column name.
+static lean_object* tableJsonRows(const std::shared_ptr<arrow::Table>& table) {
     // Get column names
     auto schema = table->schema();
     std::vector<std::string> column_names;
@@ -442,23 +390,21 @@ lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path) {
         column_names.push_back(schema->field(i)->name());
     }
 
-    // Build JSON strings for each row
-    std::vector<std::string> json_rows;
-    int64_t num_rows = table->num_rows();
-
-    // Flatten chunked arrays for easier access
+    // Flatten chunked arrays
     std::vector<std::shared_ptr<arrow::Array>> columns;
     for (int col_idx = 0; col_idx < table->num_columns(); col_idx++) {
         auto chunked = table->column(col_idx);
-        // Combine all chunks into one array
         auto maybe_combined = arrow::Concatenate(chunked->chunks(), arrow::default_memory_pool());
         if (!maybe_combined.ok()) {
-            return mk_io_error("Failed to concatenate chunks: " + maybe_combined.status().message());
+            throw std::runtime_error("Failed to concatenate chunks: " + maybe_combined.status().message());
         }
         columns.push_back(*maybe_combined);
     }
 
     // Build JSON for each row
+    std::vector<std::string> json_rows;
+    int64_t num_rows = table->num_rows();
+
     for (int64_t row = 0; row < num_rows; row++) {
         std::string json = "{";
         for (size_t col = 0; col < columns.size(); col++) {
@@ -470,7 +416,29 @@ lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path) {
         json_rows.push_back(json);
     }
 
-    return mk_io_ok(mk_string_array(json_rows));
+    return mk_string_array(json_rows);
+}
+
+// ============================================================================
+// FFI Implementation: lean_parquet_read_as_json
+// Reads all rows from a parquet file and returns them as JSON strings.
+// Returns Array String where each string is a JSON object for one row.
+// ============================================================================
+
+lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path) {
+    return tyr::ioCall("Parquet.readAsJson", [&] {
+    std::string path = lean_string_cstr(file_path);
+
+    auto reader = openParquetReader(path);
+
+    // Read entire table
+    std::shared_ptr<arrow::Table> table;
+    auto status = reader->ReadTable(&table);
+    if (!status.ok()) {
+        return tyr::ioErrorResult("Parquet.readAsJson", "Failed to read parquet table: " + status.message());
+    }
+
+    return mk_io_ok(tableJsonRows(table));
     });
 }
 
@@ -485,72 +453,24 @@ lean_object* lean_parquet_read_row_group_as_json(b_lean_obj_arg file_path, b_lea
   const uint64_t row_group_idx = tyr::natTo<int>(row_group_idx_obj, "row_group_idx");
     std::string path = lean_string_cstr(file_path);
 
-    // Open file
-    auto maybe_infile = arrow::io::ReadableFile::Open(path);
-    if (!maybe_infile.ok()) {
-        return mk_io_error("Failed to open file: " + maybe_infile.status().message());
-    }
-    auto infile = *maybe_infile;
-
-    // Create parquet reader
-    std::unique_ptr<parquet::arrow::FileReader> reader;
-    auto status = parquet::arrow::FileReader::Make(
-        arrow::default_memory_pool(),
-        parquet::ParquetFileReader::Open(infile),
-        &reader);
-    if (!status.ok()) {
-        return mk_io_error("Failed to open parquet file: " + status.message());
-    }
+    auto reader = openParquetReader(path);
 
     // Check row group index
     auto parquet_reader = reader->parquet_reader();
     auto file_metadata = parquet_reader->metadata();
     if (row_group_idx >= static_cast<uint64_t>(file_metadata->num_row_groups())) {
-        return mk_io_error("Row group index out of range: " + std::to_string(row_group_idx) +
+        return tyr::ioErrorResult("Parquet.readRowGroupAsJson", "Row group index out of range: " + std::to_string(row_group_idx) +
                           " >= " + std::to_string(file_metadata->num_row_groups()));
     }
 
     // Read the row group
     std::shared_ptr<arrow::Table> table;
-    status = reader->ReadRowGroup(static_cast<int>(row_group_idx), &table);
+    auto status = reader->ReadRowGroup(static_cast<int>(row_group_idx), &table);
     if (!status.ok()) {
-        return mk_io_error("Failed to read row group: " + status.message());
+        return tyr::ioErrorResult("Parquet.readRowGroupAsJson", "Failed to read row group: " + status.message());
     }
 
-    // Get column names
-    auto schema = table->schema();
-    std::vector<std::string> column_names;
-    for (int i = 0; i < schema->num_fields(); i++) {
-        column_names.push_back(schema->field(i)->name());
-    }
-
-    // Flatten chunked arrays
-    std::vector<std::shared_ptr<arrow::Array>> columns;
-    for (int col_idx = 0; col_idx < table->num_columns(); col_idx++) {
-        auto chunked = table->column(col_idx);
-        auto maybe_combined = arrow::Concatenate(chunked->chunks(), arrow::default_memory_pool());
-        if (!maybe_combined.ok()) {
-            return mk_io_error("Failed to concatenate chunks: " + maybe_combined.status().message());
-        }
-        columns.push_back(*maybe_combined);
-    }
-
-    // Build JSON for each row
-    std::vector<std::string> json_rows;
-    int64_t num_rows = table->num_rows();
-
-    for (int64_t row = 0; row < num_rows; row++) {
-        std::string json = "{";
-        for (size_t col = 0; col < columns.size(); col++) {
-            if (col > 0) json += ",";
-            json += "\"" + json_escape(column_names[col]) + "\":";
-            json += arrow_value_to_json(columns[col], row);
-        }
-        json += "}";
-        json_rows.push_back(json);
-    }
-
-    return mk_io_ok(mk_string_array(json_rows));
+    return mk_io_ok(tableJsonRows(table));
     });
 }
 

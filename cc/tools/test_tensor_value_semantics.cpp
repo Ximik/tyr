@@ -23,6 +23,7 @@ struct Nat {
   ~Nat() { lean_dec(object); }
   operator lean_object*() const { return object; }
 };
+lean_object* cpuDevice() { return lean_box(static_cast<unsigned>(tyr::lean::DeviceKind::CPU)); }
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -34,7 +35,7 @@ lean_object* shape(std::initializer_list<uint64_t> dims) {
 }
 lean_object* retain(lean_object* value) { lean_inc(value); return value; }
 Object full(double value, bool grad = false, bool row = false) {
-  return Object(lean_torch_full(row ? shape({1, 2}) : shape({2, 2}), value, grad, lean_box(1)), lean_dec);
+  return Object(lean_torch_full(row ? shape({1, 2}) : shape({2, 2}), value, grad, cpuDevice()), lean_dec);
 }
 // Test-only inspection of the actual native ownership graph. Do not retain
 // this handle across a uniqueness test unless that native alias is intentional.

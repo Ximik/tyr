@@ -22,6 +22,7 @@ struct Nat {
   operator lean_object*() const { return object; }
 };
 
+lean_object* cpuDevice() { return lean_box(static_cast<unsigned>(tyr::lean::DeviceKind::CPU)); }
 void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -145,10 +146,10 @@ void testOwnedArraysAndOptions(lean_object* tensor) {
 }
 
 void testNativeFailureCleanup(lean_object* tensor) {
-  LeanObject incompatible(lean_torch_ones(shape({3, 3}), 0, lean_box(1)), lean_dec);
+  LeanObject incompatible(lean_torch_ones(shape({3, 3}), 0, cpuDevice()), lean_dec);
   expectThrow([&] { return lean_torch_tensor_add(tensor, incompatible.get()); });
 
-  auto* cuda = lean_alloc_ctor(0, 1, 0);
+  auto* cuda = lean_alloc_ctor(static_cast<unsigned>(tyr::lean::DeviceKind::CUDA), 1, 0);
   lean_ctor_set(cuda, 0, lean_uint64_to_nat(std::numeric_limits<uint64_t>::max()));
   ObservedArg device(cuda), factoryShape(shape({2, 2}));
   expectThrow([&] { return lean_torch_ones(factoryShape.transfer(), 0, device.transfer()); });
@@ -172,9 +173,9 @@ void testNativeFailureCleanup(lean_object* tensor) {
 }
 
 void testModelArguments(lean_object* tensor) {
-  LeanObject input(lean_torch_ones(shape({1, 1, 3, 3}), 0, lean_box(1)), lean_dec);
-  LeanObject weight(lean_torch_ones(shape({1, 1, 1, 1}), 0, lean_box(1)), lean_dec);
-  LeanObject bias(lean_torch_zeros(shape({1}), 0, lean_box(1)), lean_dec);
+  LeanObject input(lean_torch_ones(shape({1, 1, 3, 3}), 0, cpuDevice()), lean_dec);
+  LeanObject weight(lean_torch_ones(shape({1, 1, 1, 1}), 0, cpuDevice()), lean_dec);
+  LeanObject bias(lean_torch_zeros(shape({1}), 0, cpuDevice()), lean_dec);
   ObservedArg stride(shape({1, 1})), padding(shape({0, 0})), dilation(shape({1, 1}));
   lean_dec(lean_torch_conv2d_bias(
     input.get(), weight.get(), bias.get(), stride.transfer(), padding.transfer(), dilation.transfer()));
@@ -189,7 +190,7 @@ void testModelArguments(lean_object* tensor) {
 int main() {
   lean_initialize();
   try {
-    LeanObject tensor(lean_torch_ones(shape({2, 2}), 0, lean_box(1)), lean_dec);
+    LeanObject tensor(lean_torch_ones(shape({2, 2}), 0, cpuDevice()), lean_dec);
     testShapesAndMetadata(tensor.get());
     testOwnedArraysAndOptions(tensor.get());
     testNativeFailureCleanup(tensor.get());

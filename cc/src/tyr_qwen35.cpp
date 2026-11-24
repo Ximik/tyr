@@ -183,8 +183,8 @@ lean_object* lean_torch_qwen35_chunk_gated_delta_rule(
   auto beta_ = borrowTensor(beta);
   auto [out, state] = qwen35_chunk_gated_delta_rule_impl(query_, key_, value_, g_, beta_);
   lean_object* result = lean_alloc_ctor(0, 2, 0);
-  lean_ctor_set(result, 0, fromTorchTensor(out));
-  lean_ctor_set(result, 1, fromTorchTensor(state));
+  lean_ctor_set(result, 0, giveTensor(out));
+  lean_ctor_set(result, 1, giveTensor(state));
   return result;
 }
 
@@ -204,8 +204,8 @@ lean_object* lean_torch_qwen35_recurrent_gated_delta_rule(
   auto [out, state] =
       qwen35_recurrent_gated_delta_rule_impl(query_, key_, value_, g_, beta_, initial_state_);
   lean_object* result = lean_alloc_ctor(0, 2, 0);
-  lean_ctor_set(result, 0, fromTorchTensor(out));
-  lean_ctor_set(result, 1, fromTorchTensor(state));
+  lean_ctor_set(result, 0, giveTensor(out));
+  lean_ctor_set(result, 1, giveTensor(state));
   return result;
 }
 

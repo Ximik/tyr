@@ -1,5 +1,6 @@
 #include "tyr_nat.h"
 #include "generated/tyr_ffi.h"
+#include "tyr_try_result.h"
 
 #include <cmath>
 #include <deque>
@@ -23,10 +24,6 @@ std::atomic<AudioQueueRef> g_active_queue{nullptr};
 std::atomic<bool> g_running{false};
 std::atomic<uint64_t> g_target_rate{16000};
 std::atomic<uint64_t> g_target_channels{1};
-
-static lean_object* mk_io_error(const std::string& msg) {
-  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(msg.c_str())));
-}
 
 static void input_callback(
     void* /*inUserData*/,
@@ -90,10 +87,10 @@ lean_object* lean_tyr_audio_input_start(
     channels = tyr::natTo<uint32_t>(channels_obj, "channels");
     buffer_ms = tyr::natTo<uint32_t>(buffer_ms_obj, "buffer_ms");
   } catch (const std::exception& e) {
-    return mk_io_error(e.what());
+    return tyr::ioErrorResult("audio_input_start", e.what());
   }
   if (sample_rate == 0 || channels == 0) {
-    return mk_io_error("audio_input_start: sample_rate/channels must be > 0");
+    return tyr::ioErrorResult("audio_input_start", "sample_rate/channels must be > 0");
   }
 
   std::lock_guard<std::mutex> lifecycle_lock(g_lifecycle_mu);
@@ -126,7 +123,7 @@ lean_object* lean_tyr_audio_input_start(
       0,
       &queue);
   if (st != noErr || queue == nullptr) {
-    return mk_io_error("audio_input_start: AudioQueueNewInput failed");
+    return tyr::ioErrorResult("audio_input_start", "AudioQueueNewInput failed");
   }
 
   const uint64_t ms = (buffer_ms == 0) ? 100 : buffer_ms;
@@ -136,7 +133,7 @@ lean_object* lean_tyr_audio_input_start(
   if (__builtin_mul_overflow(frames, channels * sizeof(float), &buffer_bytes) ||
       buffer_bytes > std::numeric_limits<UInt32>::max()) {
     AudioQueueDispose(queue, true);
-    return mk_io_error("audio_input_start: buffer size exceeds 4294967295 bytes");
+    return tyr::ioErrorResult("audio_input_start", "buffer size exceeds 4294967295 bytes");
   }
   UInt32 bytes = static_cast<UInt32>(buffer_bytes);
 
@@ -145,13 +142,13 @@ lean_object* lean_tyr_audio_input_start(
     st = AudioQueueAllocateBuffer(queue, bytes, &buf);
     if (st != noErr || buf == nullptr) {
       AudioQueueDispose(queue, true);
-      return mk_io_error("audio_input_start: AudioQueueAllocateBuffer failed");
+      return tyr::ioErrorResult("audio_input_start", "AudioQueueAllocateBuffer failed");
     }
     buf->mAudioDataByteSize = bytes;
     st = AudioQueueEnqueueBuffer(queue, buf, 0, nullptr);
     if (st != noErr) {
       AudioQueueDispose(queue, true);
-      return mk_io_error("audio_input_start: AudioQueueEnqueueBuffer failed");
+      return tyr::ioErrorResult("audio_input_start", "AudioQueueEnqueueBuffer failed");
     }
   }
 
@@ -162,7 +159,7 @@ lean_object* lean_tyr_audio_input_start(
   st = AudioQueueStart(queue, nullptr);
   if (st != noErr) {
     stop_queue_locked();
-    return mk_io_error("audio_input_start: AudioQueueStart failed (check microphone permission)");
+    return tyr::ioErrorResult("audio_input_start", "AudioQueueStart failed (check microphone permission)");
   }
 
   return lean_io_result_mk_ok(lean_box(0));
@@ -177,7 +174,7 @@ lean_object* lean_tyr_audio_input_read(
     max_samples = tyr::natTo<uint64_t>(max_samples_obj, "max_samples");
     block_ms = tyr::natTo<int64_t>(block_ms_obj, "block_ms");
   } catch (const std::exception& e) {
-    return mk_io_error(e.what());
+    return tyr::ioErrorResult("audio_input_read", e.what());
   }
   if (max_samples == 0) {
     return lean_io_result_mk_ok(lean_mk_empty_array());
@@ -214,7 +211,7 @@ lean_object* lean_tyr_audio_input_read_buffer(
     max_samples = tyr::natTo<uint64_t>(max_samples_obj, "max_samples");
     block_ms = tyr::natTo<int64_t>(block_ms_obj, "block_ms");
   } catch (const std::exception& e) {
-    return mk_io_error(e.what());
+    return tyr::ioErrorResult("audio_input_read_buffer", e.what());
   }
   if (max_samples == 0) {
     return lean_io_result_mk_ok(lean_alloc_sarray(sizeof(double), 0, 0));
@@ -264,14 +261,6 @@ lean_object* lean_tyr_audio_rms(b_lean_obj_arg arr) {
 
 #else
 
-namespace {
-
-static lean_object* mk_io_error(const char* msg) {
-  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(msg)));
-}
-
-} // namespace
-
 extern "C" {
 
 lean_object* lean_tyr_audio_input_start(
@@ -279,21 +268,21 @@ lean_object* lean_tyr_audio_input_start(
   lean_dec(sample_rate);
   lean_dec(channels);
   lean_dec(buffer_ms);
-  return mk_io_error("audio input is only supported on macOS");
+  return tyr::ioErrorResult("audio_input", "only supported on macOS");
 }
 
 lean_object* lean_tyr_audio_input_read(b_lean_obj_arg, lean_obj_arg block_ms) {
   lean_dec(block_ms);
-  return mk_io_error("audio input is only supported on macOS");
+  return tyr::ioErrorResult("audio_input", "only supported on macOS");
 }
 
 lean_object* lean_tyr_audio_input_read_buffer(b_lean_obj_arg, lean_obj_arg block_ms) {
   lean_dec(block_ms);
-  return mk_io_error("audio input is only supported on macOS");
+  return tyr::ioErrorResult("audio_input", "only supported on macOS");
 }
 
 lean_object* lean_tyr_audio_input_stop() {
-  return mk_io_error("audio input is only supported on macOS");
+  return tyr::ioErrorResult("audio_input", "only supported on macOS");
 }
 
 lean_object* lean_tyr_audio_rms(b_lean_obj_arg arr) {

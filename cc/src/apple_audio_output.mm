@@ -1,5 +1,6 @@
 #include "tyr_nat.h"
 #include "generated/tyr_ffi.h"
+#include "tyr_try_result.h"
 
 #include <cmath>
 #include <cstring>
@@ -14,10 +15,6 @@ namespace {
 
 std::mutex g_output_mu;
 std::atomic<bool> g_playing{false};
-
-static lean_object* mk_io_error(const char* msg) {
-  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(msg)));
-}
 
 struct ToneBuffer {
   float* samples;
@@ -146,7 +143,7 @@ static lean_object* play_tone_sync(
     uint64_t durationMs,
     uint64_t sampleRate) {
   if (!play_tone_core(freqHz, durationMs, sampleRate))
-    return mk_io_error("audio_output: playback failed");
+    return tyr::ioErrorResult("audio_output", "playback failed");
   return lean_io_result_mk_ok(lean_box(0));
 }
 
@@ -166,7 +163,7 @@ lean_object* lean_tyr_audio_output_beep(
     if (sample_rate * duration_ms / 1000 > std::numeric_limits<uint32_t>::max())
       throw std::out_of_range("sample_rate * duration_ms / 1000 exceeds 4294967295 frames");
   } catch (const std::exception& e) {
-    return mk_io_error(e.what());
+    return tyr::ioErrorResult("audio_output_beep", e.what());
   }
   return play_tone_sync(freq_hz, duration_ms, sample_rate);
 }
@@ -183,7 +180,7 @@ lean_object* lean_tyr_audio_output_beep_async(
     if (sample_rate * duration_ms / 1000 > std::numeric_limits<uint32_t>::max())
       throw std::out_of_range("sample_rate * duration_ms / 1000 exceeds 4294967295 frames");
   } catch (const std::exception& e) {
-    return mk_io_error(e.what());
+    return tyr::ioErrorResult("audio_output_beep_async", e.what());
   }
   std::thread([=]() { play_tone_core(freq_hz, duration_ms, sample_rate); }).detach();
   return lean_io_result_mk_ok(lean_box(0));
@@ -193,28 +190,20 @@ lean_object* lean_tyr_audio_output_beep_async(
 
 #else
 
-namespace {
-
-static lean_object* mk_io_error(const char* msg) {
-  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(msg)));
-}
-
-} // namespace
-
 extern "C" {
 
 lean_object* lean_tyr_audio_output_beep(
     double, lean_obj_arg duration_ms, lean_obj_arg sample_rate) {
   lean_dec(duration_ms);
   lean_dec(sample_rate);
-  return mk_io_error("audio output is only supported on macOS");
+  return tyr::ioErrorResult("audio_output", "only supported on macOS");
 }
 
 lean_object* lean_tyr_audio_output_beep_async(
     double, lean_obj_arg duration_ms, lean_obj_arg sample_rate) {
   lean_dec(duration_ms);
   lean_dec(sample_rate);
-  return mk_io_error("audio output is only supported on macOS");
+  return tyr::ioErrorResult("audio_output", "only supported on macOS");
 }
 
 } // extern "C"

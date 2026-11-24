@@ -31,7 +31,7 @@ void values(lean_object* tensor, size_t count, double expected) {
     require(lean_unbox_float(lean_array_get_core(array, i)) == expected, "Unexpected output value");
 }
 void crossEntropy(bool unreduced) {
-  Object logits(lean_torch_full(shape({2, 2}), 0, 0, lean_box(1)), lean_dec);
+  Object logits(lean_torch_full(shape({2, 2}), 0, 0, cpuDevice()), lean_dec);
   Object labels(lean_torch_full_int(shape({2}), 0), lean_dec);
   Object result(unreduced ? lean_torch_cross_entropy_none(logits.get(), labels.get())
                           : lean_torch_cross_entropy_2d(logits.get(), labels.get()), lean_dec);
@@ -46,7 +46,7 @@ void crossEntropy(bool unreduced) {
 }
 void indexSelect(bool empty) {
   const uint64_t count = empty ? 0 : 1;
-  Object input(lean_torch_full(shape({empty ? uint64_t{0} : uint64_t{2}}), 3.25, 0, lean_box(1)), lean_dec);
+  Object input(lean_torch_full(shape({empty ? uint64_t{0} : uint64_t{2}}), 3.25, 0, cpuDevice()), lean_dec);
   Object indices(lean_torch_full_int(shape({count}), 0), lean_dec);
   Object result(lean_torch_index_select(input.get(), Nat(0), indices.get()), lean_dec);
   values(result.get(), count, 3.25);
@@ -57,7 +57,7 @@ void indexSelect(bool empty) {
 }
 
 void tryIndexSelectError(uint64_t id) {
-  Object input(lean_torch_full(shape({2}), 3.25, 0, lean_box(1)), lean_dec);
+  Object input(lean_torch_full(shape({2}), 3.25, 0, cpuDevice()), lean_dec);
   Object indices(lean_torch_full_int(shape({1}), id), lean_dec);
   Object result(lean_torch_index_select_try(input.get(), Nat(0), indices.get()), lean_dec);
   exceptError(result.get(), "indexSelect");
@@ -67,9 +67,9 @@ void tryIndexSelectError(uint64_t id) {
 
 void randintError(bool invalidDevice) {
   Object dims(shape({4}), lean_dec);
-  auto* cuda = lean_alloc_ctor(0, 1, 0);
+  auto* cuda = lean_alloc_ctor(static_cast<unsigned>(tyr::lean::DeviceKind::CUDA), 1, 0);
   lean_ctor_set(cuda, 0, lean_uint64_to_nat(std::numeric_limits<uint64_t>::max()));
-  Object device(invalidDevice ? cuda : lean_box(1), lean_dec);
+  Object device(invalidDevice ? cuda : cpuDevice(), lean_dec);
   if (!invalidDevice) lean_dec(cuda);
   Object result(lean_torch_randint(3, invalidDevice ? 4 : 3, retain(dims.get()),
     retain(device.get())), lean_dec);
@@ -79,15 +79,15 @@ void randintError(bool invalidDevice) {
 }
 void randintSigned() {
   Object result(lean_torch_randint(std::bit_cast<uint64_t>(int64_t{-7}),
-    std::bit_cast<uint64_t>(int64_t{-6}), shape({4}), lean_box(1)), lean_dec);
+    std::bit_cast<uint64_t>(int64_t{-6}), shape({4}), cpuDevice()), lean_dec);
   require(lean_io_result_is_ok(result.get()), "Valid signed randint failed");
   values(lean_io_result_get_value(result.get()), 4, -7);
 }
 void randomFactoryError(bool invalidDevice) {
   Object dims(invalidDevice ? shape({4}) : shape({std::numeric_limits<uint64_t>::max()}), lean_dec);
-  auto* cuda = lean_alloc_ctor(0, 1, 0);
+  auto* cuda = lean_alloc_ctor(static_cast<unsigned>(tyr::lean::DeviceKind::CUDA), 1, 0);
   lean_ctor_set(cuda, 0, lean_uint64_to_nat(std::numeric_limits<uint64_t>::max()));
-  Object device(invalidDevice ? cuda : lean_box(1), lean_dec);
+  Object device(invalidDevice ? cuda : cpuDevice(), lean_dec);
   if (!invalidDevice) lean_dec(cuda);
   Object result(lean_torch_randn(retain(dims.get()), 0, retain(device.get())), lean_dec);
   require(lean_io_result_is_error(result.get()), "Random factory did not return IO.error");
@@ -97,7 +97,7 @@ void randomFactoryError(bool invalidDevice) {
 void randomFactorySuccess() {
   Object dims(shape({2, 3}), lean_dec);
   for (bool requiresGrad : {false, true}) {
-    Object result(lean_torch_randn(retain(dims.get()), requiresGrad, lean_box(1)), lean_dec);
+    Object result(lean_torch_randn(retain(dims.get()), requiresGrad, cpuDevice()), lean_dec);
     require(lean_io_result_is_ok(result.get()), "Valid random factory failed");
     auto* tensor = lean_io_result_get_value(result.get());
     require(!lean_is_scalar(tensor) && lean_is_external(tensor), "Random factory did not return RawTensor");

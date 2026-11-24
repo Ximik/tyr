@@ -118,6 +118,11 @@ struct ExpertTask {
   int reserved;
 };
 
+/* An expert index clamped into [0, numExperts). */
+__device__ __forceinline__ int64_t clampExpert(int64_t e, int numExperts) {
+  return e < 0 ? 0 : (e >= (int64_t)numExperts ? (int64_t)numExperts - 1 : e);
+}
+
 /* E2M1 magnitudes indexed by the low 3 bits; bit 3 is the sign. */
 __device__ __forceinline__ float e2m1Mag(int nibble3) {
   const float mags[8] = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f};
@@ -186,8 +191,7 @@ __global__ __launch_bounds__(kThreads) void laguna_moe_fp4_stage_a(
 
   const int pair = blockIdx.y;
   const int t = pair / k;
-  int64_t e = topIdx[pair];
-  e = e < 0 ? 0 : (e >= (int64_t)numExperts ? (int64_t)numExperts - 1 : e);
+  const int64_t e = clampExpert(topIdx[pair], numExperts);
 
   const __nv_bfloat16* xRow = x + (size_t)t * hidden;
   for (int j = threadIdx.x; j < hidden; j += kThreads) {
@@ -270,8 +274,7 @@ __global__ __launch_bounds__(kThreads) void laguna_moe_fp4_stage_b(
 
   const int pair = blockIdx.y;
   const int t = pair / k;
-  int64_t e = topIdx[pair];
-  e = e < 0 ? 0 : (e >= (int64_t)numExperts ? (int64_t)numExperts - 1 : e);
+  const int64_t e = clampExpert(topIdx[pair], numExperts);
   const float w = __bfloat162float(topW[pair]);
 
   const float* hidRow = hid + (size_t)pair * moeInt;
@@ -338,8 +341,7 @@ __global__ void laguna_moe_count_experts(
     int pairs, int numExperts) {
   for (int pair = blockIdx.x * blockDim.x + threadIdx.x;
        pair < pairs; pair += blockDim.x * gridDim.x) {
-    int64_t e = topIdx[pair];
-    e = e < 0 ? 0 : (e >= (int64_t)numExperts ? (int64_t)numExperts - 1 : e);
+    const int64_t e = clampExpert(topIdx[pair], numExperts);
     atomicAdd(&counts[e], 1);
   }
 }
@@ -370,8 +372,7 @@ __global__ void laguna_moe_scatter_pairs(
     int pairs, int numExperts) {
   for (int pair = blockIdx.x * blockDim.x + threadIdx.x;
        pair < pairs; pair += blockDim.x * gridDim.x) {
-    int64_t e = topIdx[pair];
-    e = e < 0 ? 0 : (e >= (int64_t)numExperts ? (int64_t)numExperts - 1 : e);
+    const int64_t e = clampExpert(topIdx[pair], numExperts);
     const int slot = atomicAdd(&cursors[e], 1);
     pairOrder[offsets[e] + slot] = pair;
   }
@@ -646,9 +647,7 @@ __global__ void laguna_nvfp4_count_rows(
     int pairs, int numExperts) {
   for (int pair = blockIdx.x * blockDim.x + threadIdx.x;
        pair < pairs; pair += blockDim.x * gridDim.x) {
-    int64_t expert = topIdx[pair];
-    expert = expert < 0 ? 0 :
-        (expert >= (int64_t)numExperts ? (int64_t)numExperts - 1 : expert);
+    const int64_t expert = clampExpert(topIdx[pair], numExperts);
     const int row = atomicAdd(&counts[expert], 1);
     pairRow[pair] = row;
     atomicMax(maxRows, row + 1);
@@ -660,9 +659,7 @@ __global__ void laguna_nvfp4_finalize_rows(
     int pairs, int rowsPerExpert, int numExperts) {
   for (int pair = blockIdx.x * blockDim.x + threadIdx.x;
        pair < pairs; pair += blockDim.x * gridDim.x) {
-    int64_t expert = topIdx[pair];
-    expert = expert < 0 ? 0 :
-        (expert >= (int64_t)numExperts ? (int64_t)numExperts - 1 : expert);
+    const int64_t expert = clampExpert(topIdx[pair], numExperts);
     pairSlot[pair] = (int)expert * rowsPerExpert + pairSlot[pair];
   }
 }
@@ -1199,11 +1196,6 @@ static bool runNativeNvfp4Prefill(
 
 #endif  // CUDART_VERSION >= 12080
 
-static lean_object* lagunaMoeIoError(const std::string& msg) {
-  return lean_io_result_mk_error(
-      lean_mk_io_user_error(lean_mk_string(msg.c_str())));
-}
-
 /* Validate one packed bank triple against its expected runtime sizes. */
 static bool checkBank(
     const at::Tensor& packed, const at::Tensor& scales, const at::Tensor& global,
@@ -1240,7 +1232,6 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
   const uint64_t numExperts = tyr::natTo<int>(numExperts_obj, "numExperts");
   const uint64_t moeInt = tyr::natTo<int>(moeInt_obj, "moeInt");
   const uint64_t hidden = tyr::natTo<int>(hidden_obj, "hidden");
-  try {
     auto x_ = borrowTensor(x);
     auto topIdx_ = borrowTensor(topIdx);
     auto topW_ = borrowTensor(topW);
@@ -1261,35 +1252,35 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     /* Validation returns IO errors (no TORCH_CHECK: c10::Error cannot
        reliably unwind across the Lean FFI boundary on this toolchain). */
     if (E <= 0 || mi <= 0 || h <= 0 || (h % 32) != 0 || (mi % 32) != 0) {
-      return lagunaMoeIoError(
-          "laguna_moe_fp4_forward: require hidden%32==0 and moeInt%32==0");
+      return tyr::ioErrorResult("lagunaMoeFp4Forward",
+          "require hidden%32==0 and moeInt%32==0");
     }
     if (!x_.is_cuda() || x_.scalar_type() != at::kBFloat16 ||
         x_.dim() != 2 || x_.size(1) != h) {
-      return lagunaMoeIoError(
-          "laguna_moe_fp4_forward: x must be CUDA BFloat16 [tokens, hidden]");
+      return tyr::ioErrorResult("lagunaMoeFp4Forward",
+          "x must be CUDA BFloat16 [tokens, hidden]");
     }
     const int64_t tokens = x_.size(0);
     if (!topIdx_.is_cuda() || topIdx_.scalar_type() != at::kLong ||
         topIdx_.dim() != 2 || topIdx_.size(0) != tokens) {
-      return lagunaMoeIoError(
-          "laguna_moe_fp4_forward: topIdx must be CUDA Int64 [tokens, k]");
-    }
+      return tyr::ioErrorResult("lagunaMoeFp4Forward",
+          "topIdx must be CUDA Int64 [tokens, k]");
+        }
     const int64_t k = topIdx_.size(1);
     if (!topW_.is_cuda() || topW_.scalar_type() != at::kBFloat16 ||
         topW_.dim() != 2 || topW_.size(0) != tokens || topW_.size(1) != k) {
-      return lagunaMoeIoError(
-          "laguna_moe_fp4_forward: topW must be CUDA BFloat16 [tokens, k]");
-    }
+      return tyr::ioErrorResult("lagunaMoeFp4Forward",
+          "topW must be CUDA BFloat16 [tokens, k]");
+        }
     if (tokens < 1 || k < 1 || tokens * k > 65535) {
-      return lagunaMoeIoError(
-          "laguna_moe_fp4_forward: require 1 <= tokens*k <= 65535");
+      return tyr::ioErrorResult("lagunaMoeFp4Forward",
+          "require 1 <= tokens*k <= 65535");
     }
     std::string bankErr;
     if (!checkBank(gp_, gs_, gg_, E, mi, h, "gate", bankErr) ||
         !checkBank(up_, us_, ug_, E, mi, h, "up", bankErr) ||
         !checkBank(dp_, ds_, dg_, E, h, mi, "down", bankErr)) {
-      return lagunaMoeIoError("laguna_moe_fp4_forward: " + bankErr);
+      return tyr::ioErrorResult("lagunaMoeFp4Forward", bankErr);
     }
 
     const c10::cuda::OptionalCUDAGuard guard(x_.device());
@@ -1324,8 +1315,8 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
               xc, ic, wc,
               gpc, gsc, ggc, upc, usc, ugc, dpc, dsc, dgc,
               E, mi, h, nativeOut, nativeErr)) {
-        return lagunaMoeIoError(
-            "laguna_moe_fp4_forward: native NVFP4 prefill failed: " +
+        return tyr::ioErrorResult("lagunaMoeFp4Forward",
+            "native NVFP4 prefill failed: " +
             nativeErr);
       }
       return lean_io_result_mk_ok(giveTensor(nativeOut));
@@ -1432,7 +1423,7 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     }
     cudaError_t errA = cudaGetLastError();
     if (errA != cudaSuccess) {
-      return lagunaMoeIoError(std::string(
+      return tyr::ioErrorResult("lagunaMoeFp4Forward", std::string(
           "laguna_moe_fp4_forward: stage A launch failed: ") +
           cudaGetErrorString(errA));
     }
@@ -1473,17 +1464,13 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     }
     cudaError_t errB = cudaGetLastError();
     if (errB != cudaSuccess) {
-      return lagunaMoeIoError(std::string(
+      return tyr::ioErrorResult("lagunaMoeFp4Forward", std::string(
           "laguna_moe_fp4_forward: stage B launch failed: ") +
           cudaGetErrorString(errB));
     }
 
     at::Tensor out = routed.to(at::kBFloat16);
     return lean_io_result_mk_ok(giveTensor(out));
-  } catch (const std::exception& e) {
-    return lagunaMoeIoError(std::string(
-        "laguna_moe_fp4_forward: exception: ") + e.what());
-  }
   });
 }
 

@@ -21,6 +21,7 @@ namespace {
 
 using LeanObject = std::unique_ptr<lean_object, decltype(&lean_dec)>;
 
+lean_object* cpuDevice() { return lean_box(static_cast<unsigned>(tyr::lean::DeviceKind::CPU)); }
 void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -188,7 +189,7 @@ void requireConverted(const std::filesystem::path& directory, lean_object* raw, 
 
 void testCombinedConversion(const std::filesystem::path& directory) {
   auto input = loadThroughRawABI(directory, c10::ScalarType::Float, "convert_float32");
-  auto converted = convertThroughRawABI(input.get(), lean_box(1), tagOf(tyr::lean::DType::Float64), "CPU F32 to F64");
+  auto converted = convertThroughRawABI(input.get(), cpuDevice(), tagOf(tyr::lean::DType::Float64), "CPU F32 to F64");
   requireConverted(directory, converted.get(), c10::ScalarType::Double, c10::DeviceType::CPU,
                    "CPU F32 to F64");
   requireConverted(directory, input.get(), c10::ScalarType::Float, c10::DeviceType::CPU,
@@ -205,7 +206,7 @@ void testCombinedConversion(const std::filesystem::path& directory) {
     require(thrown, "Unsupported cast must throw (aborting from Lean): " + std::to_string(tag));
     auto option = dtypeOption(tag);
     LeanObject moved(lean_torch_convert_tensor(lean_alloc_array(0, 0), input.get(),
-                                             lean_box(1), option.get()), lean_dec);
+                                             cpuDevice(), option.get()), lean_dec);
     require(lean_io_result_is_error(moved.get()),
             "Unsupported combined cast must return IO.error: " + std::to_string(tag));
   }
@@ -215,12 +216,12 @@ void testCombinedConversion(const std::filesystem::path& directory) {
                            c10::ScalarType::ComplexFloat, c10::ScalarType::ComplexDouble}) {
     const auto name = std::string("retain_") + c10::toString(dtype);
     auto original = loadThroughRawABI(directory, dtype, name);
-    auto retained = convertThroughRawABI(original.get(), lean_box(1), std::nullopt, name);
+    auto retained = convertThroughRawABI(original.get(), cpuDevice(), std::nullopt, name);
     requireConverted(directory, retained.get(), dtype, c10::DeviceType::CPU, name);
   }
 
   auto complex_input = loadThroughRawABI(directory, c10::ScalarType::ComplexFloat, "cast_complex64");
-  auto complex_output = convertThroughRawABI(complex_input.get(), lean_box(1),
+  auto complex_output = convertThroughRawABI(complex_input.get(), cpuDevice(),
                                             tagOf(tyr::lean::DType::Complex128), "Complex64 to Complex128");
   requireConverted(directory, complex_output.get(), c10::ScalarType::ComplexDouble,
                    c10::DeviceType::CPU, "Complex64 to Complex128");
@@ -232,13 +233,13 @@ void testCombinedConversion(const std::filesystem::path& directory) {
   for (const unsigned tag : {tyr::lean::DTypeCount, 255u}) {
     auto option = dtypeOption(tag);
     LeanObject result(lean_torch_convert_tensor(lean_alloc_array(0, 0), input.get(),
-                                              lean_box(1), option.get()), lean_dec);
+                                              cpuDevice(), option.get()), lean_dec);
     require(lean_io_result_is_error(result.get()),
             "Invalid dtype tag must return IO.error: " + std::to_string(tag));
   }
   for (const uint64_t index : {uint64_t{128}, uint64_t{255}, uint64_t{256},
                                std::numeric_limits<uint64_t>::max()}) {
-    LeanObject device(lean_alloc_ctor(0, 1, 0), lean_dec);
+    LeanObject device(lean_alloc_ctor(static_cast<unsigned>(tyr::lean::DeviceKind::CUDA), 1, 0), lean_dec);
     lean_ctor_set(device.get(), 0, lean_uint64_to_nat(index));
     LeanObject result(lean_torch_convert_tensor(lean_alloc_array(0, 0), input.get(),
                                               device.get(), lean_box(0)), lean_dec);
@@ -256,7 +257,7 @@ void testCombinedConversion(const std::filesystem::path& directory) {
   auto mps_input = convertThroughRawABI(input.get(), lean_box(2), std::nullopt, "CPU F32 to MPS");
   requireConverted(directory, mps_input.get(), c10::ScalarType::Float, c10::DeviceType::MPS,
                    "CPU F32 to MPS");
-  auto cpu_double = convertThroughRawABI(mps_input.get(), lean_box(1), tagOf(tyr::lean::DType::Float64), "MPS F32 to CPU F64");
+  auto cpu_double = convertThroughRawABI(mps_input.get(), cpuDevice(), tagOf(tyr::lean::DType::Float64), "MPS F32 to CPU F64");
   requireConverted(directory, cpu_double.get(), c10::ScalarType::Double, c10::DeviceType::CPU,
                    "MPS F32 to CPU F64");
   auto mps_float = convertThroughRawABI(cpu_double.get(), lean_box(2), tagOf(tyr::lean::DType::Float32), "CPU F64 to MPS F32");
