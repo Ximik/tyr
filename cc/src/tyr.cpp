@@ -3686,7 +3686,7 @@ lean_object* lean_torch_diagflat(
     b_lean_obj_arg v_obj
 ) {
   auto v = borrowTensor(v_obj);
-  auto result = torch::diag(v);
+  auto result = torch::diagflat(v);
   return fromTorchTensor(result);
 }
 
