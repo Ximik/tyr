@@ -8,7 +8,7 @@ TEST = Test(
     probe="Gemma4VL",
     devices=("cuda",),
     gpu_dtype="bfloat16",
-    cases=["vision/describe"],
+    cases=["vision/describe", "vision/wide", "vision/tall"],
     env="vision",
 )
 
