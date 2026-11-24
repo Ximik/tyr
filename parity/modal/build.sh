@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Prepare the Modal image from the repository root: the pinned native
-# dependencies, every parity venv under /opt/parity-envs, a CUDA (H100) Lake
-# configuration, and every parity probe built with it.
+# Build a checkout in the Modal build sandbox, from the repository root: the
+# pinned native dependencies, every parity venv under /opt/parity-envs, a CUDA
+# (H100) Lake configuration, and every parity probe built with it.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 

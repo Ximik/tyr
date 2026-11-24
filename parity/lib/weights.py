@@ -1,13 +1,15 @@
 """Weight files from `manifest.json`, downloaded to `<root>/<key>/` and checked
-against their sha256. A file verified for the same hash is not read again.
-Gated repositories need `HF_TOKEN`."""
+against their sha256. A file verified for the same hash is not read again; the
+record of that is one file per weight file under `.verified/`, so concurrent
+runs writing a shared directory do not overwrite each other's records. Gated
+repositories need `HF_TOKEN`."""
 
 import hashlib
 import json
 from pathlib import Path
 
 MANIFEST = Path(__file__).resolve().parents[1] / "manifest.json"
-VERIFIED = ".verified.json"
+VERIFIED = ".verified"
 
 
 def sha256(path: Path) -> str:
@@ -25,11 +27,10 @@ def fetch(key: str, root: Path) -> Path:
 
     entry = json.loads(MANIFEST.read_text())["weights"][key]
     target = root / key
-    verified_path = target / VERIFIED
-    verified = json.loads(verified_path.read_text()) if verified_path.exists() else {}
     for name, expected in entry["files"].items():
         path = target / name
-        if verified.get(name) == expected and path.exists():
+        record = target / VERIFIED / name
+        if path.exists() and record.exists() and record.read_text() == expected:
             continue
         print(f"{key}: {name}", flush=True)
         target.mkdir(parents=True, exist_ok=True)
@@ -38,6 +39,6 @@ def fetch(key: str, root: Path) -> Path:
         if actual != expected:
             path.unlink()
             raise ValueError(f"{key}/{name}: sha256 {actual}, manifest {expected}")
-        verified[name] = expected
-        verified_path.write_text(json.dumps(verified, indent=2))
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(expected)
     return target
