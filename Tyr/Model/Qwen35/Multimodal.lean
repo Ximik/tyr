@@ -302,7 +302,7 @@ end Qwen35VisionPatchMerger
 structure Qwen35VisionModel (cfg : VisionConfig) (dtype : DType := .Float32) where
   patch_embed : Qwen35VisionPatchEmbed (dtype := dtype) (device := device) cfg
   pos_embed : Tensor { device := device, shape := #[cfg.num_position_embeddings, cfg.hidden_size], dtype := dtype }
-  blocks : Array (Qwen35VisionBlock (dtype := dtype) (device := device) cfg)
+  blocks : Vector (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) cfg.depth
   merger : Qwen35VisionPatchMerger (dtype := dtype) (device := device) cfg
   deriving TensorStruct
 
@@ -313,9 +313,8 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
   let posRaw ← Tensor.randn (device := device) #[cfg.num_position_embeddings, cfg.hidden_size]
   let posEmbed ← Tensor.parameter ((Tensor.mulScalar posRaw 0.02).castDType dtype)
 
-  let mut blocks : Array (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := #[]
-  for _ in [:cfg.depth] do
-    blocks := blocks.push (← Qwen35VisionBlock.init (dtype := dtype) (device := device) cfg)
+  let blocks ← Vector.ofFnM fun (_ : Fin cfg.depth) =>
+    Qwen35VisionBlock.init (dtype := dtype) (device := device) cfg
 
   let merger ← Qwen35VisionPatchMerger.init (dtype := dtype) (device := device) cfg
   pure {
