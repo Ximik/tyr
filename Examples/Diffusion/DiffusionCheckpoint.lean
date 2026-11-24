@@ -97,10 +97,8 @@ def loadDiffusionParams (cfg : Config) (dir : String) : IO (DiffusionParams cfg)
   let time_emb ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (dir ++ "/time_emb.pt")
   let output_head ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (dir ++ "/output_head.pt")
   -- Load blocks
-  let mut blocks : Array (BlockParams cfg.n_head cfg.half_head_dim cfg.n_head) := #[]
-  for i in [:cfg.n_layer] do
-    let block ← loadDiffusionBlockParams cfg.n_head cfg.half_head_dim cfg.n_head dir i
-    blocks := blocks.push block
+  let blocks ← Vector.ofFnM fun (i : Fin cfg.n_layer) =>
+    loadDiffusionBlockParams cfg.n_head cfg.half_head_dim cfg.n_head dir i
   IO.println s!"Diffusion model loaded from {dir}"
   -- Apply makeLeafParams
   let model : DiffusionParams cfg := {
@@ -263,12 +261,10 @@ def loadDiffusionAdamWState (cfg : Config) (dir : String)
   let nu_time_emb ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_time_emb.pt")
   let nu_output_head ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_output_head.pt")
   -- Load block states
-  let mut muBlocks : Array (BlockParams cfg.n_head cfg.half_head_dim cfg.n_head) := #[]
-  let mut nuBlocks : Array (BlockParams cfg.n_head cfg.half_head_dim cfg.n_head) := #[]
-  for i in [:cfg.n_layer] do
-    let (muBlock, nuBlock) ← loadDiffusionBlockAdamState cfg.n_head cfg.half_head_dim cfg.n_head dir i
-    muBlocks := muBlocks.push muBlock
-    nuBlocks := nuBlocks.push nuBlock
+  let blockStates ← Vector.ofFnM fun (i : Fin cfg.n_layer) =>
+    loadDiffusionBlockAdamState cfg.n_head cfg.half_head_dim cfg.n_head dir i
+  let muBlocks := blockStates.map (·.1)
+  let nuBlocks := blockStates.map (·.2)
   let mu : DiffusionParams cfg := {
     token_emb := mu_token_emb
     time_emb := mu_time_emb
