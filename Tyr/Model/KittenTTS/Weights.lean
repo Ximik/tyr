@@ -207,10 +207,10 @@ private def loadKittenAlbertFromCheckpoint
         ffn := linearFromTensors (← onDevice layer.ffn.weight) (← onDevice layer.ffn.bias)
         ffnOutput := linearFromTensors (← onDevice layer.ffn_output.weight) (← onDevice layer.ffn_output.bias)
       }
-      unless layers.size = kokoro.plbert.innerGroupNum do
+      let ⟨hLayers⟩ ← if h : layers.size = kokoro.plbert.innerGroupNum then pure (PLift.up h) else
         throw <| IO.userError
           s!"KittenTTS checkpoint ALBERT group has {layers.size} layers, config inner_group_num={kokoro.plbert.innerGroupNum}"
-      pure { layers }
+      pure { layers := ⟨layers, hLayers⟩ }
   let ⟨hGroups⟩ ← if h : groups.size = kokoro.plbert.numHiddenGroups then pure (PLift.up h) else
     throw <| IO.userError
       s!"KittenTTS checkpoint has {groups.size} ALBERT layer groups, config num_hidden_groups={kokoro.plbert.numHiddenGroups}"
