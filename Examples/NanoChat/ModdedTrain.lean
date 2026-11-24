@@ -891,6 +891,17 @@ def runValidation (state : TrainState (device := device) cfg) (hp : Hyperparamet
       bestValLoss := if newBest then valResult.loss else state.bestValLoss
     }
 
+private def stepMuonGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
+    (params grads : Array (Tensor σ)) (states : Array (NorMuon.ParamState σ))
+    (cfg : NorMuon.Config) (hRank : 2 ≤ σ.shape.size := by simp) :
+    IO (Array (Tensor σ) × Array (NorMuon.ParamState σ)) := do
+  if h : grads.size = params.size ∧ states.size = params.size then
+    let (params', states') ← NorMuon.stepDistributedGroup
+      params.toVector (h.1 ▸ grads.toVector) (h.2 ▸ states.toVector) cfg (hRank := hRank)
+    pure (params'.toArray, states'.toArray)
+  else
+    throw <| IO.userError "Muon group parameters, gradients and states differ in length"
+
 /-- Distributed training step with gradient accumulation over micro-batches. -/
 def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
@@ -976,7 +987,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let (scalars', scalarState') ← runAdamStep
     params.scalars.values grads.scalars.values optState.dualState.scalars lrUnembed
 
-  let (smearGateWs, smearGateStates) ← NorMuon.stepDistributedGroup
+  let (smearGateWs, smearGateStates) ← stepMuonGroup
     #[params.smearGate.weight]
     #[grads.smearGate.weight]
     #[optState.dualState.smearGate]
@@ -1038,12 +1049,12 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
       oStates := oStates.push attnState.wO
     | _, _ => pure ()
 
-  let (qParams', qStates') ← NorMuon.stepDistributedGroup qParams qGrads qStates muonCfg
-  let (kParams', kStates') ← NorMuon.stepDistributedGroup kParams kGrads kStates muonCfg
-  let (vParams', vStates') ← NorMuon.stepDistributedGroup vParams vGrads vStates muonCfg
-  let (oParams', oStates') ← NorMuon.stepDistributedGroup oParams oGrads oStates muonCfg
-  let (cFcParams', cFcStates') ← NorMuon.stepDistributedGroup cFcParams cFcGrads cFcStates muonCfg
-  let (cProjParams', cProjStates') ← NorMuon.stepDistributedGroup cProjParams cProjGrads cProjStates muonCfg
+  let (qParams', qStates') ← stepMuonGroup qParams qGrads qStates muonCfg
+  let (kParams', kStates') ← stepMuonGroup kParams kGrads kStates muonCfg
+  let (vParams', vStates') ← stepMuonGroup vParams vGrads vStates muonCfg
+  let (oParams', oStates') ← stepMuonGroup oParams oGrads oStates muonCfg
+  let (cFcParams', cFcStates') ← stepMuonGroup cFcParams cFcGrads cFcStates muonCfg
+  let (cProjParams', cProjStates') ← stepMuonGroup cProjParams cProjGrads cProjStates muonCfg
 
   let (newPairs, _) := ((Vector.finRange cfg.nLayer).mapM (m := StateM Nat) fun idx => do
     let i := idx.val

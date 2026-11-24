@@ -206,10 +206,7 @@ def testMatrixBackendOpsComposable : IO Unit := do
 
   let s0 := ops.initState p0
   let s1 := ops.initState p1
-  let (ps', ss') ← ops.stepGroupLocal #[p0, p1] #[g0, g1] #[s0, s1]
-
-  LeanTest.assertEqual ps'.size 2
-  LeanTest.assertEqual ss'.size 2
+  discard <| ops.stepGroupLocal #v[p0, p1] #v[g0, g1] #v[s0, s1]
 
 @[test]
 def testMatrixBackendOpsBenchmarkPositive : IO Unit := do

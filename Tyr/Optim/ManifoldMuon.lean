@@ -284,35 +284,26 @@ def stepSingle {m n : Nat}
   return (param', state')
 
 /-- Local group update for homogeneous matrix shapes. -/
-def stepGroupLocal {m n : Nat}
-    (params : Array (Tensor ⟨#[m, n], d, dev⟩))
-    (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
-    (states : Array (ParamState m n d dev))
+def stepGroupLocal {m n k : Nat}
+    (params grads : Vector (Tensor ⟨#[m, n], d, dev⟩) k)
+    (states : Vector (ParamState m n d dev) k)
     (cfg : Config)
     (lrMul : Float := 1.0)
-    : IO (Array (Tensor ⟨#[m, n], d, dev⟩) × Array (ParamState m n d dev)) := do
-  let mut outParams : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
-  let mut outStates : Array (ParamState m n d dev) := #[]
-  for h : i in [:params.size] do
-    let p := params[i]
-    let g := grads[i]?.getD (Tensor.zerosLike p)
-    let st := states[i]?.getD (initParamState p)
-    let (p', st') ← stepSingle p g st cfg lrMul
-    outParams := outParams.push p'
-    outStates := outStates.push st'
-  return (outParams, outStates)
+    : IO (Vector (Tensor ⟨#[m, n], d, dev⟩) k × Vector (ParamState m n d dev) k) := do
+  let steps ← (Vector.finRange k).mapM fun i =>
+    stepSingle params[i] grads[i] states[i] cfg lrMul
+  return (steps.map (·.1), steps.map (·.2))
 
 /--
 Distributed group update (prototype): all-reduce gradients then local manifold step.
 -/
-def stepDistributedGroup {m n : Nat}
-    (params : Array (Tensor ⟨#[m, n], d, dev⟩))
-    (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
-    (states : Array (ParamState m n d dev))
+def stepDistributedGroup {m n k : Nat}
+    (params grads : Vector (Tensor ⟨#[m, n], d, dev⟩) k)
+    (states : Vector (ParamState m n d dev) k)
     (cfg : Config)
     (lrMul : Float := 1.0)
-    : IO (Array (Tensor ⟨#[m, n], d, dev⟩) × Array (ParamState m n d dev)) := do
-  if params.isEmpty then
+    : IO (Vector (Tensor ⟨#[m, n], d, dev⟩) k × Vector (ParamState m n d dev) k) := do
+  if k = 0 then
     return (params, states)
 
   let isDist ← dist.isInitialized
@@ -323,13 +314,7 @@ def stepDistributedGroup {m n : Nat}
   if worldSize <= 1 then
     return (← stepGroupLocal params grads states cfg lrMul)
 
-  let mut reducedGrads : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
-  for h : i in [:params.size] do
-    let p := params[i]
-    let g := Tensor.detach (grads[i]?.getD (Tensor.zerosLike p))
-    let g ← dist.allReduce g .avg
-    reducedGrads := reducedGrads.push g
-
+  let reducedGrads ← grads.mapM fun g => dist.allReduce (Tensor.detach g) .avg
   stepGroupLocal params reducedGrads states cfg lrMul
 
 /-- Measure average local step latency for one parameter (benchmark helper). -/

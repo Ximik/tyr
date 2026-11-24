@@ -371,49 +371,31 @@ def stepMatrixSingle {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating 
       return (p', .genericManifold st')
 
 /-- Local matrix-group step that composes `stepMatrixSingle` over each parameter. -/
-def stepMatrixGroupLocal {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
-    (params : Array (Tensor ⟨#[m, n], d, dev⟩))
-    (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
-    (states : Array (MatrixParamState m n d dev))
+def stepMatrixGroupLocal {m n k : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
+    (params grads : Vector (Tensor ⟨#[m, n], d, dev⟩) k)
+    (states : Vector (MatrixParamState m n d dev) k)
     (cfg : Config)
     (step : Nat)
     (lrMul : Float := 1.0)
     (wdMul : Float := 1.0)
-    : IO (Array (Tensor ⟨#[m, n], d, dev⟩) × Array (MatrixParamState m n d dev)) := do
-  let mut outParams : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
-  let mut outStates : Array (MatrixParamState m n d dev) := #[]
-  for h : i in [:params.size] do
-    let p := params[i]
-    let g := grads[i]?.getD (Tensor.zerosLike p)
-    let st := match states[i]? with
-      | some s => s
-      | none => initMatrixParamState cfg p
-    let (p', st') ← stepMatrixSingle p g st cfg step lrMul wdMul
-    outParams := outParams.push p'
-    outStates := outStates.push st'
-  return (outParams, outStates)
+    : IO (Vector (Tensor ⟨#[m, n], d, dev⟩) k × Vector (MatrixParamState m n d dev) k) := do
+  let steps ← (Vector.finRange k).mapM fun i =>
+    stepMatrixSingle params[i] grads[i] states[i] cfg step lrMul wdMul
+  return (steps.map (·.1), steps.map (·.2))
 
-private def allNorMuonStates? {m n : Nat} {d : DType} {dev : Device}
-    (states : Array (MatrixParamState m n d dev)) :
-    Option (Array (NorMuon.ParamState ⟨#[m, n], d, dev⟩)) :=
-  Id.run do
-    let mut out : Array (NorMuon.ParamState ⟨#[m, n], d, dev⟩) := #[]
-    for st in states do
-      match st with
-      | .norMuon s => out := out.push s
-      | _ => return none
-    return some out
+private def allNorMuonStates? {m n k : Nat} {d : DType} {dev : Device}
+    (states : Vector (MatrixParamState m n d dev) k) :
+    Option (Vector (NorMuon.ParamState ⟨#[m, n], d, dev⟩) k) :=
+  states.mapM fun
+    | .norMuon s => some s
+    | _ => none
 
-private def allManifoldMuonStates? {m n : Nat} {d : DType} {dev : Device}
-    (states : Array (MatrixParamState m n d dev)) :
-    Option (Array (torch.Optim.ManifoldMuon.ParamState m n d dev)) :=
-  Id.run do
-    let mut out : Array (torch.Optim.ManifoldMuon.ParamState m n d dev) := #[]
-    for st in states do
-      match st with
-      | .manifoldMuon s => out := out.push s
-      | _ => return none
-    return some out
+private def allManifoldMuonStates? {m n k : Nat} {d : DType} {dev : Device}
+    (states : Vector (MatrixParamState m n d dev) k) :
+    Option (Vector (torch.Optim.ManifoldMuon.ParamState m n d dev) k) :=
+  states.mapM fun
+    | .manifoldMuon s => some s
+    | _ => none
 
 /--
 Distributed matrix-group step with backend-aware dispatch.
@@ -425,16 +407,15 @@ Fast-paths:
 Fallback:
 - generic manifold path does gradient all-reduce then local per-parameter updates.
 -/
-def stepMatrixGroupDistributed {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
-    (params : Array (Tensor ⟨#[m, n], d, dev⟩))
-    (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
-    (states : Array (MatrixParamState m n d dev))
+def stepMatrixGroupDistributed {m n k : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
+    (params grads : Vector (Tensor ⟨#[m, n], d, dev⟩) k)
+    (states : Vector (MatrixParamState m n d dev) k)
     (cfg : Config)
     (step : Nat)
     (lrMul : Float := 1.0)
     (wdMul : Float := 1.0)
-    : IO (Array (Tensor ⟨#[m, n], d, dev⟩) × Array (MatrixParamState m n d dev)) := do
-  if params.isEmpty then
+    : IO (Vector (Tensor ⟨#[m, n], d, dev⟩) k × Vector (MatrixParamState m n d dev) k) := do
+  if k = 0 then
     return (params, states)
 
   match cfg.matrixOptimizer with
@@ -464,12 +445,7 @@ def stepMatrixGroupDistributed {m n : Nat} {d : DType} {dev : Device} [DType.Rea
         if worldSize <= 1 then
           stepMatrixGroupLocal params grads states cfg step lrMul wdMul
         else
-          let mut reducedGrads : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
-          for h : i in [:params.size] do
-            let p := params[i]
-            let g := Tensor.detach (grads[i]?.getD (Tensor.zerosLike p))
-            let g ← dist.allReduce g .avg
-            reducedGrads := reducedGrads.push g
+          let reducedGrads ← grads.mapM fun g => dist.allReduce (Tensor.detach g) .avg
           stepMatrixGroupLocal params reducedGrads states cfg step lrMul wdMul
 
 /-- Composable matrix backend operations for a fixed shape. -/
@@ -479,12 +455,12 @@ structure MatrixBackendOps (m n : Nat) (dtype : DType := .Float32)
   stepSingle : Tensor ⟨#[m, n], dtype, device⟩ → Tensor ⟨#[m, n], dtype, device⟩ →
     MatrixParamState m n dtype device →
     IO (Tensor ⟨#[m, n], dtype, device⟩ × MatrixParamState m n dtype device)
-  stepGroupLocal : Array (Tensor ⟨#[m, n], dtype, device⟩) → Array (Tensor ⟨#[m, n], dtype, device⟩) →
-    Array (MatrixParamState m n dtype device) →
-    IO (Array (Tensor ⟨#[m, n], dtype, device⟩) × Array (MatrixParamState m n dtype device))
-  stepGroupDistributed : Array (Tensor ⟨#[m, n], dtype, device⟩) → Array (Tensor ⟨#[m, n], dtype, device⟩) →
-    Array (MatrixParamState m n dtype device) →
-    IO (Array (Tensor ⟨#[m, n], dtype, device⟩) × Array (MatrixParamState m n dtype device))
+  stepGroupLocal : {k : Nat} → Vector (Tensor ⟨#[m, n], dtype, device⟩) k →
+    Vector (Tensor ⟨#[m, n], dtype, device⟩) k → Vector (MatrixParamState m n dtype device) k →
+    IO (Vector (Tensor ⟨#[m, n], dtype, device⟩) k × Vector (MatrixParamState m n dtype device) k)
+  stepGroupDistributed : {k : Nat} → Vector (Tensor ⟨#[m, n], dtype, device⟩) k →
+    Vector (Tensor ⟨#[m, n], dtype, device⟩) k → Vector (MatrixParamState m n dtype device) k →
+    IO (Vector (Tensor ⟨#[m, n], dtype, device⟩) k × Vector (MatrixParamState m n dtype device) k)
 
 /--
 Build a backend operations bundle for a matrix parameter shape.

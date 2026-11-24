@@ -202,23 +202,15 @@ def stepDistributedOwner {σ : StaticSpec} [DType.RealFloating σ.dtype] (param 
   return (newParam, newState)
 
 /-- Local (non-distributed) Muon step for a homogeneous parameter group. -/
-private def stepGroupLocal {σ : StaticSpec} [DType.RealFloating σ.dtype]
-    (params : Array (Tensor σ))
-    (grads : Array (Tensor σ))
-    (states : Array (ParamState σ))
+private def stepGroupLocal {σ : StaticSpec} [DType.RealFloating σ.dtype] {k : Nat}
+    (params grads : Vector (Tensor σ) k)
+    (states : Vector (ParamState σ) k)
     (cfg : Config) (lrMul wdMul : Float)
     (hRank : 2 ≤ σ.shape.size := by simp)
-    : IO (Array (Tensor σ) × Array (ParamState σ)) := do
-  let mut outParams : Array (Tensor σ) := #[]
-  let mut outStates : Array (ParamState σ) := #[]
-  for h : i in [:params.size] do
-    let p := params[i]
-    let g := grads[i]?.getD (Tensor.zerosLike p)
-    let st := states[i]?.getD (initParamState p)
-    let (p', st') ← stepSingle p g st cfg lrMul wdMul hRank
-    outParams := outParams.push p'
-    outStates := outStates.push st'
-  return (outParams, outStates)
+    : IO (Vector (Tensor σ) k × Vector (ParamState σ) k) := do
+  let steps ← (Vector.finRange k).mapM fun i =>
+    stepSingle params[i] grads[i] states[i] cfg lrMul wdMul hRank
+  return (steps.map (·.1), steps.map (·.2))
 
 /-- Distributed Muon step for a homogeneous parameter group.
 
@@ -228,13 +220,12 @@ private def stepGroupLocal {σ : StaticSpec} [DType.RealFloating σ.dtype]
     - Gradients are averaged with `reduce_scatter` over explicit per-rank lists.
     - Updated owner parameters are replicated with `all_gather`.
 -/
-def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
-    (params : Array (Tensor σ))
-    (grads : Array (Tensor σ))
-    (states : Array (ParamState σ))
+def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype] {k : Nat}
+    (params grads : Vector (Tensor σ) k)
+    (states : Vector (ParamState σ) k)
     (cfg : Config) (lrMul wdMul : Float := 1.0)
     (hRank : 2 ≤ σ.shape.size := by simp)
-    : IO (Array (Tensor σ) × Array (ParamState σ)) := do
+    : IO (Vector (Tensor σ) k × Vector (ParamState σ) k) := do
   let some template := params[0]? | return (params, states)
 
   let isDist ← dist.isInitialized
@@ -251,7 +242,7 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
   let mut outStates := states
   let mut base : Nat := 0
 
-  while base < params.size do
+  while base < k do
     -- Build per-rank inputs for reduce-scatter (pad with zeros for short tails).
     let mut rsInputs : Array (Tensor σ) := #[]
     for j in [:worldSize] do
@@ -260,51 +251,49 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
       rsInputs := rsInputs.push g
 
     let ownerIdx := base + rank
-    let gradOwner := if h : ownerIdx < params.size then Tensor.zerosLike params[ownerIdx]
+    let gradOwner := if h : ownerIdx < k then Tensor.zerosLike params[ownerIdx]
       else Tensor.zerosLike zeroBuf
     let gradOwner ← dist.reduceScatterList gradOwner rsInputs .avg
 
-    let mut ownerParam := if h : ownerIdx < params.size then params[ownerIdx] else zeroBuf
-    let mut ownerState := states[ownerIdx]?.getD (initParamState ownerParam)
-    if ownerIdx < params.size then
-      let (p', st') ← stepSingle ownerParam gradOwner ownerState cfg lrMul wdMul hRank
-      ownerParam := p'
-      ownerState := st'
+    let (ownerParam, ownerState) ←
+      if h : ownerIdx < k then
+        stepSingle params[ownerIdx] gradOwner states[ownerIdx] cfg lrMul wdMul hRank
+      else
+        pure (zeroBuf, initParamState zeroBuf)
 
     -- Gather updated owner parameters back to all ranks for this block.
     let mut gatherParams : Array (Tensor σ) := #[]
     for j in [:worldSize] do
       let idx := base + j
-      let t := if h : idx < params.size then params[idx] else zeroBuf
+      let t := if h : idx < k then params[idx] else zeroBuf
       gatherParams := gatherParams.push (Tensor.detach t)
-    let agInput := if ownerIdx < params.size then ownerParam else zeroBuf
-    gatherParams ← dist.allGatherList gatherParams agInput
+    gatherParams ← dist.allGatherList gatherParams ownerParam
 
     -- Gather owner momentum buffers to keep replicated checkpoint-compatible state.
     let mut gatherMomentum : Array (Tensor σ) := #[]
     for j in [:worldSize] do
       let idx := base + j
-      let t := if h : idx < params.size then params[idx] else zeroBuf
+      let t := if h : idx < k then params[idx] else zeroBuf
       gatherMomentum := gatherMomentum.push (Tensor.zerosLike t)
-    let agMomentum := ownerState.momentumBuffer.getD (Tensor.zerosLike agInput)
+    let agMomentum := ownerState.momentumBuffer.getD (Tensor.zerosLike ownerParam)
     gatherMomentum ← dist.allGatherList gatherMomentum agMomentum
 
     for j in [:worldSize] do
       let idx := base + j
-      if idx < params.size then
+      if h : idx < k then
         let some gatheredParam := gatherParams[j]? |
           throw (IO.userError "NorMuon.stepDistributedGroup: gathered parameter list is too short")
         let some gatheredMomentum := gatherMomentum[j]? |
           throw (IO.userError "NorMuon.stepDistributedGroup: gathered momentum list is too short")
         let pSynced ← Tensor.parameter (Tensor.detach gatheredParam)
-        outParams := outParams.set! idx pSynced
-        let prevState := outStates[idx]?.getD (initParamState pSynced)
+        outParams := outParams.set idx pSynced h
+        let prevState := outStates[idx]
         let stSynced : ParamState σ := {
           momentumBuffer := some (Tensor.detach gatheredMomentum)
           secondMoment := prevState.secondMoment
           step := prevState.step + 1
         }
-        outStates := outStates.set! idx stSynced
+        outStates := outStates.set idx stSynced h
 
     base := base + worldSize
 
