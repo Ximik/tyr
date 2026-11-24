@@ -432,7 +432,7 @@ structure ModdedGPTParams (cfg : Config) where
   /-- Value embeddings (3 separate layers) -/
   valueEmbeds : Array (Tensor { shape := #[cfg.vocabSize, cfg.modelDim], dtype := .Float32, device := device })
   /-- Transformer blocks -/
-  blocks : Array (Block (device := device) cfg.modelDim cfg.headDim cfg.nHead)
+  blocks : Vector (Block (device := device) cfg.modelDim cfg.headDim cfg.nHead) cfg.nLayer
   /-- Language model head (weight-tied with embed in forward) -/
   lmHead : CastedLinear (device := device) cfg.modelDim cfg.vocabSize
   /-- Learnable scalars -/
@@ -456,12 +456,9 @@ def ModdedGPTParams.init (cfg : Config) (device : Device := .CPU) : IO (ModdedGP
     valueEmbeds := valueEmbeds.push ve
 
   -- Transformer blocks
-  let mut blocks := #[]
-  for i in [:cfg.nLayer] do
+  let blocks ← Vector.ofFnM fun (i : Fin cfg.nLayer) =>
     -- Layer 6 (0-indexed: 5) has attention skipped
-    let skipAttn := i == 5
-    let block ← Block.init (device := device) cfg.modelDim cfg.headDim cfg.nHead skipAttn
-    blocks := blocks.push block
+    Block.init (device := device) cfg.modelDim cfg.headDim cfg.nHead (i.val == 5)
 
   -- LM head
   let lmHead ← CastedLinear.init (device := device) cfg.modelDim cfg.vocabSize 0.02
@@ -519,8 +516,7 @@ def forward {cfg : Config} {batch seq : Nat}
 
   for hL : i in [:cfg.nLayer] do
     have hi : i < cfg.nLayer := by have := hL.upper; simpa using this
-    let some block := params.blocks[i]?
-      | throw <| IO.userError s!"ModdedGPT has {params.blocks.size} blocks, config has {cfg.nLayer}"
+    let block := params.blocks[i]
     let lamX := scalarSigmoidAt params.scalars.values (i * 4)
     let lamX0 := scalarSigmoidAt params.scalars.values (i * 4 + 1)
     let lamAttn := scalarSigmoidAt params.scalars.values (i * 4 + 2)

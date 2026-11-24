@@ -203,8 +203,6 @@ def testModdedGPTInit : IO Unit := do
 
   let params ← ModdedGPTParams.init cfg
 
-  -- Check that arrays have correct sizes
-  LeanTest.assertEqual params.blocks.size cfg.nLayer
   LeanTest.assertEqual params.valueEmbeds.size cfg.numValueEmbeds
 
 @[test]

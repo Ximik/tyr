@@ -205,7 +205,7 @@ structure DualParamState (cfg : moddedGpt.Config) where
   lmHead : DistAdam.ParamState ⟨#[cfg.vocabSize, cfg.modelDim], .Float32, device⟩
   scalars : DistAdam.ParamState ⟨#[cfg.nLayer * 4 + 8], .Float32, device⟩
   smearGate : NorMuon.ParamState ⟨#[1, 12], .Float32, device⟩
-  blocks : Array (MuonBlockState (device := device) cfg)
+  blocks : Vector (MuonBlockState (device := device) cfg) cfg.nLayer
   deriving Repr, TensorStruct
 
 private def initDualParamState (cfg : moddedGpt.Config) (params : ModdedGPTParams (device := device) cfg) : DualParamState (device := device) cfg :=
@@ -220,7 +220,7 @@ private def initDualParamState (cfg : moddedGpt.Config) (params : ModdedGPTParam
         wV := NorMuon.initParamState a.wV
         wO := NorMuon.initParamState a.wO
       }
-  let blockStates : Array (MuonBlockState (device := device) cfg) := params.blocks.map fun b =>
+  let blockStates : Vector (MuonBlockState (device := device) cfg) cfg.nLayer := params.blocks.map fun b =>
     {
       attn := attnState? b.attn
       cFc := NorMuon.initParamState b.mlp.cFc
@@ -578,9 +578,8 @@ private def restoreDualStateLayout {cfg : moddedGpt.Config} (state : DualParamSt
   let lmHead := { state.lmHead with step := metadata.adamSteps[state.valueEmbeds.size + 1]! }
   let scalars := { state.scalars with step := metadata.adamSteps[state.valueEmbeds.size + 2]! }
   let smearGate ← restoreMuonState (s := #[1, 12]) metadata.muonStates 0
-  let mut index := 1
-  let mut blocks := #[]
-  for block in state.blocks do
+  let (blocks, _) ← (state.blocks.mapM (m := StateT Nat (Except String)) fun block => do
+    let index ← get
     let attn ← match block.attn with
       | none => pure none
       | some _ => do
@@ -589,11 +588,12 @@ private def restoreDualStateLayout {cfg : moddedGpt.Config} (state : DualParamSt
           let wV ← restoreMuonState (s := #[cfg.nHead * cfg.headDim, cfg.modelDim]) metadata.muonStates (index + 2)
           let wO ← restoreMuonState (s := #[cfg.modelDim, cfg.nHead * cfg.headDim]) metadata.muonStates (index + 3)
           pure (some ({ wQ, wK, wV, wO } : MuonAttnState (device := device) cfg))
-    if block.attn.isSome then index := index + 4
+    if block.attn.isSome then modify (· + 4)
+    let index ← get
     let cFc ← restoreMuonState (s := #[4 * cfg.modelDim, cfg.modelDim]) metadata.muonStates index
     let cProj ← restoreMuonState (s := #[4 * cfg.modelDim, cfg.modelDim]) metadata.muonStates (index + 1)
-    index := index + 2
-    blocks := blocks.push { attn, cFc, cProj }
+    set (index + 2)
+    pure ({ attn, cFc, cProj } : MuonBlockState (device := device) cfg)).run 1
   pure { embed, valueEmbeds, lmHead, scalars, smearGate, blocks }
 
 private def loadCheckpointStateMetadata (path : String) (required : Bool) :
@@ -1059,10 +1059,11 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let (cFcParams', cFcStates') ← NorMuon.stepDistributedGroup cFcParams cFcGrads cFcStates muonCfg
   let (cProjParams', cProjStates') ← NorMuon.stepDistributedGroup cProjParams cProjGrads cProjStates muonCfg
 
-  let mut newBlocks : Array (Block (device := device) cfg.modelDim cfg.headDim cfg.nHead) := #[]
-  let mut newBlockStates : Array (MuonBlockState (device := device) cfg) := #[]
-  let mut attnCursor : Nat := 0
-  for block in params.blocks, blockGrad in grads.blocks, i in [:params.blocks.size] do
+  let (newPairs, _) := ((Vector.finRange cfg.nLayer).mapM (m := StateM Nat) fun idx => do
+    let i := idx.val
+    let block := params.blocks[idx]
+    let blockGrad := grads.blocks[idx]
+    let attnCursor ← get
     let defaultBlockState : MuonBlockState (device := device) cfg := {
       attn := block.attn.map fun attn =>
         {
@@ -1108,7 +1109,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
           (block.attn, blockState.attn, attnCursor)
       | none, _ => (none, none, attnCursor)
       | _, none => (block.attn, blockState.attn, attnCursor)
-    attnCursor := nextAttnCursor
+    set nextAttnCursor
     let newBlock : Block (device := device) cfg.modelDim cfg.headDim cfg.nHead := {
       attn := attn'
       mlp := { cFc := cFc', cProj := cProj' }
@@ -1118,8 +1119,9 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
       cFc := cFcState'
       cProj := cProjState'
     }
-    newBlocks := newBlocks.push newBlock
-    newBlockStates := newBlockStates.push newBlockState
+    pure (newBlock, newBlockState)).run 0
+  let newBlocks := newPairs.map (·.1)
+  let newBlockStates := newPairs.map (·.2)
 
   let newParams : ModdedGPTParams (device := device) cfg := {
     params with
