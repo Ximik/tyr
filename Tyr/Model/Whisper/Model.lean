@@ -294,12 +294,12 @@ structure WhisperModel (cfg : WhisperConfig) (dtype : DType := .Float32) where
   encoderConv2Weight : Tensor { dtype := dtype, device := device, shape := #[cfg.dModel, cfg.dModel, 3] }
   encoderConv2Bias : Tensor { dtype := dtype, device := device, shape := #[cfg.dModel] }
   encoderPositionalEmbedding : Tensor { dtype := dtype, device := device, shape := #[cfg.maxSourcePositions, cfg.dModel] }
-  encoderLayers : Array (WhisperEncoderLayer (device := device) (dtype := dtype) cfg)
+  encoderLayers : Vector (WhisperEncoderLayer (device := device) (dtype := dtype) cfg) cfg.encoderLayers
   encoderLayerNorm : LayerNorm (device := device) cfg.dModel dtype
 
   decoderTokenEmbedding : Tensor { dtype := dtype, device := device, shape := #[cfg.vocabSize, cfg.dModel] }
   decoderPositionalEmbedding : Tensor { dtype := dtype, device := device, shape := #[cfg.maxTargetPositions, cfg.dModel] }
-  decoderLayers : Array (WhisperDecoderLayer (device := device) (dtype := dtype) cfg)
+  decoderLayers : Vector (WhisperDecoderLayer (device := device) (dtype := dtype) cfg) cfg.decoderLayers
   decoderLayerNorm : LayerNorm (device := device) cfg.dModel dtype
   deriving TensorStruct
 
@@ -312,16 +312,14 @@ def init (cfg : WhisperConfig) (device : Device := .CPU) (dtype : DType := .Floa
   let encoderConv2Bias ← initBiasFor (device := device) (dtype := dtype) #[cfg.dModel]
   let encoderPositionalEmbedding ← initWeightFor (device := device) (dtype := dtype) #[cfg.maxSourcePositions, cfg.dModel] cfg.dModel
 
-  let mut encoderLayers : Array (WhisperEncoderLayer (device := device) (dtype := dtype) cfg) := #[]
-  for _ in [:cfg.encoderLayers] do
-    encoderLayers := encoderLayers.push (← WhisperEncoderLayer.init (device := device) (dtype := dtype) cfg)
+  let encoderLayers ← Vector.ofFnM fun (_ : Fin cfg.encoderLayers) =>
+    WhisperEncoderLayer.init (device := device) (dtype := dtype) cfg
   let encoderLayerNorm ← initLayerNorm (device := device) (dtype := dtype) cfg.dModel cfg.layerNormEps
 
   let decoderTokenEmbedding ← initWeightFor (device := device) (dtype := dtype) #[cfg.vocabSize, cfg.dModel] cfg.dModel
   let decoderPositionalEmbedding ← initWeightFor (device := device) (dtype := dtype) #[cfg.maxTargetPositions, cfg.dModel] cfg.dModel
-  let mut decoderLayers : Array (WhisperDecoderLayer (device := device) (dtype := dtype) cfg) := #[]
-  for _ in [:cfg.decoderLayers] do
-    decoderLayers := decoderLayers.push (← WhisperDecoderLayer.init (device := device) (dtype := dtype) cfg)
+  let decoderLayers ← Vector.ofFnM fun (_ : Fin cfg.decoderLayers) =>
+    WhisperDecoderLayer.init (device := device) (dtype := dtype) cfg
   let decoderLayerNorm ← initLayerNorm (device := device) (dtype := dtype) cfg.dModel cfg.layerNormEps
 
   pure {
@@ -439,7 +437,7 @@ def initLayerKVCaches {batch : Nat}
     [DType.ConstantSupported dtype device]
     (h : 0 < maxLen := by omega)
     : SelfKVCaches (device := device) (dtype := dtype) cfg batch maxLen 0 :=
-  { layers := m.model.decoderLayers.map (fun _ =>
+  { layers := m.model.decoderLayers.toArray.map (fun _ =>
       WhisperAttention.initKVCache
         (dtype := dtype) maxLen
         (batch := batch)
@@ -474,11 +472,8 @@ def decodeStepWithCache {batch encSeq cap len : Nat}
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := Tensor.add tokEmb posB
   let mut nextCaches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch cap (len + 1)) :=
     Array.mkEmpty selfCaches.layers.size
-  for i in [:m.model.decoderLayers.size] do
-    let layer ←
-      match m.model.decoderLayers[i]? with
-      | some l => pure l
-      | none => throw <| IO.userError s!"missing Whisper decoder layer at index {i}"
+  for hi : i in [:m.model.decoderLayers.size] do
+    let layer := m.model.decoderLayers[i]'hi.upper
     let selfCache ←
       match selfCaches.layers[i]? with
       | some c => pure c
