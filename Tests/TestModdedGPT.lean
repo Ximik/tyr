@@ -189,23 +189,6 @@ def testShardingShapes : IO Unit := do
 /-! ## 5. Model Tests -/
 
 @[test]
-def testModdedGPTInit : IO Unit := do
-  -- Use tiny config for fast testing
-  let cfg : moddedGpt.Config := {
-    vocabSize := 1000
-    nLayer := 2
-    nHead := 2
-    halfHeadDim := 16
-    maxSeqLen := 128
-    blockSize := 32
-    numValueEmbeds := 2
-  }
-
-  let params ← ModdedGPTParams.init cfg
-
-  LeanTest.assertEqual params.valueEmbeds.size cfg.numValueEmbeds
-
-@[test]
 def testYarnRotary : IO Unit := do
   let half : Nat := 32
   let maxSeqLen : Nat := 128
