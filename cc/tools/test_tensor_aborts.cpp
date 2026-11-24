@@ -19,7 +19,7 @@ Object notATensor() { return Object(lean_mk_string("not a tensor"), lean_dec); }
 
 void crossEntropy(bool unreduced, bool integralLogits) {
   Object logits(integralLogits ? lean_torch_full_int(shape({2, 2}), 0)
-                               : lean_torch_full(shape({2, 2}), 0, 0, lean_box(1)), lean_dec);
+                               : lean_torch_full(shape({2, 2}), 0, 0, cpuDevice()), lean_dec);
   Object labels(lean_torch_full_int(shape({2}), integralLogits ? 0 : 2), lean_dec);
   Object result(unreduced ? lean_torch_cross_entropy_none(logits.get(), labels.get())
                           : lean_torch_cross_entropy_2d(logits.get(), labels.get()), lean_dec);

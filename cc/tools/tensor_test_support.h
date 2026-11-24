@@ -22,6 +22,7 @@ struct Nat {
   ~Nat() { lean_dec(object); }
   operator lean_object*() const { return object; }
 };
+lean_object* cpuDevice() { return lean_box(static_cast<unsigned>(tyr::lean::DeviceKind::CPU)); }
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -38,7 +39,7 @@ lean_object* some(lean_object* value) {
   return result;
 }
 Object full(std::initializer_list<uint64_t> dims, double value = 0) {
-  return Object(lean_torch_full(shape(dims), value, 0, lean_box(1)), lean_dec);
+  return Object(lean_torch_full(shape(dims), value, 0, cpuDevice()), lean_dec);
 }
 lean_object* exceptValue(lean_object* result) {
   require(!lean_is_scalar(result) && !lean_is_external(result) && lean_obj_tag(result) == 1,

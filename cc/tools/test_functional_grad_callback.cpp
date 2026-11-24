@@ -15,6 +15,7 @@ lean_object* tyr_test_callback_throw(lean_object*, lean_object*);
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
 using Callback = lean_object* (*)(lean_object*, lean_object*);
 
+static lean_object* cpuDevice() { return lean_box(static_cast<unsigned>(tyr::lean::DeviceKind::CPU)); }
 static void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -34,7 +35,7 @@ static lean_object* shape() {
 static void run(const std::string& mode) {
   const bool integer = mode == "setup-error";
   Object input(integer ? lean_torch_full_int(shape(), 2)
-                       : lean_torch_full(shape(), 2.0, 0, lean_box(1)), lean_dec);
+                       : lean_torch_full(shape(), 2.0, 0, cpuDevice()), lean_dec);
   lean_inc(input.get());
   Object inputs(lean_array_push(lean_mk_empty_array(), input.get()), lean_dec);
   Callback callback = mode == "success" ? tyr_test_callback_sum

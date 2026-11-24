@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <exception>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace tyr {
@@ -48,11 +49,11 @@ lean_object* tryCall(const char* context, F&& operation) {
   }
 }
 
-inline lean_object* ioErrorResult(const char* context, const char* message) noexcept {
+inline lean_object* ioErrorResult(std::string_view context, std::string_view message) noexcept {
   auto* separator = lean_mk_string(": ");
-  auto* prefix = lean_string_append(lean_mk_string(context), separator);
+  auto* prefix = lean_string_append(lean_mk_string_from_bytes(context.data(), context.size()), separator);
   lean_dec(separator);
-  auto* detail = lean_mk_string(message);
+  auto* detail = lean_mk_string_from_bytes(message.data(), message.size());
   auto* text = lean_string_append(prefix, detail);
   lean_dec(detail);
   return lean_io_result_mk_error(lean_mk_io_user_error(text));

@@ -10,6 +10,7 @@ extern "C" void lean_initialize();
 
 namespace {
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
+lean_object* cpuDevice() { return lean_box(static_cast<unsigned>(tyr::lean::DeviceKind::CPU)); }
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -27,7 +28,7 @@ torch::Tensor native(lean_object* value) {
   return torch::Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::reclaim(impl));
 }
 Object wrap(torch::Tensor tensor) {
-  Object carrier(lean_torch_full(shape({}), 0, 0, lean_box(1)), lean_dec);
+  Object carrier(lean_torch_full(shape({}), 0, 0, cpuDevice()), lean_dec);
   auto* old = static_cast<c10::TensorImpl*>(lean_get_external_data(carrier.get()));
   auto* impl = tensor.unsafeGetTensorImpl();
   c10::raw::intrusive_ptr::incref(impl);

@@ -10,6 +10,3 @@ torch::Tensor borrowTensor(b_lean_obj_arg o);
 // Transfer ownership of a new tensor to Lean.
 // The tensor object is moved to a heap allocation owned by Lean.
 lean_object* giveTensor(torch::Tensor t);
-
-// Alias for backward compatibility
-lean_object* fromTorchTensor(torch::Tensor t);

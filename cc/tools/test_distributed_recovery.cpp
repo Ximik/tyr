@@ -23,16 +23,16 @@
 #define lean_torch_muon_orthogonalize unit_lean_torch_muon_orthogonalize
 #define lean_torch_cautious_update unit_lean_torch_cautious_update
 #define borrowTensor unitBorrowTensor
-#define fromTorchTensor unitFromTorchTensor
+#define giveTensor unitGiveTensor
 #include "../src/tyr_distributed.cpp"
 #include "../src/tyr_polar.cpp"
 #undef borrowTensor
-#undef fromTorchTensor
+#undef giveTensor
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 
 // Local handles are used only by the included implementation. Real ABI mode
 // constructs actual library handles through the checked allocation export.
-lean_object* unitFromTorchTensor(torch::Tensor tensor) {
+lean_object* unitGiveTensor(torch::Tensor tensor) {
   static auto* cls = lean_register_external_class(
     [](void* value) { delete static_cast<torch::Tensor*>(value); },
     [](void*, b_lean_obj_arg) {});
@@ -79,6 +79,7 @@ struct Nat {
   ~Nat() { lean_dec(object); }
   operator lean_object*() const { return object; }
 };
+lean_object* cpuDevice() { return lean_box(static_cast<unsigned>(tyr::lean::DeviceKind::CPU)); }
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -116,7 +117,7 @@ lean_object* shape(std::initializer_list<uint64_t> dims) {
 }
 Object tensor(std::initializer_list<uint64_t> dims) {
   // Device.CPU is constructor 1; constructor 0 is CUDA with an index payload.
-  return Object(lean_torch_ones(shape(dims), 0, lean_box(1)), lean_dec);
+  return Object(lean_torch_ones(shape(dims), 0, cpuDevice()), lean_dec);
 }
 } // namespace
 
@@ -218,7 +219,7 @@ int main() {
     Counts counts;
     g_process_group = c10::make_intrusive<FakeBackend>(counts);
     g_initialized = true;
-    Object raw(unitFromTorchTensor(torch::ones({2, 2})), lean_dec);
+    Object raw(unitGiveTensor(torch::ones({2, 2})), lean_dec);
     require(uintResult(lean_torch_dist_all_reduce(raw.get(), 0, 0)) == 0, "allreduce ID");
     require(uintResult(lean_torch_dist_reduce_scatter_tensor(raw.get(), raw.get(), 0, 0)) == 0,
       "reduce-scatter ID");
@@ -234,7 +235,7 @@ int main() {
     Counts counts;
     auto backend = c10::make_intrusive<FakeBackend>(counts);
     g_process_group = backend; g_initialized = true;
-    Object raw(unitFromTorchTensor(torch::ones({2})), lean_dec);
+    Object raw(unitGiveTensor(torch::ones({2})), lean_dec);
     expectError(lean_torch_dist_broadcast(raw.get(), Nat(UINT64_MAX)));
     expectError(lean_torch_dist_broadcast(raw.get(), Nat(1)));
     require(backend->broadcasts == 0, "invalid rank reached backend");
@@ -245,7 +246,7 @@ int main() {
   test("async work retained until wait and released once", [] {
     Counts counts;
     g_process_group = c10::make_intrusive<FakeBackend>(counts); g_initialized = true;
-    Object raw(unitFromTorchTensor(torch::ones({2})), lean_dec);
+    Object raw(unitGiveTensor(torch::ones({2})), lean_dec);
     const auto id = uintResult(lean_torch_dist_all_reduce(raw.get(), 0, 1));
     require(id != 0 && g_pending_work.size() == 1 && counts.destroyed == 0, "pending work not retained");
     expectSuccess(lean_torch_dist_wait(id));
@@ -263,7 +264,7 @@ int main() {
   test("false synchronous waits return errors", [] {
     Counts counts;
     g_process_group = c10::make_intrusive<FakeBackend>(counts, false); g_initialized = true;
-    Object raw(unitFromTorchTensor(torch::ones({2, 2})), lean_dec);
+    Object raw(unitGiveTensor(torch::ones({2, 2})), lean_dec);
     expectError(lean_torch_dist_all_reduce(raw.get(), 0, 0));
     expectError(lean_torch_dist_reduce_scatter_tensor(raw.get(), raw.get(), 0, 0));
     expectError(lean_torch_dist_all_gather_into_tensor(raw.get(), raw.get(), 0));

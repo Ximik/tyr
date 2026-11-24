@@ -25,12 +25,7 @@
 #import <CoreVideo/CoreVideo.h>
 #import <CoreMedia/CoreMedia.h>
 
-// Defined in tyr.cpp
-lean_object *fromTorchTensor(torch::Tensor t);
-
-static lean_object* mk_io_error(const std::string& msg) {
-  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(msg.c_str())));
-}
+#include "tyr_tensor.h"
 
 // CoreFoundation Create/Copy ownership and pixel-buffer locks must survive C++
 // exceptions from the vectors and tensor allocations in the media pipeline.
@@ -612,7 +607,7 @@ lean_object* lean_torch_media_load_image_patchified(
   std::vector<float> rgb;
   std::string err;
   if (!load_image_rgb_f32(path, width, height, rgb, err)) {
-    return mk_io_error("loadImagePatchified failed: " + err);
+    return tyr::ioErrorResult("loadImagePatchified", err);
   }
 
   std::vector<std::vector<float>> frames;
@@ -623,7 +618,7 @@ lean_object* lean_torch_media_load_image_patchified(
   if (!patchify_rgb_frames(
         frames, width, height, in_channels, patch_size, temporal_patch_size,
         patches, n_patches, err)) {
-    return mk_io_error("loadImagePatchified failed: " + err);
+    return tyr::ioErrorResult("loadImagePatchified", err);
   }
 
   uint64_t patch_dim = in_channels * temporal_patch_size * patch_size * patch_size;
@@ -631,7 +626,7 @@ lean_object* lean_torch_media_load_image_patchified(
       patches.data(),
       {static_cast<int64_t>(n_patches), static_cast<int64_t>(patch_dim)},
       torch::TensorOptions().dtype(torch::kFloat32)).clone();
-  return lean_io_result_mk_ok(fromTorchTensor(t));
+  return lean_io_result_mk_ok(giveTensor(t));
   });
 }
 
@@ -660,7 +655,7 @@ lean_object* lean_torch_media_load_video_patchified(
   if (!load_video_patchified_streaming(
         path, in_channels, patch_size, temporal_patch_size,
         max_frames, frame_stride, patches, n_patches, err)) {
-    return mk_io_error("loadVideoPatchified failed: " + err);
+    return tyr::ioErrorResult("loadVideoPatchified", err);
   }
 
   uint64_t patch_dim = in_channels * temporal_patch_size * patch_size * patch_size;
@@ -668,7 +663,7 @@ lean_object* lean_torch_media_load_video_patchified(
       patches.data(),
       {static_cast<int64_t>(n_patches), static_cast<int64_t>(patch_dim)},
       torch::TensorOptions().dtype(torch::kFloat32)).clone();
-  return lean_io_result_mk_ok(fromTorchTensor(t));
+  return lean_io_result_mk_ok(giveTensor(t));
   });
 }
 
@@ -691,7 +686,7 @@ LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
   std::string path(path_c);
 
   if (patch_size == 0 || pooling_kernel_size == 0 || max_soft_tokens == 0) {
-    return mk_io_error("loadGemma4ImagePatchGrid failed: patch_size, pooling_kernel_size, and max_soft_tokens must be > 0");
+    return tyr::ioErrorResult("loadGemma4ImagePatchGrid", "patch_size, pooling_kernel_size, and max_soft_tokens must be > 0");
   }
 
   int width = 0;
@@ -699,20 +694,20 @@ LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
   std::vector<float> rgb;
   std::string err;
   if (!load_image_rgb_f32(path, width, height, rgb, err)) {
-    return mk_io_error("loadGemma4ImagePatchGrid failed: " + err);
+    return tyr::ioErrorResult("loadGemma4ImagePatchGrid", err);
   }
 
   int target_h = 0;
   int target_w = 0;
   if (!compute_gemma4_target_size(
         width, height, patch_size, pooling_kernel_size, max_soft_tokens, target_h, target_w, err)) {
-    return mk_io_error("loadGemma4ImagePatchGrid failed: " + err);
+    return tyr::ioErrorResult("loadGemma4ImagePatchGrid", err);
   }
 
   uint64_t patch_rows = static_cast<uint64_t>(target_h) / patch_size;
   uint64_t patch_cols = static_cast<uint64_t>(target_w) / patch_size;
   if (patch_rows == 0 || patch_cols == 0) {
-    return mk_io_error("loadGemma4ImagePatchGrid failed: computed empty patch grid");
+    return tyr::ioErrorResult("loadGemma4ImagePatchGrid", "computed empty patch grid");
   }
 
   std::vector<float> resized;
@@ -737,7 +732,7 @@ LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
         static_cast<int64_t>(patch_dim)
       },
       torch::TensorOptions().dtype(torch::kFloat32)).clone();
-  return lean_io_result_mk_ok(fromTorchTensor(t));
+  return lean_io_result_mk_ok(giveTensor(t));
   });
 }
 
