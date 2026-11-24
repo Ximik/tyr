@@ -1,12 +1,8 @@
 import json
-import wave
-from pathlib import Path
 
-from lib import lm, probe
+from lib import audio, lm, probe
 from lib.compare import LmTokens, TensorsClose
 from lib.test import Test
-
-CASES = Path(__file__).resolve().parents[1] / "cases"
 
 TEST = Test(
     name="whisper",
@@ -23,20 +19,14 @@ CHECKS = [
 ]
 
 
-def audio_path(case: Path) -> Path:
-    return CASES / json.loads(case.read_text())["audio"]
-
-
 def reference(case, weights, device, dtype, out):
-    import numpy as np
     import torch
     from safetensors.torch import save_file
     from transformers import WhisperFeatureExtractor, WhisperForConditionalGeneration
 
-    with wave.open(str(audio_path(case))) as f:
-        audio = np.frombuffer(f.readframes(f.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+    _, samples = audio.read(audio.case_audio(case))
     prompt = json.loads(case.read_text())["prompt"]
-    mel = WhisperFeatureExtractor.from_pretrained(weights)(audio, sampling_rate=16000, return_tensors="pt").input_features
+    mel = WhisperFeatureExtractor.from_pretrained(weights)(samples, sampling_rate=16000, return_tensors="pt").input_features
     model = WhisperForConditionalGeneration.from_pretrained(weights, dtype=getattr(torch, dtype)).to(device).eval()
 
     tokens, logits, margins = [], [], []
@@ -68,6 +58,6 @@ def reference(case, weights, device, dtype, out):
 
 def tyr(case, weights, device, dtype, out):
     forced = json.loads((out.parent / "reference" / "result.json").read_text())["tokens"][0]
-    request = {"dtype": dtype, "audio": str(audio_path(case)), "prompt": json.loads(case.read_text())["prompt"],
+    request = {"dtype": dtype, "audio": str(audio.case_audio(case)), "prompt": json.loads(case.read_text())["prompt"],
                "max_new_tokens": lm.STEPS, "forced": forced}
     probe.run(TEST.probe, request, weights, device, out)

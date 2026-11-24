@@ -1,12 +1,10 @@
 import json
-import wave
 from pathlib import Path
 
-from lib import probe
+from lib import audio, probe
 from lib.compare import IntsEqual, TensorsClose
 from lib.test import Test
 
-CASES = Path(__file__).resolve().parents[1] / "cases"
 WINDOW = 512
 
 TEST = Test(
@@ -31,12 +29,9 @@ TYR_NAMES = {
 
 
 def read_audio(case: Path):
-    import numpy as np
     import torch
 
-    with wave.open(str(CASES / json.loads(case.read_text())["audio"])) as f:
-        audio = np.frombuffer(f.readframes(f.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
-    return torch.from_numpy(audio)
+    return torch.from_numpy(audio.read(audio.case_audio(case))[1])
 
 
 def reference(case, weights, device, dtype, out):
@@ -45,15 +40,15 @@ def reference(case, weights, device, dtype, out):
     from safetensors.torch import save_file
     from silero_vad import get_speech_timestamps, load_silero_vad
 
-    audio = read_audio(case)
+    samples = read_audio(case)
     model = load_silero_vad()
     probs = []
     with torch.inference_mode():
-        for start in range(0, len(audio), WINDOW):
-            chunk = torch.nn.functional.pad(audio[start:start + WINDOW], (0, max(0, start + WINDOW - len(audio))))
+        for start in range(0, len(samples), WINDOW):
+            chunk = torch.nn.functional.pad(samples[start:start + WINDOW], (0, max(0, start + WINDOW - len(samples))))
             probs.append(model(chunk, 16000).item())
         model.reset_states()
-        segments = get_speech_timestamps(audio, model, sampling_rate=16000)
+        segments = get_speech_timestamps(samples, model, sampling_rate=16000)
     out.mkdir(parents=True, exist_ok=True)
     (out / "result.json").write_text(json.dumps({"segments": [[s["start"], s["end"]] for s in segments]}))
     save_file({"probs": torch.tensor(probs, dtype=torch.float32)}, str(out / "tensors.safetensors"))
@@ -68,5 +63,5 @@ def tyr(case, weights, device, dtype, out):
     out.mkdir(parents=True, exist_ok=True)
     checkpoint = out / "silero_vad.safetensors"
     save_file({tyr_name: state[name].float().contiguous() for name, tyr_name in TYR_NAMES.items()}, str(checkpoint))
-    request = {"audio": str(CASES / json.loads(case.read_text())["audio"])}
+    request = {"audio": str(audio.case_audio(case))}
     probe.run(TEST.probe, request, checkpoint, device, out)
