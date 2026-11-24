@@ -122,9 +122,8 @@ private def loadModelSharded (modelDir : String) (cfg : WhisperConfig) (dtype : 
   let encoderPositionalEmbedding ←
     loadWeight (device := device) dtype modelDir "model.encoder.embed_positions.weight" #[cfg.maxSourcePositions, cfg.dModel]
 
-  let mut encoderLayers : Array (WhisperEncoderLayer (device := device) (dtype := dtype) cfg) := #[]
-  for i in [:cfg.encoderLayers] do
-    encoderLayers := encoderLayers.push (← loadEncoderLayerSharded (dtype := dtype) (device := device) modelDir i cfg)
+  let encoderLayers ← Vector.ofFnM fun (i : Fin cfg.encoderLayers) =>
+    loadEncoderLayerSharded (dtype := dtype) (device := device) modelDir i cfg
   let encoderLayerNorm ← loadLayerNormSharded (dtype := dtype) (device := device) modelDir "model.encoder.layer_norm" cfg.dModel cfg.layerNormEps
 
   let decoderTokenEmbedding ←
@@ -132,9 +131,8 @@ private def loadModelSharded (modelDir : String) (cfg : WhisperConfig) (dtype : 
   let decoderPositionalEmbedding ←
     loadWeight (device := device) dtype modelDir "model.decoder.embed_positions.weight" #[cfg.maxTargetPositions, cfg.dModel]
 
-  let mut decoderLayers : Array (WhisperDecoderLayer (device := device) (dtype := dtype) cfg) := #[]
-  for i in [:cfg.decoderLayers] do
-    decoderLayers := decoderLayers.push (← loadDecoderLayerSharded (dtype := dtype) (device := device) modelDir i cfg)
+  let decoderLayers ← Vector.ofFnM fun (i : Fin cfg.decoderLayers) =>
+    loadDecoderLayerSharded (dtype := dtype) (device := device) modelDir i cfg
   let decoderLayerNorm ← loadLayerNormSharded (dtype := dtype) (device := device) modelDir "model.decoder.layer_norm" cfg.dModel cfg.layerNormEps
 
   pure {
