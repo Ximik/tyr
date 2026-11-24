@@ -113,12 +113,11 @@ def loadQwen3Model (src : Source) (cfg : QwenConfig := QwenConfig.qwen3_4B)
   log.onInfo "  Loaded embed_tokens"
 
   -- Layers
-  let mut layers := #[]
-  for i in [:cfg.num_hidden_layers] do
+  let layers ← Vector.ofFnM fun (i : Fin cfg.num_hidden_layers) => do
     let layer ← loadLayer (device := device) src i cfg loadQKNorms
-    layers := layers.push layer
-    if (i + 1) % 7 == 0 then
-      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers} layers"
+    if (i.val + 1) % 7 == 0 then
+      log.onInfo s!"  Loaded {i.val + 1}/{cfg.num_hidden_layers} layers"
+    pure layer
 
   -- Final norm
   let norm ← loadRMSNorm (device := device) src "model.norm" cfg.hidden_size

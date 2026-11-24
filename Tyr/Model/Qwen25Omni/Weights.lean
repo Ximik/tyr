@@ -114,11 +114,11 @@ private def loadThinkerModel (src : Source) (cfg : Config) (log : Handlers := {}
   let ⟨_, embed⟩ ← src.load (← src.resolve (nameCandidates "model.embed_tokens.weight")) #[cfg.vocab_size, cfg.hidden_size] device
   let embed := Tensor.detach embed.toFloat32
 
-  let mut layers : Array (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := #[]
-  for i in [:cfg.num_hidden_layers] do
-    layers := layers.push (← loadLayer (device := device) src i cfg)
-    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then
-      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers} layers"
+  let layers ← Vector.ofFnM fun (i : Fin cfg.num_hidden_layers) => do
+    let layer ← loadLayer (device := device) src i cfg
+    if (i.val + 1) % 8 == 0 || i.val + 1 == cfg.num_hidden_layers then
+      log.onInfo s!"  Loaded {i.val + 1}/{cfg.num_hidden_layers} layers"
+    pure layer
 
   let norm ← loadRMSNorm (device := device) src "model.norm" cfg.hidden_size
   log.onInfo "Loaded Qwen2.5-Omni thinker weights."
