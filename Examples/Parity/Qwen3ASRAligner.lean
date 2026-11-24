@@ -1,11 +1,13 @@
 /-
   Examples/Parity/Qwen3ASRAligner.lean
 
-  Parity probe for `parity/tests/qwen3asr_aligner.py`. Request:
-  `{"dtype", "audio": <16 kHz PCM16 WAV path>, "prompt": [token], "words": [word]}`,
-  the prompt carrying the audio placeholders and a `<timestamp>` marker around
-  every word. Features come from the same frontend as transcription. Writes the
-  class predicted at each marker (`classes`, `[[class]]`), each word's start and
+  Parity probe for `parity/tests/qwen3asr_aligner.py`. `--weights` is the
+  model directory with its tokenizer files. Request:
+  `{"dtype", "audio": <16 kHz PCM16 WAV path>, "transcript", "language"}`.
+  Features, words and prompt are built as alignment builds them. Writes the
+  words (`words`, `[word]`), the prompt with its audio placeholders and a
+  `<timestamp>` marker around every word (`prompt`, `[token]`), the class
+  predicted at each marker (`classes`, `[[class]]`), each word's start and
   end in milliseconds (`timestamps`, `[[[start, end]]]`), and the Float32 tensors
   `mel` (`[1, mels, frames]`) and `logits` (`[1, seq, classes]`).
 -/
@@ -19,8 +21,8 @@ open Lean torch torch.qwen3asr
 structure Request where
   dtype : String
   audio : String
-  prompt : Array Nat
-  words : Array String
+  transcript : String
+  language : String
   deriving FromJson
 
 def probe (args : Args) (device : Device) (json : Json) : IO Output := do
@@ -32,6 +34,9 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir weights
   unless ThinkerConfig.isForcedAligner cfg.thinkerConfig do
     throw <| IO.userError s!"{weights} is not a forced-aligner checkpoint"
+  let language ← IO.ofExcept (normalizeLanguageName request.language)
+  IO.ofExcept (validateLanguage cfg.supportLanguages language)
+  let tok ← tokenizer.qwen3.loadTokenizer weights
   let pre ← PreprocessorConfig.loadFromPretrainedDir weights (requiredSamplingRate := some 16000)
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
     throw <| IO.userError s!"feature_size {pre.featureSize} is not num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}"
@@ -42,18 +47,25 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
     (device := device)
   let mel : Tensor { dtype := .Float32, device := device, shape := #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] } :=
     Tensor.reshape features.inputFeatures #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel])
-  let prompt ← LM.tokenMatrix #[request.prompt] 1 request.prompt.size device
+  let featureLens := (← (Tensor.sumDim features.featureAttentionMask 1 false).toUInt64Array).map (·.toNat)
+  let audioTokens := (AudioEncoderConfig.featExtractOutputLengths featureLens).getD 0 0
+  let (words, text) := Qwen3ForceAlignProcessor.encodeTimestampText request.transcript language
+  let promptIds ← IO.ofExcept <| ({} : Qwen3ASRProcessor).encodeWithExpandedAudioTokenIds tok text
+    #[audioTokens] cfg.thinkerConfig.audioTokenId
+  let promptIds := promptIds.map (·.toNat)
+  let prompt ← LM.tokenMatrix #[promptIds] 1 promptIds.size device
   let logits ← model.forward prompt (some mel) (some features.featureAttentionMask)
 
   let predicted ← (Tensor.argmax! logits 2).toUInt64Array
   let marker := cfg.timestampTokenId.toNat
-  let classes := (Array.range request.prompt.size).filterMap fun i =>
-    if request.prompt[i]! == marker then some (predicted[i]!.toNat) else none
-  let aligned ← model.alignFromLogits prompt logits #[request.words]
+  let classes := (Array.range promptIds.size).filterMap fun i =>
+    if promptIds[i]! == marker then some (predicted[i]!.toNat) else none
+  let aligned ← model.alignFromLogits prompt logits #[words]
   let ms (seconds : Float) : Nat := (seconds * 1000.0).round.toUInt64.toNat
   let timestamps := (aligned.getD 0 { items := #[] }).items.map fun item => #[ms item.startTime, ms item.endTime]
   pure {
-    json := Json.mkObj [("classes", toJson #[classes]), ("timestamps", toJson #[timestamps])]
+    json := Json.mkObj [("words", toJson words), ("prompt", toJson promptIds), ("classes", toJson #[classes]),
+      ("timestamps", toJson #[timestamps])]
     tensors := #[
       ("mel", Tensor.toTensor mel),
       ("logits", Tensor.toTensor (Tensor.castDType logits .Float32))]
