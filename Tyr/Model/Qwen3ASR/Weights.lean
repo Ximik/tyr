@@ -234,29 +234,12 @@ private def loadThinkerSharded (modelDir : String) (cfg : ThinkerConfig)
 
 namespace Qwen3ASRForConditionalGeneration
 
-/-- Resolve runtime target device for ASR inference.
-    Honors `TYR_DEVICE=cpu|cuda|mps|auto`; defaults to `auto`. -/
-private def resolveAsrDevice (log : Handlers := {}) : IO Device := do
-  let requested := (← IO.getEnv "TYR_DEVICE").map String.toLower
-  match requested with
-  | some "cpu" => pure Device.CPU
-  | some "cuda" =>
-    if ← cuda_is_available then
-      Device.cuda 0
-    else
-      log.onWarn "TYR_DEVICE=cuda requested but CUDA is unavailable; falling back to auto device selection."
-      getBestDevice
-  | some "mps" => Device.mps
-  | some "auto" => getBestDevice
-  | some _ => getBestDevice
-  | none => getBestDevice
-
 /-- Load Qwen3-ASR model from HuggingFace sharded SafeTensors directory onto
 `device`. The model dtype is `dtype?`, every weight cast to it once
 here, or else the stored dtype of the first audio convolution, which every
 weight must have. -/
-def loadShardedAt (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handlers := {})
-    (device : Device) (dtype? : Option RealFloatingDType := none) :
+def loadSharded (modelDir : String) (cfg : Qwen3ASRConfig) (device : Device)
+    (log : Handlers := {}) (dtype? : Option RealFloatingDType := none) :
     IO (Σ dtype : RealFloatingDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   log.onInfo s!"Loading Qwen3-ASR weights from {modelDir}..."
   let conv2d1 ← (← safetensors.Source.open modelDir).load
@@ -271,12 +254,6 @@ def loadShardedAt (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handle
   log.onInfo "Loaded Qwen3-ASR weights."
   pure ⟨RealFloatingDType.ofDType dtype, { thinker, supportLanguages := cfg.supportLanguages }⟩
 
-/-- Load using the environment-selected device, retaining that index in the result. -/
-def loadSharded (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handlers := {}) :
-    IO (Σ device : Device, Σ dtype : RealFloatingDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
-  let device ← resolveAsrDevice log
-  let model ← loadShardedAt modelDir cfg log device
-  pure ⟨device, model⟩
 
 end Qwen3ASRForConditionalGeneration
 

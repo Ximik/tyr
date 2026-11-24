@@ -261,13 +261,10 @@ structure WhisperForConditionalGeneration (cfg : WhisperConfig)
 
 with `encode`, `decode`, and the incremental path `initLayerKVCaches` +
 `precomputeCrossCaches` + `decodeStepWithCache` (`Tyr/Model/Whisper/Model.lean`).
-`WhisperForConditionalGeneration.loadSharded modelDir cfg` loads HF-layout weights, ties
-`projOut` to the token embedding when missing, and picks a device from `TYR_DEVICE`
-(`cpu`/`cuda`/`mps`/`auto`), falling back to `getBestDevice`. Its result packages
-placement and checkpoint precision as
-`Σ device : Device, Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) cfg dtype.val`.
-Use `loadShardedAt` to request an acquired device explicitly; its result retains
-the dtype witness. Compute dtype validation occurs during loading, and bundles
+`WhisperForConditionalGeneration.loadSharded modelDir cfg device` loads HF-layout weights
+onto `device` and ties `projOut` to the token embedding when missing. Its result packages
+checkpoint precision as
+`Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) cfg dtype.val`. Compute dtype validation occurs during loading, and bundles
 retain the proof alongside the model.
 
 The user API (`Tyr/Model/Whisper/Transcribe.lean`) is a bundle plus transcribe functions:
@@ -306,11 +303,11 @@ Loading:
 
 | Family | Config | Weights | One-shot bundle |
 |---|---|---|---|
-| KittenTTS | `KittenTTSConfig.loadFromPretrainedDir` | `Model.loadAutoConfig path cfg` | `Model.loadFromPretrained source` → `PretrainedBundle` |
+| KittenTTS | `KittenTTSConfig.loadFromPretrainedDir` | `Model.loadAutoConfig path device cfg` | `Model.loadFromPretrained device source` → `PretrainedBundle` |
 | Qwen3TTS | `Qwen3TTSConfig.loadFromPretrainedDir` | `Qwen3TTSForConditionalGeneration.loadSharded modelDir cfg device` | — |
-| Qwen3ASR | `Qwen3ASRConfig.loadFromPretrainedDir` | `Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg` | `Qwen3ASRForConditionalGeneration.loadFromPretrained source`; `StreamModel.loadFromPretrained source`; `Qwen3ForcedAligner.loadFromPretrained source` |
+| Qwen3ASR | `Qwen3ASRConfig.loadFromPretrainedDir` | `Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg device` | `Qwen3ASRForConditionalGeneration.loadFromPretrained source device`; `StreamModel.loadFromPretrained source device`; `Qwen3ForcedAligner.loadFromPretrained source device` |
 | SileroVAD | — (fixed shapes) | `SileroVAD.load path` | — |
-| Whisper | `WhisperConfig.loadFromPretrainedDir` | `WhisperForConditionalGeneration.loadSharded modelDir cfg` | `loadFromPretrainedDir modelDir` → `WhisperBundle` |
+| Whisper | `WhisperConfig.loadFromPretrainedDir` | `WhisperForConditionalGeneration.loadSharded modelDir cfg device` | `loadFromPretrainedDir modelDir device` → `WhisperBundle` |
 
 Running:
 
@@ -341,7 +338,7 @@ import Tyr.Model.KittenTTS
 open torch torch.kittentts
 
 def main (args : List String) : IO UInt32 := do
-  let bundle ← Model.loadFromPretrained "hexgrad/Kokoro-82M"
+  let bundle ← Model.loadFromPretrained (← Device.acquireNamed "cpu") "hexgrad/Kokoro-82M"
   let out ← bundle.synthesizePhonemesToFile "həˈloʊ wɜːld" "af_heart" "out.wav" 1.0
   IO.println s!"frames={out.alignmentFrames} shape={out.audio.runtimeShape}"
   return 0
@@ -385,13 +382,13 @@ let modelDir ← hub.resolvePretrainedDir "Qwen/Qwen3-ASR-0.6B" {}
 let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
 let tok ← tokenizer.qwen3.loadTokenizer modelDir
 let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
-let ⟨device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg device
 let outs ← model.transcribeWavs tok pre #["MLKDream.wav"]
   (languages := #[some "English"]) (returnTimeStamps := false)
 IO.println (outs.getD 0 default).text
 
 -- streaming, session style
-let sm ← StreamModel.loadFromPretrained "Qwen/Qwen3-ASR-0.6B"
+let sm ← StreamModel.loadFromPretrained "Qwen/Qwen3-ASR-0.6B" device
 let mut ss ← newSession sm (chunkSec := 2.0) (hopSec := 0.5)
 for chunk in pcm16kChunks do
   let (ss', step) ← pushAudio sm ss chunk
@@ -407,7 +404,7 @@ import Tyr.Model.Whisper
 
 open torch.whisper
 
-let bundle ← loadFromPretrainedDir "weights/whisper-base.en"
+let bundle ← loadFromPretrainedDir "weights/whisper-base.en" device
 let out ← transcribeWav bundle.model bundle.tok bundle.preprocessor
   "MLKDream.wav" "en" 0 true { beamSize := 1, noFallback := true }
 IO.println out.text

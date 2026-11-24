@@ -231,6 +231,7 @@ end PretrainedBundle
 namespace Model
 
 def loadFromPretrained
+    (device : Device)
     (source : String := hub.defaultRepoId)
     (defaults : KittenTTSConfig := {})
     (revision : String := "main")
@@ -239,7 +240,7 @@ def loadFromPretrained
     : IO PretrainedBundle := do
   let modelDir ← hub.resolvePretrainedDir source { revision := revision, cacheDir := cacheDir }
   let cfg0 ← KittenTTSConfig.loadFromPretrainedDir modelDir defaults
-  let loaded ← Model.loadAutoConfig s!"{modelDir}/model.safetensors" cfg0 (log := log)
+  let loaded ← Model.loadAutoConfig s!"{modelDir}/model.safetensors" device cfg0 log
   let cfg := loaded.cfg
   let vocab ← loadVocabFromPretrainedDir modelDir cfg.nToken
   let model := loaded.model

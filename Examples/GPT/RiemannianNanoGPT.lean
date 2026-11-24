@@ -186,16 +186,6 @@ private def deviceName (device : Device) : String :=
   | DeviceKind.CUDA n => s!"CUDA:{n}"
   | DeviceKind.CPU => "CPU"
 
-private def resolveDeviceFromEnv : IO Device := do
-  let requestedDevice? := (← IO.getEnv "TYR_DEVICE")
-  match requestedDevice?.map String.toLower with
-  | some "auto" => getBestDevice
-  | some "cuda" => Device.cuda 0
-  | some "mps" => Device.mps
-  | some "cpu" => pure Device.CPU
-  | some _ => pure Device.CPU
-  | none => pure Device.CPU
-
 private def defaultTrainConfig (device : Device) (blockSize : Nat) : TrainConfig := {
   maxIters := 5000
   evalInterval := 500
@@ -422,13 +412,15 @@ def runTrainingWithVal {nTrain nVal : Nat} (modelCfg : Config) (trainCfg : Train
 
 /-- Script-style entrypoint mirroring `Examples.TrainGPT.main`, but using
     the exact-VJP Riemannian optimizer path. -/
-def main : IO Unit := do
+def main (args : List String) : IO UInt32 := do
+  let ["--device", name] := args
+    | IO.eprintln "usage: RunRiemannianNanoGPT --device <cpu|mps|cuda>"; return 2
+  let device ← Device.acquireNamed name
   IO.println "Starting..."
   IO.println "=== Tyr Riemannian GPT Training ==="
   IO.println ""
   (← IO.getStdout).flush
 
-  let device ← resolveDeviceFromEnv
   IO.println s!"Using device: {deviceName device}"
   IO.println ""
 
@@ -494,5 +486,6 @@ def main : IO Unit := do
   IO.println "---"
   IO.println ""
   IO.println "Done!"
+  return 0
 
 end Examples.GPT.RiemannianNanoGPT

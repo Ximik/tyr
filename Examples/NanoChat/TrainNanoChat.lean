@@ -19,6 +19,7 @@
 -/
 import Tyr.Torch
 import Tyr.Distributed
+import Tyr.Pipeline
 import Examples.NanoChat.ModdedGPT
 import Tyr.DataLoader
 import Examples.NanoChat.ModdedTrain
@@ -38,7 +39,6 @@ structure TrainEnvState where
   rank? : Option Nat := none
   masterAddr? : Option String := none
   masterPort? : Option Nat := none
-  requestedDevice? : Option String := none
   deriving Repr
 
 /-- Resolve distributed/device env vars once into a typed structure. -/
@@ -48,18 +48,18 @@ def loadTrainEnvState : IO TrainEnvState := do
   let rank? := (← IO.getEnv "RANK").bind (·.toNat?)
   let masterAddr? := (← IO.getEnv "MASTER_ADDR")
   let masterPort? := (← IO.getEnv "MASTER_PORT").bind (·.toNat?)
-  let requestedDevice? := (← IO.getEnv "TYR_DEVICE").map String.toLower
   pure {
     localRank? := localRank?
     worldSize? := worldSize?
     rank? := rank?
     masterAddr? := masterAddr?
     masterPort? := masterPort?
-    requestedDevice? := requestedDevice?
   }
 
 /-- Parse command line arguments -/
 structure Args where
+  /-- Device to train on (`--device`, required) -/
+  device? : Option String := none
   /-- Path to training data -/
   dataPath : String := "data/fineweb10B"
   /-- Path to validation data -/
@@ -80,6 +80,7 @@ structure Args where
 def parseArgs (args : List String) : Args :=
   let rec go : List String → Args → Args
     | [], acc => acc
+    | "--device" :: name :: rest, acc => go rest { acc with device? := some name }
     | "--data" :: path :: rest, acc => go rest { acc with dataPath := path }
     | "--val" :: path :: rest, acc => go rest { acc with valPath := path }
     | "--checkpoint-dir" :: dir :: rest, acc => go rest { acc with checkpointDir := dir }
@@ -124,26 +125,6 @@ def deviceToString (device : Device) : String :=
   | DeviceKind.CPU => "CPU"
   | DeviceKind.CUDA n => s!"CUDA:{n}"
 
-/-- Resolve training device from TYR_DEVICE.
-    In distributed mode, CUDA ordinal follows LOCAL_RANK (per-node index). -/
-def resolveTrainingDevice (_rank localRank : Nat) (isDistributed : Bool) (env : TrainEnvState) : IO Device := do
-  let cudaOrdinal := if isDistributed then localRank else 0
-  let requested? := env.requestedDevice?
-  match requested? with
-  | some "cpu" => pure Device.CPU
-  | some "mps" => Device.mps
-  | some "cuda" => Device.cuda cudaOrdinal
-  | some "auto" | none =>
-    if isDistributed then
-      if ← cuda_is_available then Device.cuda cudaOrdinal else pure Device.CPU
-    else
-      getBestDevice
-  | some _ =>
-    if isDistributed then
-      if ← cuda_is_available then Device.cuda cudaOrdinal else pure Device.CPU
-    else
-      getBestDevice
-
 /-- Initialize distributed training if needed -/
 def initDistributedIfNeeded (env : TrainEnvState) : IO Bool := do
   let worldSize := getWorldSizeFromEnv env
@@ -172,7 +153,10 @@ def runTraining (args : Args) (env : TrainEnvState) : IO Unit := do
     else
       pure (0, 1)
   let localRank := env.localRank?.getD args.localRank
-  let trainDevice ← resolveTrainingDevice rank localRank isDistributed env
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")
+  let some deviceKind := DeviceKind.ofString? deviceName
+    | throw (IO.userError s!"unknown device '{deviceName}'")
+  let trainDevice ← torch.Pipeline.acquireTrainingDevice deviceKind localRank isDistributed
   let seed : UInt64 := 42 + rank.toUInt64
   manualSeed seed
   IO.println s!"Rank {rank}/{worldSize} local={localRank} device={deviceToString trainDevice}"

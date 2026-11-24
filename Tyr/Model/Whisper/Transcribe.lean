@@ -1218,7 +1218,7 @@ private def maybeAppendTailRescue
         else
           pure ((cur ++ " " ++ tailText).trimAscii.toString)
 
-def loadFromPretrainedDir (modelDir : String) : IO WhisperBundle := do
+def loadFromPretrainedDir (modelDir : String) (device : Device) : IO WhisperBundle := do
   let cfg ← WhisperConfig.loadFromPretrainedDir modelDir {}
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let preprocessor ←
@@ -1235,7 +1235,7 @@ def loadFromPretrainedDir (modelDir : String) : IO WhisperBundle := do
   let ⟨melBinsMatch⟩ ← if h : preprocessor.featureSize = cfg.numMelBins then pure (PLift.up h) else
     throw <| IO.userError
       s!"Whisper preprocessor feature_size {preprocessor.featureSize} does not match num_mel_bins {cfg.numMelBins}"
-  let ⟨device, dtype, model⟩ ← WhisperForConditionalGeneration.loadSharded modelDir cfg
+  let ⟨dtype, model⟩ ← WhisperForConditionalGeneration.loadSharded modelDir cfg device
   pure { cfg, device, dtype, model, tok, preprocessor, melBinsMatch }
 
 private def transcribeWavCore

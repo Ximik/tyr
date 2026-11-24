@@ -18,6 +18,18 @@ opaque cuda (index : Nat := 0) : IO Device :=
 opaque mps : IO Device :=
   throw (IO.userError "Device.mps requires the native runtime")
 
+/-- Acquire the placement `kind` describes; throws if its backend is unavailable. -/
+def acquire : DeviceKind → IO Device
+  | .CPU => pure .CPU
+  | .CUDA index => cuda index
+  | .MPS => mps
+
+/-- Acquire the placement a `DeviceKind.ofString?` spelling names. -/
+def acquireNamed (name : String) : IO Device :=
+  match DeviceKind.ofString? name with
+  | some kind => acquire kind
+  | none => throw (IO.userError s!"unknown device '{name}' (expected cpu, mps, cuda or cuda:<ordinal>)")
+
 end Device
 
 /-- Check if CUDA is available -/

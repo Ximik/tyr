@@ -67,7 +67,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 : Bool)
   for bf16 in #[false, true] do
     IO.FS.withTempDir fun dir => do
       writeCheckpoint dir bf16
-      let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
+      let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded dir.toString cfg .CPU
       LeanTest.assertEqual dtype.val (if bf16 then .BFloat16 else .Float32)
       LeanTest.assertEqual model.thinker.audioProjectionWeight.actualSpec.dtype dtype.val
       LeanTest.assertEqual model.thinker.audioProjectionBias.actualSpec.dtype dtype.val
@@ -86,14 +86,14 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 : Bool)
     IO.FS.withTempDir fun dir => do
       writeCheckpoint dir true (mismatchedDType := name)
       Tests.assertThrows (do
-        let _ ← Qwen3ASRForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
+        let _ ← Qwen3ASRForConditionalGeneration.loadSharded dir.toString cfg .CPU
         pure ())
 
 @[test] def testExactASRRejectsMalformedOptionalNorm : IO Unit :=
   IO.FS.withTempDir fun dir => do
     writeCheckpoint dir false (badOptionalShape := true)
     Tests.assertThrows (do
-      let _ ← Qwen3ASRForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
+      let _ ← Qwen3ASRForConditionalGeneration.loadSharded dir.toString cfg .CPU
       pure ())
 
 end Tests.Qwen3ASRWeights

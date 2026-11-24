@@ -129,7 +129,7 @@ let log : torch.Log.Handlers := {
   onWarn := fun msg => IO.eprintln s!"warning: {msg}"
   onError := fun msg => IO.eprintln s!"error: {msg}"
 }
-let bundle ← Model.loadFromPretrained source (log := log)
+let bundle ← Model.loadFromPretrained device source (log := log)
 ```
 
 ### Inspecting tensors and modules in the infoview

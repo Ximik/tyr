@@ -81,7 +81,7 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   }
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.numMelBins then pure (PLift.up h) else
     throw <| IO.userError s!"feature_size {pre.featureSize} is not num_mel_bins {cfg.numMelBins}"
-  let ⟨dtype, model⟩ ← WhisperForConditionalGeneration.loadShardedAt weights cfg {} device
+  let ⟨dtype, model⟩ ← WhisperForConditionalGeneration.loadSharded weights cfg device
   unless DType.ofString? request.dtype == some dtype.val do
     throw <| IO.userError s!"the checkpoint loads as {dtype.val}; the request asks for '{request.dtype}'"
   have : DType.RealFloating dtype.val := inferInstance

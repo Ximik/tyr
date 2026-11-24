@@ -26,7 +26,7 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let request : Request ← IO.ofExcept (fromJson? json)
   let dir := args.weights.toString
   let cfg ← KittenTTSConfig.loadFromPretrainedDir dir
-  let loaded ← Model.loadAutoConfig s!"{dir}/model.safetensors" cfg (device? := some device)
+  let loaded ← Model.loadAutoConfig s!"{dir}/model.safetensors" device cfg
   let vocab ← loadVocabFromPretrainedDir dir loaded.cfg.nToken
   let bundle : PretrainedBundle := {
     cfg := loaded.cfg, device := loaded.device, model := loaded.model, vocab, modelDir := dir,

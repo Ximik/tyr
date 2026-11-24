@@ -11,7 +11,7 @@ Character-level GPT training on Shakespeare, matching [nanoGPT](https://github.c
 **Data:** `data/shakespeare_char/{train,val}.bin` (nanoGPT format). Falls back to random tokens if data is missing.
 
 ```bash
-lake exe TrainGPT
+lake exe TrainGPT --device cpu
 ```
 
 Configs available in `Examples/GPT/GPT.lean`: `nanogpt_cpu_shakespeare`, `gpt2_micro`, `gpt2_mini`, `gpt2_small`.
@@ -47,13 +47,13 @@ Modded-nanogpt style distributed GPT training with NorMuon + DistAdam optimizers
 lake build TrainNanoChat
 
 # Single GPU
-.lake/build/bin/TrainNanoChat
+.lake/build/bin/TrainNanoChat --device cuda
 
 # Multi-GPU
-torchrun --nproc_per_node=8 .lake/build/bin/TrainNanoChat
+torchrun --nproc_per_node=8 .lake/build/bin/TrainNanoChat --device cuda
 
 # With options
-.lake/build/bin/TrainNanoChat --data data/fineweb10B --val data/fineweb_val \
+.lake/build/bin/TrainNanoChat --device cuda --data data/fineweb10B --val data/fineweb_val \
   --checkpoint-dir checkpoints/modded --debug
 ```
 
@@ -92,7 +92,7 @@ End-to-end Qwen3-TTS demo: Lean loads real talker/speaker weights, does Lean tok
 
 ```bash
 lake build Qwen3TTSEndToEnd
-lake exe Qwen3TTSEndToEnd \
+lake exe Qwen3TTSEndToEnd --device cuda \
   --model-dir weights/qwen3-tts \
   --text "Hello from Lean." \
   --wav-path output/qwen3tts.wav
@@ -121,42 +121,42 @@ Supported repo coverage:
 lake build Qwen35RunHF
 
 # Small smoke-test model
-lake exe Qwen35RunHF --source tiny-random/qwen3.5 --prompt "Hello from Lean."
+lake exe Qwen35RunHF --device cpu --source tiny-random/qwen3.5 --prompt "Hello from Lean."
 
 # Official Qwen repo
-lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B --prompt "Summarize dependent types."
+lake exe Qwen35RunHF --device cuda --source Qwen/Qwen3.5-0.8B --prompt "Summarize dependent types."
 
 # Base checkpoint variant
-lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B-Base --prompt "Summarize dependent types."
+lake exe Qwen35RunHF --device cuda --source Qwen/Qwen3.5-0.8B-Base --prompt "Summarize dependent types."
 
 # Qwen3.6 text-only from the multimodal root checkpoint
-lake exe Qwen35RunHF --source Qwen/Qwen3.6-35B-A3B --prompt "Summarize dependent types."
+lake exe Qwen35RunHF --device cuda --source Qwen/Qwen3.6-35B-A3B --prompt "Summarize dependent types."
 
 # Prefer GPU/MPS when available.
-lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B \
+lake exe Qwen35RunHF --device cuda --source Qwen/Qwen3.5-0.8B \
   --device mps --prompt "Summarize dependent types."
 
 # Multimodal with Apple system media path (ImageIO/AVFoundation).
 # Passing --image/--video auto-enables multimodal mode.
-lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B \
+lake exe Qwen35RunHF --device cuda --source Qwen/Qwen3.5-0.8B \
   --image input.jpg --prompt "Describe this image."
 
 # Multimodal video with temporal downsampling
-lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B \
+lake exe Qwen35RunHF --device cuda --source Qwen/Qwen3.5-0.8B \
   --video clip.mp4 --video-max-frames 64 --video-frame-stride 4 \
   --prompt "Summarize this clip."
 
 # Multimodal streaming decode
-lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B \
+lake exe Qwen35RunHF --device cuda --source Qwen/Qwen3.5-0.8B \
   --image input.jpg --prompt "Describe this image." --stream
 
 # Batched prompts + streaming
-lake exe Qwen35RunHF --source tiny-random/qwen3.5 --prompt-file prompts.txt \
+lake exe Qwen35RunHF --device cpu --source tiny-random/qwen3.5 --prompt-file prompts.txt \
   --batch-size 4 --stream
 ```
 
 Useful flags:
-- `--device <auto|cpu|mps|cuda[:n]>` execution device (default: `auto`; falls back to CPU if unavailable)
+- `--device <cpu|mps|cuda[:n]>` execution device (required; fails if unavailable)
 - `--revision <rev>` HF branch/tag/commit (default: `main`)
 - `--cache-dir <path>` override model download cache directory
 - `--prompt-file <path>` one prompt per line (batched decode input)
@@ -180,13 +180,13 @@ Supported collection coverage:
 lake build Qwen25OmniRunHF
 
 # 3B thinker text path
-lake exe Qwen25OmniRunHF --source Qwen/Qwen2.5-Omni-3B --prompt "Hello from Lean."
+lake exe Qwen25OmniRunHF --device cuda --source Qwen/Qwen2.5-Omni-3B --prompt "Hello from Lean."
 
 # 7B thinker text path
-lake exe Qwen25OmniRunHF --source Qwen/Qwen2.5-Omni-7B --prompt "Summarize dependent types."
+lake exe Qwen25OmniRunHF --device cuda --source Qwen/Qwen2.5-Omni-7B --prompt "Summarize dependent types."
 
 # Batched prompts
-lake exe Qwen25OmniRunHF --source Qwen/Qwen2.5-Omni-3B --prompt-file prompts.txt --batch-size 2
+lake exe Qwen25OmniRunHF --device cuda --source Qwen/Qwen2.5-Omni-3B --prompt-file prompts.txt --batch-size 2
 ```
 
 Useful flags:
@@ -212,44 +212,44 @@ Supported repo coverage:
 lake build Gemma4RunHF
 
 # Official Gemma 4 E4B
-lake exe Gemma4RunHF --source google/gemma-4-E4B \
+lake exe Gemma4RunHF --device cuda --source google/gemma-4-E4B \
   --prompt "Summarize dependent types."
 
 # Small E2B variant
-lake exe Gemma4RunHF --source google/gemma-4-E2B \
+lake exe Gemma4RunHF --device cuda --source google/gemma-4-E2B \
   --prompt "Write one sentence about Lean."
 
 # Larger dense checkpoint
-lake exe Gemma4RunHF --source google/gemma-4-31B \
+lake exe Gemma4RunHF --device cuda --source google/gemma-4-31B \
   --prompt "Summarize dependent types."
 
 # Streaming decode
-lake exe Gemma4RunHF --source google/gemma-4-E4B \
+lake exe Gemma4RunHF --device cuda --source google/gemma-4-E4B \
   --prompt "Write one sentence about Lean." --stream
 
 # Batched prompts
-lake exe Gemma4RunHF --source google/gemma-4-E4B \
+lake exe Gemma4RunHF --device cuda --source google/gemma-4-E4B \
   --prompt-file prompts.txt --batch-size 4
 
 # Single-image captioning
-lake exe Gemma4RunHF --source google/gemma-4-E2B-it \
+lake exe Gemma4RunHF --device cuda --source google/gemma-4-E2B-it \
   --image path/to/image.png \
   --prompt "Describe this image."
 
 # Multiple images with explicit placeholders
-lake exe Gemma4RunHF --source google/gemma-4-E2B-it \
+lake exe Gemma4RunHF --device cuda --source google/gemma-4-E2B-it \
   --image path/to/image.png \
   --image path/to/second.png \
   --prompt "Image A: <|image|> Image B: <|image|> Compare them briefly."
 
 # Larger multimodal checkpoint
-lake exe Gemma4RunHF --source google/gemma-4-26B-A4B-it \
+lake exe Gemma4RunHF --device cuda --source google/gemma-4-26B-A4B-it \
   --image path/to/image.png \
   --prompt "Describe this image."
 ```
 
 Useful flags:
-- `--device <auto|cpu|mps|cuda[:n]>` execution device (default: `auto`; falls back to CPU if unavailable)
+- `--device <cpu|mps|cuda[:n]>` execution device (required; fails if unavailable)
 - `--revision <rev>` HF branch/tag/commit (default: `main`)
 - `--cache-dir <path>` override model download cache directory
 - `--prompt-file <path>` one prompt per line (batched decode input)

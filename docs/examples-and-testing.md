@@ -117,10 +117,10 @@ The root module `Examples.lean` imports only library modules (GPT, NanoChat) —
 
 Shared infrastructure:
 
-- `Examples/ModelRunner.lean` — CLI/device/streaming helpers for the
-  pretrained-model demos: `resolveDevice : String → IO (Device × Option String)`
-  (parses `auto`/`cpu`/`mps`/`cuda[:n]`, warns and falls back to CPU),
-  `parseNatArg`, `loadPrompts`.
+- `Examples/ModelRunner.lean` — CLI/streaming helpers for the
+  pretrained-model demos: `deviceToString`, `parseNatArg`, `loadPrompts`.
+  Every example takes its device from `--device`, acquired with
+  `Device.acquireNamed`.
 - `Examples/GPT/GPT.lean` — the canonical dependently-typed model demo:
   `torch.gpt.Config` with presets `tiny_shakespeare` and
   `nanogpt_cpu_shakespeare`, and shape-indexed parameters such as
@@ -196,8 +196,8 @@ lake exe ffi_crash_probe                   # manual FFI failure-mode probe
 python3 scripts/test_inventory.py --build # build every required CPU suite
 lake env python3 scripts/test_inventory.py --run # run that same suite list
 
-lake exe TrainGPT                          # char-GPT on Shakespeare
-lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B --prompt "Summarize dependent types." --stream
+lake exe TrainGPT --device cpu             # char-GPT on Shakespeare
+lake exe Qwen35RunHF --device cpu --source Qwen/Qwen3.5-0.8B --prompt "Summarize dependent types." --stream
 ```
 
 ## What is covered vs uncovered

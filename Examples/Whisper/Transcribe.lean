@@ -6,6 +6,7 @@ open torch (TopK PosNat)
 namespace Examples.Whisper
 
 structure Args where
+  device? : Option String := none
   modelDir : String := "weights/whisper-base.en"
   wavPath : String := "MLKDream.wav"
   language : String := "en"
@@ -80,6 +81,7 @@ private def toDecodeOptions (args : Args) : IO WhisperDecodeOptions := do
 private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := do
   match xs with
   | [] => pure acc
+  | "--device" :: v :: rest => parseArgsLoop rest { acc with device? := some v }
   | "--model-dir" :: v :: rest =>
       parseArgsLoop rest { acc with modelDir := v }
   | "--source" :: v :: rest =>
@@ -126,6 +128,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       parseArgsLoop rest { acc with noTimestamps := false }
   | "--help" :: _ =>
       IO.println "Usage: lake exe WhisperTranscribe [options]"
+      IO.println "  --device <name>          cpu, mps, cuda or cuda:<n> (required)"
       IO.println "  --model-dir <path>       Whisper model directory (HF layout with config/tokenizer/safetensors)"
       IO.println "  --source <path>          Alias for --model-dir"
       IO.println "  --wav-path <path>        WAV file path"
@@ -158,7 +161,9 @@ def runMain (argv : List String) : IO UInt32 := do
   let args ← parseArgs argv
   if argv.contains "--help" then return 0
   let decodeOpts ← toDecodeOptions args
-  let bundle ← loadFromPretrainedDir args.modelDir
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")
+  let device ← torch.Device.acquireNamed deviceName
+  let bundle ← loadFromPretrainedDir args.modelDir device
   let out ←
     transcribeWav
       bundle.model

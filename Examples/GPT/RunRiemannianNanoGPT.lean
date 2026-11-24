@@ -1,4 +1,4 @@
 import Examples.GPT.RiemannianNanoGPT
 
-def main : IO Unit :=
-  Examples.GPT.RiemannianNanoGPT.main
+def main (args : List String) : IO UInt32 :=
+  Examples.GPT.RiemannianNanoGPT.main args

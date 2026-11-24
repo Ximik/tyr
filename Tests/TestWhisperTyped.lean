@@ -210,7 +210,7 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
   for bf16 in #[false, true] do
     IO.FS.withTempDir fun dir => do
       writeWhisperCheckpoint dir bf16
-      let ⟨storedDType, model⟩ ← WhisperForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
+      let ⟨storedDType, model⟩ ← WhisperForConditionalGeneration.loadSharded dir.toString cfg .CPU
       let dtype := if bf16 then DType.BFloat16 else .Float32
       LeanTest.assertEqual storedDType.val dtype
       LeanTest.assertEqual model.projOut.actualSpec.dtype dtype
@@ -226,7 +226,7 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
   IO.FS.withTempDir fun dir => do
     writeWhisperCheckpoint dir false true
     let rejected ← try
-      let _ ← WhisperForConditionalGeneration.loadSharded dir.toString cfg
+      let _ ← WhisperForConditionalGeneration.loadSharded dir.toString cfg .CPU
       pure false
     catch _ => pure true
     LeanTest.assertTrue rejected "malformed optional bias must not be treated as absent"
@@ -237,7 +237,7 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
     IO.FS.withTempDir fun dir => do
       writeWhisperCheckpoint dir true (mismatchedDType := name)
       let rejected ← try
-        let _ ← WhisperForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
+        let _ ← WhisperForConditionalGeneration.loadSharded dir.toString cfg .CPU
         pure false
       catch _ => pure true
       LeanTest.assertTrue rejected s!"inconsistent stored dtype must be rejected: {name}"

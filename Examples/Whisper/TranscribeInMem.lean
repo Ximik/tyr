@@ -8,11 +8,14 @@ open torch.whisper
 open torch.qwen3asr
 
 def main (argv : List String) : IO UInt32 := do
-  let modelDir := argv.getD 0 "weights/whisper-base.en"
-  let wavPath := argv.getD 1 "output/mlk_10s.wav"
+  let deviceName :: rest := argv
+    | IO.eprintln "usage: WhisperTranscribeInMem <device> [model_dir] [wav_path]"; return 2
+  let modelDir := rest.getD 0 "weights/whisper-base.en"
+  let wavPath := rest.getD 1 "output/mlk_10s.wav"
+  let device ← torch.Device.acquireNamed deviceName
 
   IO.println s!"Loading model from {modelDir}..."
-  let bundle ← loadFromPretrainedDir modelDir
+  let bundle ← loadFromPretrainedDir modelDir device
 
   IO.println s!"Loading WAV from {wavPath}..."
   let wav16k ← normalizeAudioTo16kFromWav wavPath

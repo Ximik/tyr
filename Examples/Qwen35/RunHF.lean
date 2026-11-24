@@ -31,7 +31,7 @@ structure Args where
   source : String := "tiny-random/qwen3.5"
   revision : String := "main"
   cacheDir : String := Hub.defaultCacheDir
-  device : String := "auto"
+  device? : Option String := none
   prompt : String := "Give a concise definition of a dependent type."
   promptFile : Option String := none
   imagePath : Option String := none
@@ -50,7 +50,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--source" :: v :: rest => parseArgsLoop rest { acc with source := v }
   | "--revision" :: v :: rest => parseArgsLoop rest { acc with revision := v }
   | "--cache-dir" :: v :: rest => parseArgsLoop rest { acc with cacheDir := v }
-  | "--device" :: v :: rest => parseArgsLoop rest { acc with device := v }
+  | "--device" :: v :: rest => parseArgsLoop rest { acc with device? := some v }
   | "--prompt" :: v :: rest => parseArgsLoop rest { acc with prompt := v }
   | "--prompt-file" :: v :: rest => parseArgsLoop rest { acc with promptFile := some v }
   | "--image" :: v :: rest => parseArgsLoop rest { acc with imagePath := some v }
@@ -72,7 +72,7 @@ private def printHelp : IO Unit := do
   IO.println "  --source <path-or-repo>      Local model dir or HF repo id (default: tiny-random/qwen3.5)"
   IO.println "  --revision <rev>             HF revision/branch/tag (default: main)"
   IO.println "  --cache-dir <path>           Local cache for downloaded files"
-  IO.println "  --device <auto|cpu|mps|cuda[:n]>  Execution device (default: auto)"
+  IO.println "  --device <cpu|mps|cuda[:n]>  Execution device (required)"
   IO.println "  --prompt <text>              Prompt text"
   IO.println "  --prompt-file <path>         One prompt per non-empty line"
   IO.println "  --image <path>               Rejected: the Apple media loader gives no image grid"
@@ -84,9 +84,9 @@ private def printHelp : IO Unit := do
   IO.println "  --enable-thinking            Use the Qwen3.5 thinking-enabled generation suffix"
   IO.println "  --debug-ids                  Print generated token ids alongside decoded text"
   IO.println "Examples:"
-  IO.println "  lake exe Qwen35RunHF --source tiny-random/qwen3.5 --stream"
-  IO.println "  lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B --prompt \"Write one sentence about Lean.\""
-  IO.println "  lake exe Qwen35RunHF --source tiny-random/qwen3.5 --prompt-file prompts.txt --batch-size 4"
+  IO.println "  lake exe Qwen35RunHF --device cpu --source tiny-random/qwen3.5 --stream"
+  IO.println "  lake exe Qwen35RunHF --device cuda --source Qwen/Qwen3.5-0.8B --prompt \"Write one sentence about Lean.\""
+  IO.println "  lake exe Qwen35RunHF --device cpu --source tiny-random/qwen3.5 --prompt-file prompts.txt --batch-size 4"
 
 private def encodePromptToIds
     (tok : tokenizer.qwen35.QwenTokenizer)
@@ -185,7 +185,8 @@ def runMain (argv : List String) : IO UInt32 := do
     printHelp
     return 0
 
-  let (device, deviceWarning?) ← resolveDevice args.device
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda[:n]>")
+  let device ← Device.acquireNamed deviceName
   let hasMedia := args.imagePath.isSome || args.videoPath.isSome
   let useMultimodal := args.multimodal || hasMedia
   if hasMedia && !args.multimodal then
@@ -196,9 +197,6 @@ def runMain (argv : List String) : IO UInt32 := do
     includeTokenizer := true
   }
   IO.println s!"Model directory: {modelDir}"
-  match deviceWarning? with
-  | some msg => IO.println msg
-  | none => pure ()
   IO.println s!"Using device: {deviceToString device}"
 
   let tok ← tokenizer.qwen35.loadTokenizer modelDir

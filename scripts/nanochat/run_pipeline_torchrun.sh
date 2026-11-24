@@ -57,7 +57,7 @@ else
 fi
 mkdir -p "${NANOCHAT_DIR}"
 
-if [[ "${TYR_DEVICE:-cuda}" == "cuda" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+if command -v nvidia-smi >/dev/null 2>&1; then
   GPU_COUNT="$(nvidia-smi --query-gpu=count --format=csv,noheader 2>/dev/null | head -n 1 || echo 0)"
   if [[ "${GPU_COUNT}" =~ ^[0-9]+$ ]] && [[ "${GPU_COUNT}" -gt 0 ]] && [[ "${NPROC_PER_NODE}" -gt "${GPU_COUNT}" ]]; then
     echo "error: requested NPROC_PER_NODE=${NPROC_PER_NODE}, but only ${GPU_COUNT} CUDA devices are visible" >&2
@@ -205,6 +205,5 @@ echo "PRETRAIN_TEXT_COLUMN=${PRETRAIN_TEXT_COLUMN} PRETRAIN_TOKENIZER_BATCH_SIZE
 echo "AUTO_REUSE_CACHE=${AUTO_REUSE_CACHE:-1}"
 echo "REQUIRE_BIN_DATA_PATHS=${REQUIRE_BIN_DATA_PATHS}"
 
-exec env TYR_DEVICE="${TYR_DEVICE:-cuda}" \
-  "${TORCHRUN_BIN}" --standalone --nnodes=1 --nproc_per_node="${NPROC_PER_NODE}" --no_python \
-  "${PIPELINE_BIN}"
+exec "${TORCHRUN_BIN}" --standalone --nnodes=1 --nproc_per_node="${NPROC_PER_NODE}" --no_python \
+  "${PIPELINE_BIN}" --device cuda

@@ -29,6 +29,5 @@ fi
 echo "Running TrainNanoChat with torchrun (${NPROC_PER_NODE} processes)"
 echo "Torchrun: ${TORCHRUN_BIN}"
 
-exec env TYR_DEVICE="${TYR_DEVICE:-cuda}" \
-  "${TORCHRUN_BIN}" --standalone --nnodes=1 --nproc_per_node="${NPROC_PER_NODE}" --no_python \
-  ./.lake/build/bin/TrainNanoChat "$@"
+exec "${TORCHRUN_BIN}" --standalone --nnodes=1 --nproc_per_node="${NPROC_PER_NODE}" --no_python \
+  ./.lake/build/bin/TrainNanoChat --device cuda "$@"

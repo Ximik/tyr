@@ -32,9 +32,9 @@ run() {
   local iters="$1"
   local log="$2"
   env CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES}" \
-    TYR_DEVICE="${TYR_DEVICE:-cuda}" \
     "${TORCHRUN_BIN}" --standalone --nnodes=1 --nproc_per_node="${NPROC_PER_NODE}" --no_python \
     ./.lake/build/bin/TrainNanoChat \
+    --device cuda \
     --debug \
     --iterations "${iters}" \
     --data "${DATA_PATH}" \
