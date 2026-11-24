@@ -891,16 +891,25 @@ def runValidation (state : TrainState (device := device) cfg) (hp : Hyperparamet
       bestValLoss := if newBest then valResult.loss else state.bestValLoss
     }
 
-private def stepMuonGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
-    (params grads : Array (Tensor σ)) (states : Array (NorMuon.ParamState σ))
-    (cfg : NorMuon.Config) (hRank : 2 ≤ σ.shape.size := by simp) :
-    IO (Array (Tensor σ) × Array (NorMuon.ParamState σ)) := do
-  if h : grads.size = params.size ∧ states.size = params.size then
-    let (params', states') ← NorMuon.stepDistributedGroup
-      params.toVector (h.1 ▸ grads.toVector) (h.2 ▸ states.toVector) cfg (hRank := hRank)
-    pure (params'.toArray, states'.toArray)
-  else
-    throw <| IO.userError "Muon group parameters, gradients and states differ in length"
+/-- Blocks whose attention has both parameters and gradients, with their Muon
+    states; these form the attention parameter groups. -/
+private def attentionEntries (cfg : moddedGpt.Config)
+    (params grads : ModdedGPTParams (device := device) cfg) (state : DualParamState (device := device) cfg) :
+    Array (Fin cfg.nLayer ×
+      CausalSelfAttention (device := device) cfg.modelDim cfg.headDim cfg.nHead ×
+      CausalSelfAttention (device := device) cfg.modelDim cfg.headDim cfg.nHead ×
+      MuonAttnState (device := device) cfg) :=
+  (Array.finRange cfg.nLayer).filterMap fun i =>
+    match params.blocks[i].attn, grads.blocks[i].attn with
+    | some attn, some attnGrad =>
+      let attnState := state.blocks[i].attn.getD {
+        wQ := NorMuon.initParamState attn.wQ
+        wK := NorMuon.initParamState attn.wK
+        wV := NorMuon.initParamState attn.wV
+        wO := NorMuon.initParamState attn.wO
+      }
+      some (i, attn, attnGrad, attnState)
+    | _, _ => none
 
 /-- Distributed training step with gradient accumulation over micro-batches. -/
 def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
@@ -987,125 +996,52 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let (scalars', scalarState') ← runAdamStep
     params.scalars.values grads.scalars.values optState.dualState.scalars lrUnembed
 
-  let (smearGateWs, smearGateStates) ← stepMuonGroup
-    #[params.smearGate.weight]
-    #[grads.smearGate.weight]
-    #[optState.dualState.smearGate]
-    muonCfg
-  let smearGateW' := smearGateWs[0]?.getD params.smearGate.weight
-  let smearGateState' := smearGateStates[0]?.getD optState.dualState.smearGate
+  let (smearGateWs, smearGateStates) ← NorMuon.stepDistributedGroup
+    #v[params.smearGate.weight] #v[grads.smearGate.weight] #v[optState.dualState.smearGate] muonCfg
+  let smearGateW' := smearGateWs[0]
+  let smearGateState' := smearGateStates[0]
 
-  let mut cFcParams : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut cFcGrads : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut cFcStates : Array (NorMuon.ParamState ⟨#[4 * cfg.modelDim, cfg.modelDim], .Float32, device⟩) := #[]
-  let mut cProjParams : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut cProjGrads : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut cProjStates : Array (NorMuon.ParamState ⟨#[4 * cfg.modelDim, cfg.modelDim], .Float32, device⟩) := #[]
+  let (cFcParams', cFcStates') ← NorMuon.stepDistributedGroup (σ := ⟨#[4 * cfg.modelDim, cfg.modelDim], .Float32, device⟩)
+    (params.blocks.map (·.mlp.cFc)) (grads.blocks.map (·.mlp.cFc))
+    (optState.dualState.blocks.map (·.cFc)) muonCfg
+  let (cProjParams', cProjStates') ← NorMuon.stepDistributedGroup (σ := ⟨#[4 * cfg.modelDim, cfg.modelDim], .Float32, device⟩)
+    (params.blocks.map (·.mlp.cProj)) (grads.blocks.map (·.mlp.cProj))
+    (optState.dualState.blocks.map (·.cProj)) muonCfg
 
-  let mut qParams : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut qGrads : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut qStates : Array (NorMuon.ParamState ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, device⟩) := #[]
-  let mut kParams : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut kGrads : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut kStates : Array (NorMuon.ParamState ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, device⟩) := #[]
-  let mut vParams : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut vGrads : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32, device := device }) := #[]
-  let mut vStates : Array (NorMuon.ParamState ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, device⟩) := #[]
-  let mut oParams : Array (Tensor { shape := #[cfg.modelDim, cfg.nHead * cfg.headDim], dtype := .Float32, device := device }) := #[]
-  let mut oGrads : Array (Tensor { shape := #[cfg.modelDim, cfg.nHead * cfg.headDim], dtype := .Float32, device := device }) := #[]
-  let mut oStates : Array (NorMuon.ParamState ⟨#[cfg.modelDim, cfg.nHead * cfg.headDim], .Float32, device⟩) := #[]
+  let attnEntries := attentionEntries cfg params grads optState.dualState
+  let attnParams := attnEntries.toVector.map (·.2.1)
+  let attnGrads := attnEntries.toVector.map (·.2.2.1)
+  let attnStates := attnEntries.toVector.map (·.2.2.2)
+  let (qParams', qStates') ← NorMuon.stepDistributedGroup (σ := ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, device⟩)
+    (attnParams.map (·.wQ)) (attnGrads.map (·.wQ)) (attnStates.map (·.wQ)) muonCfg
+  let (kParams', kStates') ← NorMuon.stepDistributedGroup (σ := ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, device⟩)
+    (attnParams.map (·.wK)) (attnGrads.map (·.wK)) (attnStates.map (·.wK)) muonCfg
+  let (vParams', vStates') ← NorMuon.stepDistributedGroup (σ := ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, device⟩)
+    (attnParams.map (·.wV)) (attnGrads.map (·.wV)) (attnStates.map (·.wV)) muonCfg
+  let (oParams', oStates') ← NorMuon.stepDistributedGroup (σ := ⟨#[cfg.modelDim, cfg.nHead * cfg.headDim], .Float32, device⟩)
+    (attnParams.map (·.wO)) (attnGrads.map (·.wO)) (attnStates.map (·.wO)) muonCfg
 
-  for h : i in [:cfg.nLayer] do
-    let block := params.blocks[i]'h.upper
-    let blockGrad := grads.blocks[i]'h.upper
-    let blockState := optState.dualState.blocks[i]'h.upper
-
-    cFcParams := cFcParams.push block.mlp.cFc
-    cFcGrads := cFcGrads.push blockGrad.mlp.cFc
-    cFcStates := cFcStates.push blockState.cFc
-    cProjParams := cProjParams.push block.mlp.cProj
-    cProjGrads := cProjGrads.push blockGrad.mlp.cProj
-    cProjStates := cProjStates.push blockState.cProj
-
-    match block.attn, blockGrad.attn with
-    | some attn, some attnGrad =>
-      let attnState := blockState.attn.getD {
-        wQ := NorMuon.initParamState attn.wQ
-        wK := NorMuon.initParamState attn.wK
-        wV := NorMuon.initParamState attn.wV
-        wO := NorMuon.initParamState attn.wO
-      }
-      qParams := qParams.push attn.wQ
-      qGrads := qGrads.push attnGrad.wQ
-      qStates := qStates.push attnState.wQ
-      kParams := kParams.push attn.wK
-      kGrads := kGrads.push attnGrad.wK
-      kStates := kStates.push attnState.wK
-      vParams := vParams.push attn.wV
-      vGrads := vGrads.push attnGrad.wV
-      vStates := vStates.push attnState.wV
-      oParams := oParams.push attn.wO
-      oGrads := oGrads.push attnGrad.wO
-      oStates := oStates.push attnState.wO
-    | _, _ => pure ()
-
-  let (qParams', qStates') ← stepMuonGroup qParams qGrads qStates muonCfg
-  let (kParams', kStates') ← stepMuonGroup kParams kGrads kStates muonCfg
-  let (vParams', vStates') ← stepMuonGroup vParams vGrads vStates muonCfg
-  let (oParams', oStates') ← stepMuonGroup oParams oGrads oStates muonCfg
-  let (cFcParams', cFcStates') ← stepMuonGroup cFcParams cFcGrads cFcStates muonCfg
-  let (cProjParams', cProjStates') ← stepMuonGroup cProjParams cProjGrads cProjStates muonCfg
-
-  let (newPairs, _) := ((Vector.finRange cfg.nLayer).mapM (m := StateM Nat) fun idx => do
-    let i := idx.val
-    let block := params.blocks[idx]
-    let blockGrad := grads.blocks[idx]
-    let attnCursor ← get
-    let blockState := optState.dualState.blocks[idx]
-    let cFc' := cFcParams'[i]?.getD block.mlp.cFc
-    let cProj' := cProjParams'[i]?.getD block.mlp.cProj
-    let cFcState' := cFcStates'[i]?.getD (NorMuon.initParamState cFc')
-    let cProjState' := cProjStates'[i]?.getD (NorMuon.initParamState cProj')
-    let (attn', attnState', nextAttnCursor) :=
-      match block.attn, blockGrad.attn with
-      | some attn, some _ =>
-        if attnCursor < qParams'.size then
-          let wQ' := qParams'[attnCursor]?.getD attn.wQ
-          let wK' := kParams'[attnCursor]?.getD attn.wK
-          let wV' := vParams'[attnCursor]?.getD attn.wV
-          let wO' := oParams'[attnCursor]?.getD attn.wO
-          let wQState' := qStates'[attnCursor]?.getD (NorMuon.initParamState wQ')
-          let wKState' := kStates'[attnCursor]?.getD (NorMuon.initParamState wK')
-          let wVState' := vStates'[attnCursor]?.getD (NorMuon.initParamState wV')
-          let wOState' := oStates'[attnCursor]?.getD (NorMuon.initParamState wO')
-          let newAttn : CausalSelfAttention (device := device) cfg.modelDim cfg.headDim cfg.nHead := {
-            wQ := wQ'
-            wK := wK'
-            wV := wV'
-            wO := wO'
-          }
-          let newAttnState : MuonAttnState (device := device) cfg := {
-            wQ := wQState'
-            wK := wKState'
-            wV := wVState'
-            wO := wOState'
-          }
-          (some newAttn, some newAttnState, attnCursor + 1)
-        else
-          (block.attn, blockState.attn, attnCursor)
-      | none, _ => (none, none, attnCursor)
-      | _, none => (block.attn, blockState.attn, attnCursor)
-    set nextAttnCursor
+  let newPairs := (Vector.finRange cfg.nLayer).map fun i =>
+    let block := params.blocks[i]
+    let blockState := optState.dualState.blocks[i]
+    let (attn', attnState') :
+        Option (CausalSelfAttention (device := device) cfg.modelDim cfg.headDim cfg.nHead) ×
+          Option (MuonAttnState (device := device) cfg) :=
+      match attnEntries.findFinIdx? (·.1 == i) with
+      | some j =>
+        (some { wQ := qParams'[j], wK := kParams'[j], wV := vParams'[j], wO := oParams'[j] },
+          some { wQ := qStates'[j], wK := kStates'[j], wV := vStates'[j], wO := oStates'[j] })
+      | none => if block.attn.isSome then (block.attn, blockState.attn) else (none, none)
     let newBlock : Block (device := device) cfg.modelDim cfg.headDim cfg.nHead := {
       attn := attn'
-      mlp := { cFc := cFc', cProj := cProj' }
+      mlp := { cFc := cFcParams'[i], cProj := cProjParams'[i] }
     }
     let newBlockState : MuonBlockState (device := device) cfg := {
       attn := attnState'
-      cFc := cFcState'
-      cProj := cProjState'
+      cFc := cFcStates'[i]
+      cProj := cProjStates'[i]
     }
-    pure (newBlock, newBlockState)).run 0
+    (newBlock, newBlockState)
   let newBlocks := newPairs.map (·.1)
   let newBlockStates := newPairs.map (·.2)
 
