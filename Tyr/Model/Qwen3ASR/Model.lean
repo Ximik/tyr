@@ -395,7 +395,7 @@ private def initLayerKVCaches {batch : Nat}
     [DType.ConstantSupported dtype device]
     (h : 0 < maxLen := by omega)
     : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen 0) :=
-  m.textModel.layers.map (fun _ =>
+  m.textModel.layers.toArray.map (fun _ =>
     qwen.QwenAttention.initKVCache
       maxLen
       (batch := batch)
@@ -416,11 +416,8 @@ private def decodeStepFromEmbedWithCache {batch maxLen len : Nat}
   let mut hidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := tokenEmbed
   let mut nextCaches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen (len + 1)) := Array.mkEmpty caches.size
 
-  for i in [:m.textModel.layers.size] do
-    let layer ←
-      match m.textModel.layers[i]? with
-      | some l => pure l
-      | none => throw <| IO.userError s!"missing thinker text layer at index {i}"
+  for h : i in [:m.textModel.layers.size] do
+    let layer := m.textModel.layers[i]'h.upper
     let cache ←
       match caches[i]? with
       | some c => pure c

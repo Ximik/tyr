@@ -24,7 +24,7 @@ structure Qwen3Model (cfg : QwenConfig) (dtype : DType := .Float32) where
   /-- Token embeddings: [vocab_size, hidden_size] -/
   embed_tokens : Tensor { device := device, shape := #[cfg.vocab_size, cfg.hidden_size], dtype := dtype }
   /-- Transformer layers -/
-  layers : Array (QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size dtype)
+  layers : Vector (QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size dtype) cfg.num_hidden_layers
   /-- Final layer norm -/
   norm : RMSNorm (device := device) cfg.hidden_size dtype
   deriving TensorStruct
@@ -45,7 +45,7 @@ def init (cfg : QwenConfig) (dtype : DType := .Float32) (device : Device := .CPU
   let embed_tokens ← Tensor.parameter (Tensor.mulScalar emb std)
 
   -- Initialize layers
-  let layers ← Array.ofFnM (n := cfg.num_hidden_layers) fun _ =>
+  let layers ← Vector.ofFnM fun _ =>
     QwenLayer.init (device := device) cfg.hidden_size cfg.num_attention_heads
       cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size cfg.rms_norm_eps dtype
 

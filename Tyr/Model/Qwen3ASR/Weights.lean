@@ -184,10 +184,8 @@ private def loadTextModelSharded (modelDir : String) (cfg : TextConfig)
     (dtype : DType) (cast : Bool) (device : Device := .CPU) : IO (qwen.Qwen3Model (device := device) (TextConfig.toQwenConfig cfg) dtype) := do
   let embedTokens ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir "thinker.model.embed_tokens.weight"
     #[cfg.vocabSize, cfg.hiddenSize]
-  let mut layers : Array (qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype) := #[]
-  for i in [:cfg.numHiddenLayers] do
-    let layer ← loadQwenLayerSharded (dtype := dtype) (cast := cast) (device := device) modelDir i cfg
-    layers := layers.push layer
+  let layers ← Vector.ofFnM fun (i : Fin cfg.numHiddenLayers) =>
+    loadQwenLayerSharded (dtype := dtype) (cast := cast) (device := device) modelDir i cfg
   let norm ← loadRMSNormSharded (dtype := dtype) (cast := cast) (device := device) modelDir "thinker.model.norm" cfg.hiddenSize cfg.rmsNormEps
   pure {
     embed_tokens := Tensor.detach embedTokens

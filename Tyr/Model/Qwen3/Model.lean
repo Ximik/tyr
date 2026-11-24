@@ -129,7 +129,7 @@ private def initLayerKVCaches {batch : Nat}
     (device : Device)
     (h : 0 < maxLen := by omega)
     : Array (LayerKVCache (device := device) cfg batch maxLen 0) :=
-  m.model.layers.map (fun _ =>
+  m.model.layers.toArray.map (fun _ =>
     qwen.QwenAttention.initKVCache
       maxLen
       (batch := batch)
@@ -150,11 +150,8 @@ private def decodeStepFromEmbedWithCache {batch maxLen len : Nat}
   let mut hidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := tokenEmbed
   let mut nextCaches : Array (LayerKVCache (device := device) cfg batch maxLen (len + 1)) := Array.mkEmpty caches.size
 
-  for i in [:m.model.layers.size] do
-    let layer ←
-      match m.model.layers[i]? with
-      | some l => pure l
-      | none => throw <| IO.userError s!"missing Qwen3 layer at index {i}"
+  for h : i in [:m.model.layers.size] do
+    let layer := m.model.layers[i]'h.upper
     let cache ←
       match caches[i]? with
       | some c => pure c

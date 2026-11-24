@@ -21,7 +21,6 @@ variable {device : Device}
 structure QwenFluxEmbedder (cfg : QwenConfig) (max_seq : Nat) where
   /-- The Qwen3 model -/
   model : Qwen3Model (device := device) cfg
-  layersSize : model.layers.size = cfg.num_hidden_layers
   /-- RoPE cache for position embeddings -/
   ropeCache : RoPECache (device := device) max_seq cfg.half_head_dim
   /-- Decoder layers whose outputs are concatenated, 0-indexed -/
@@ -30,19 +29,17 @@ structure QwenFluxEmbedder (cfg : QwenConfig) (max_seq : Nat) where
 namespace QwenFluxEmbedder
 
 /-- Create a text embedder from a Qwen3 model; `outputLayers` must be nonempty
-    and name layers of `cfg`, and the model must have `cfg.num_hidden_layers` layers. -/
+    and name layers of `cfg`. -/
 def fromModel (cfg : QwenConfig) (max_seq : Nat) (model : Qwen3Model (device := device) cfg)
     (outputLayers : Array Nat)
     : IO (QwenFluxEmbedder (device := device) cfg max_seq) := do
-  let ⟨layersSize⟩ ← if h : model.layers.size = cfg.num_hidden_layers then pure (PLift.up h) else
-    throw <| IO.userError s!"the model has {model.layers.size} layers, the config {cfg.num_hidden_layers}"
   if outputLayers.isEmpty then
     throw <| IO.userError "no output layers"
   let outputLayers ← outputLayers.mapM fun i =>
     if h : i < cfg.num_hidden_layers then pure (⟨i, h⟩ : Fin cfg.num_hidden_layers) else
       throw <| IO.userError s!"output layer {i} is not below num_hidden_layers = {cfg.num_hidden_layers}"
   let ropeCache ← RoPECache.init (device := device) max_seq cfg.half_head_dim cfg.rope_theta
-  pure { model, layersSize, ropeCache, outputLayers }
+  pure { model, ropeCache, outputLayers }
 
 /-- Concatenate equal-spec tensors along `dim`, validating the runtime
     result against the claimed output shape. -/
@@ -70,7 +67,7 @@ def encodeMasked {batch seq : Nat} (cfg : QwenConfig) (max_seq : Nat)
     (fun h layer => layer.forwardMasked cfg.headsValid.2.2 h cos sin attn_mask true)
     (Tensor.embedding input_ids embedder.model.embed_tokens) embedder.model.layers.toList
   have hStates : states.length = cfg.num_hidden_layers + 1 := by
-    simp [states, List.length_scanl, embedder.layersSize]
+    simp [states, List.length_scanl]
   let selected := embedder.outputLayers.map fun i => states[i.val + 1]'(by omega)
   catAlong selected 2 #[batch, seq, embedder.outputLayers.size * cfg.hidden_size]
 
