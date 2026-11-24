@@ -98,9 +98,7 @@ private def loadVisionModel (src : Source) (cfg : VisionConfig)
 
   let posEmbed ← src.load (← src.resolve (visionNameCandidates "model.visual.pos_embed.weight")) #[cfg.num_position_embeddings, cfg.hidden_size] device
 
-  let mut blocks : Array (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := #[]
-  for i in [:cfg.depth] do
-    blocks := blocks.push (← loadVisionBlock src cfg i device dtype)
+  let blocks ← Vector.ofFnM fun (i : Fin cfg.depth) => loadVisionBlock src cfg i device dtype
 
   let mergeUnit := VisionConfig.mergeUnit cfg
   let mergedHidden := cfg.hidden_size * mergeUnit
