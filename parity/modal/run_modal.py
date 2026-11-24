@@ -90,7 +90,7 @@ def build_image() -> modal.Image:
         modal.Image.from_registry(BASE_IMAGE, add_python="3.12")
         # The base image's entrypoint prints a banner and a missing-driver warning on CPU machines.
         .entrypoint([])
-        .apt_install("ca-certificates", "git", "curl", "unzip", "make", "g++", "rsync")
+        .apt_install("ca-certificates", "git", "curl", "unzip", "make", "g++")
         .run_commands("curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh"
                       " | sh -s -- -y --default-toolchain none")
         .env({"PATH": "/root/.elan/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"})
@@ -115,9 +115,10 @@ def sandbox(command: str, mount: str, **options) -> modal.Sandbox:
 
 
 def checkout(sha: str) -> str:
-    """The command that copies the tree built for `sha` into the checkout. The
-    image's `external/` is not in the build volume."""
-    return f"rsync -a {BUILD}/builds/{sha}/ {CHECKOUT}/"
+    """The command that unpacks the tree built for `sha` into the checkout. The
+    image's `external/` is not in the archive. A Volume reads one large file far
+    faster than thousands of small ones, so a build is stored as one tar file."""
+    return f"tar -xf {BUILD}/builds/{sha}.tar -C {CHECKOUT}"
 
 
 def wait(run: modal.Sandbox, label: str) -> int:
@@ -131,21 +132,19 @@ def wait(run: modal.Sandbox, label: str) -> int:
 
 def build(sha: str, url: str, cache: modal.Volume, **options) -> int:
     """Build `sha` from the tree of the last stored build and store the result
-    under `builds/<sha>`, then point `latest` at it. Probe build failures do
+    as `builds/<sha>.tar`, then point `latest` at it. Probe build failures do
     not fail this step: `run.py` records them per test."""
     builds = f"{BUILD}/builds"
     script = " && ".join([
         f"latest=$(cat {BUILD}/latest 2>/dev/null || true)",
-        f'if [ -n "$latest" ] && [ -d {builds}/$latest ]; then rsync -a {builds}/$latest/ ./; fi',
+        f'if [ -n "$latest" ] && [ -f {builds}/$latest.tar ]; then tar -xf {builds}/$latest.tar; fi',
         "if [ ! -d .git ]; then git init -q; fi",
         f"git fetch -q --depth 1 {url} {sha}",
         "git checkout -q --force --detach FETCH_HEAD",
         "{ parity/modal/build.sh || echo 'some probes failed to build'; }",
-        f"rm -rf {builds}/{sha}.partial",
         f"mkdir -p {builds}",
-        f"rsync -a --exclude=/external ./ {builds}/{sha}.partial/",
-        f"rm -rf {builds}/{sha}",
-        f"mv {builds}/{sha}.partial {builds}/{sha}",
+        f"tar -cf {builds}/{sha}.tar.partial --exclude=./external .",
+        f"mv {builds}/{sha}.tar.partial {builds}/{sha}.tar",
         f"echo {sha} > {BUILD}/latest.partial",
         f"mv {BUILD}/latest.partial {BUILD}/latest",
         f"(cd {builds} && ls -1t | grep -v '\\.partial$' | tail -n +{KEEP_BUILDS + 1} | xargs -r rm -rf)",
