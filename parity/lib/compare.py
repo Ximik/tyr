@@ -123,9 +123,9 @@ class IntsEqual:
 
 @dataclass(frozen=True)
 class ListsEqual:
-    """Each named list of integer lists in both `result.json` files is the same,
-    item by item; on a difference, how many items differ and, for the first, its
-    index, the first differing position and both lengths."""
+    """Each named list of integer lists or strings in both `result.json` files is
+    the same, item by item; on a difference, how many items differ and, for the
+    first, its index, the first differing position and both lengths."""
 
     keys: tuple[str, ...]
     name: str = "lists"

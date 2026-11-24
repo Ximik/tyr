@@ -1,7 +1,7 @@
 import json
 
 from lib import audio, lm, probe
-from lib.compare import LmTokens, TensorsClose
+from lib.compare import IntsEqual, LmTokens, TensorsClose
 from lib.test import Test
 
 TEST = Test(
@@ -15,6 +15,7 @@ TEST = Test(
 )
 
 CHECKS = [
+    IntsEqual(keys=("prompt",)),
     TensorsClose(atol={"mel": 1e-4, "encoder": 1e-3}),
     LmTokens(margin=1e-3, logits_atol=1e-3),
 ]
@@ -64,7 +65,7 @@ def reference(case, weights, device, dtype, out):
 
 
 def tyr(case, weights, device, dtype, out):
-    ref = json.loads((out.parent / "reference" / "result.json").read_text())
-    request = {"dtype": dtype, "audio": str(audio.case_audio(case)), "prompt": ref["prompt"],
-               "max_new_tokens": lm.STEPS, "forced": ref["tokens"][0]}
+    forced = json.loads((out.parent / "reference" / "result.json").read_text())["tokens"][0]
+    request = {"dtype": dtype, "audio": str(audio.case_audio(case)), "language": json.loads(case.read_text())["language"],
+               "max_new_tokens": lm.STEPS, "forced": forced}
     probe.run(TEST.probe, request, weights, device, out)
