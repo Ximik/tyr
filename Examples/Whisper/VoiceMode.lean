@@ -24,6 +24,7 @@ namespace Examples.Whisper.VoiceMode
 -- ============================================================================
 
 structure Args where
+  device? : Option String := none
   modelDir : String := "weights/whisper-base.en"
   language : String := "en"
   maxNewTokens : Option Nat := some 128
@@ -79,6 +80,7 @@ private def parseNatArg (name : String) (v : String) : IO Nat :=
 private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := do
   match xs with
   | [] => pure acc
+  | "--device" :: v :: rest => parseArgsLoop rest { acc with device? := some v }
   | "--model-dir" :: v :: rest =>
       parseArgsLoop rest { acc with modelDir := v }
   | "--source" :: v :: rest =>
@@ -112,6 +114,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       IO.println ""
       IO.println "Interactive voice mode for Whisper ASR."
       IO.println ""
+      IO.println "  --device <name>          cpu, mps, cuda or cuda:<n> (required)"
       IO.println "  --model-dir <path>         Whisper model directory (HF layout)"
       IO.println "  --source <path>            Alias for --model-dir"
       IO.println "  --language <code>          Language code (default: en)"
@@ -310,7 +313,9 @@ def runMain (argv : List String) : IO UInt32 := do
   }
 
   IO.println "Loading Whisper model..."
-  let bundle ← loadFromPretrainedDir args.modelDir
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")
+  let device ← torch.Device.acquireNamed deviceName
+  let bundle ← loadFromPretrainedDir args.modelDir device
   IO.println s!"Model loaded ({args.modelDir})"
   IO.println s!"Language: {args.language}, continuous: {args.continuous}"
   IO.println ""

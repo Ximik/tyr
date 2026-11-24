@@ -18,6 +18,7 @@ private def UseCase.toString : UseCase → String
   | .conversation => "conversation"
 
 structure Args where
+  device? : Option String := none
   source : String := "weights/qwen3-asr-0.6b"
   revision : String := "main"
   cacheDir : String := "~/.cache/huggingface/tyr-models"
@@ -75,6 +76,7 @@ private def parseFloatArg (name : String) (v : String) : IO Float :=
 private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := do
   match xs with
   | [] => pure acc
+  | "--device" :: v :: rest => parseArgsLoop rest { acc with device? := some v }
   | "--source" :: v :: rest => parseArgsLoop rest { acc with source := v }
   | "--model-dir" :: v :: rest => parseArgsLoop rest { acc with source := v }
   | "--revision" :: v :: rest => parseArgsLoop rest { acc with revision := v }
@@ -113,6 +115,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       parseArgsLoop rest { acc with simpleOutput := true }
   | "--help" :: _ =>
       IO.println "Usage: lake exe Qwen3ASRLiveMic [options]"
+      IO.println "  --device <name>          cpu, mps, cuda or cuda:<n> (required)"
       IO.println "  --source <path-or-repo>  Local model dir or HF repo id"
       IO.println "  --model-dir <path>       Alias for --source (backward compatible)"
       IO.println "  --revision <rev>         HF revision/branch/tag (default: main)"
@@ -275,7 +278,9 @@ def runMain (argv : List String) : IO UInt32 := do
   let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
     throw (IO.userError s!"preprocessor feature_size {pre.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
-  let ⟨_device, _dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")
+  let device ← torch.Device.acquireNamed deviceName
+  let ⟨_dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg device
 
   let hopSamples := toSamples args.hopSec
   let silenceSamples := toSamples args.silenceSec

@@ -45,11 +45,6 @@ def parseArgs (argv : List String) : Except String Args := do
     | throw s!"invalid --device '{device}'"
   pure { request := ← get "--request", weights := ← get "--weights", device := kind, out := ← get "--out" }
 
-def acquire : DeviceKind → IO Device
-  | .CPU => pure .CPU
-  | .CUDA index => Device.cuda index
-  | .MPS => Device.mps
-
 /-- Parse the command line, run `body` on the acquired device and the parsed
 request, and write its output. -/
 def run (argv : List String) (body : Args → Device → Json → IO Output) : IO UInt32 := do
@@ -58,7 +53,7 @@ def run (argv : List String) (body : Args → Device → Json → IO Output) : I
     | .error message =>
       IO.eprintln s!"{message}\nusage: --request <file> --weights <dir> --device <device> --out <dir>"
       return 2
-  let device ← acquire args.device
+  let device ← Device.acquire args.device
   let request ← IO.ofExcept (Json.parse (← IO.FS.readFile args.request))
   let output ← body args device request
   IO.FS.createDirAll args.out

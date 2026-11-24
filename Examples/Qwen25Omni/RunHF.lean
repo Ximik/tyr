@@ -24,7 +24,7 @@ structure Args where
   source : String := "Qwen/Qwen2.5-Omni-3B"
   revision : String := "main"
   cacheDir : String := Hub.defaultCacheDir
-  device : String := "auto"
+  device? : Option String := none
   prompt : String := "Give a concise definition of a dependent type."
   promptFile : Option String := none
   batchSize : Nat := 1
@@ -37,7 +37,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--source" :: v :: rest => parseArgsLoop rest { acc with source := v }
   | "--revision" :: v :: rest => parseArgsLoop rest { acc with revision := v }
   | "--cache-dir" :: v :: rest => parseArgsLoop rest { acc with cacheDir := v }
-  | "--device" :: v :: rest => parseArgsLoop rest { acc with device := v }
+  | "--device" :: v :: rest => parseArgsLoop rest { acc with device? := some v }
   | "--prompt" :: v :: rest => parseArgsLoop rest { acc with prompt := v }
   | "--prompt-file" :: v :: rest => parseArgsLoop rest { acc with promptFile := some v }
   | "--batch-size" :: v :: rest => parseArgsLoop rest { acc with batchSize := (← parseNatArg "--batch-size" v) }
@@ -53,14 +53,14 @@ private def printHelp : IO Unit := do
   IO.println "  --source <path-or-repo>      Local model dir or HF repo id (default: Qwen/Qwen2.5-Omni-3B)"
   IO.println "  --revision <rev>             HF revision/branch/tag (default: main)"
   IO.println "  --cache-dir <path>           Local cache for downloaded files"
-  IO.println "  --device <auto|cpu|mps|cuda[:n]>  Execution device (default: auto)"
+  IO.println "  --device <cpu|mps|cuda[:n]>  Execution device (required)"
   IO.println "  --prompt <text>              Prompt text"
   IO.println "  --prompt-file <path>         One prompt per non-empty line"
   IO.println "  --batch-size <n>             Prompts per decode batch (default: 1)"
   IO.println "  --max-new-tokens <n>         Number of tokens to generate"
   IO.println "Examples:"
-  IO.println "  lake exe Qwen25OmniRunHF --source Qwen/Qwen2.5-Omni-3B --prompt \"Hello\""
-  IO.println "  lake exe Qwen25OmniRunHF --source Qwen/Qwen2.5-Omni-7B --prompt-file prompts.txt --batch-size 2"
+  IO.println "  lake exe Qwen25OmniRunHF --device cuda --source Qwen/Qwen2.5-Omni-3B --prompt \"Hello\""
+  IO.println "  lake exe Qwen25OmniRunHF --device cuda --source Qwen/Qwen2.5-Omni-7B --prompt-file prompts.txt --batch-size 2"
 
 private def encodePromptToIds
     (tok : tokenizer.qwen3.QwenTokenizer)
@@ -97,16 +97,14 @@ def runMain (argv : List String) : IO UInt32 := do
     printHelp
     return 0
 
-  let (device, deviceWarning?) ← resolveDevice args.device
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda[:n]>")
+  let device ← Device.acquireNamed deviceName
   let modelDir ← Hub.resolvePretrainedDir args.source {
     revision := args.revision
     cacheDir := args.cacheDir
     includeTokenizer := true
   }
   IO.println s!"Resolved model dir: {modelDir}"
-  match deviceWarning? with
-  | some msg => IO.println msg
-  | none => pure ()
   IO.println s!"Using device: {deviceToString device}"
 
   let tok ← tokenizer.qwen3.loadTokenizer modelDir

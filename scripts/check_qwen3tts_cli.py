@@ -6,7 +6,6 @@ prompt assembly and codec generation; the native WAV boundary has a Lean test.
 """
 import json
 import math
-import os
 from pathlib import Path
 import struct
 import subprocess
@@ -79,15 +78,14 @@ def main() -> None:
                 for streaming in [False, True]:
                     codes = directory / "codes.txt"
                     codes.unlink(missing_ok=True)
-                    command = [str(binary), "--model-dir", str(directory), "--text", "Hello",
+                    command = [str(binary), "--device", "cpu", "--model-dir", str(directory), "--text", "Hello",
                                "--max-frames", "2", "--top-k", "1", "--subtalker-top-k", "1",
                                "--suppress-tail", "0", "--seed", "7", "--skip-decode",
                                "--think-mode", mode, "--language", language,
                                "--codes-path", str(codes), "--token-ids-path", str(directory / "ids.txt")]
                     if streaming:
                         command.append("--true-streaming")
-                    result = subprocess.run(command, env=dict(os.environ, TYR_DEVICE="cpu"),
-                                            capture_output=True, text=True, timeout=60)
+                    result = subprocess.run(command, capture_output=True, text=True, timeout=60)
                     if result.returncode:
                         raise RuntimeError(f"bf16={bf16} mode={mode} stream={streaming}\n{result.stdout}\n{result.stderr}")
                     rows = [[int(value) for value in line.split()] for line in codes.read_text().splitlines()]

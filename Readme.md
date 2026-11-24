@@ -141,7 +141,6 @@ See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler ov
 
 | Variable | Effect |
 |---|---|
-| `TYR_DEVICE` | `cpu`, `cuda`, `mps` or `auto`; device used by the examples and model loaders |
 | `TYR_VERBOSE_ERRORS=1` | print the full libtorch report when a libtorch error crashes the program |
 | `TYR_DEBUG_MPS=1` | print MPS (Apple GPU) availability diagnostics |
 

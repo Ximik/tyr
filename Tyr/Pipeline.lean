@@ -237,24 +237,16 @@ def getLocalRankFromEnv : IO Nat := do
   | some r => pure r.toNat!
   | none => pure 0
 
-/-- Resolve the training device from `TYR_DEVICE` and distributed rank state. -/
-def resolveTrainingDevice (_rank localRank : Nat) (isDistributed : Bool) : IO Device := do
-  let cudaOrdinal := if isDistributed then localRank else 0
-  let requested? := (← IO.getEnv "TYR_DEVICE").map String.toLower
-  match requested? with
-  | some "cpu" => pure Device.CPU
-  | some "mps" => Device.mps
-  | some "cuda" => Device.cuda cudaOrdinal
-  | some "auto" | none =>
-    if isDistributed then
-      if ← cuda_is_available then Device.cuda cudaOrdinal else pure Device.CPU
-    else
-      getBestDevice
-  | some _ =>
-    if isDistributed then
-      if ← cuda_is_available then Device.cuda cudaOrdinal else pure Device.CPU
-    else
-      getBestDevice
+/-- Acquire `kind` for this process. In a distributed run each process owns the
+CUDA device at its local rank, so `cuda` takes that ordinal and an explicit
+nonzero ordinal is rejected. -/
+def acquireTrainingDevice (kind : DeviceKind) (localRank : Nat) (isDistributed : Bool) :
+    IO Device :=
+  match kind, isDistributed with
+  | .CUDA 0, true => Device.cuda localRank
+  | .CUDA n, true =>
+    throw (IO.userError s!"device cuda:{n}: a distributed run assigns each process the CUDA device at its local rank")
+  | kind, _ => Device.acquire kind
 
 /-- Save checkpoint to disk -/
 def saveCheckpoint (baseDir : String) (stages : Array StageInfo) (runId : String) (configRepr : String := "") : IO Unit := do

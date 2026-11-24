@@ -478,25 +478,6 @@ private def loadDecoderFromCheckpoint
     generator
   }
 
-private def resolveKittenDevice (log : Handlers := {}) : IO Device := do
-  let requested := (← IO.getEnv "TYR_DEVICE").map String.toLower
-  match requested with
-  | some "cpu" => pure Device.CPU
-  | some "cuda" =>
-    if ← cuda_is_available then
-      Device.cuda 0
-    else
-      log.onWarn "TYR_DEVICE=cuda requested but CUDA is unavailable; falling back to auto."
-      getBestDevice
-  | some "mps" => Device.mps
-  | some "auto" => getBestDevice
-  | some _ => getBestDevice
-  | none =>
-    if ← cuda_is_available then
-      Device.cuda 0
-    else
-      pure Device.CPU
-
 private def loadCheckpointWeights (path : String) (log : Handlers := {}) : IO LoadedCheckpointWeights := do
   let handle ← safetensors.openHandle path
   log.onInfo "Loading ALBERT backbone..."
@@ -576,15 +557,11 @@ structure Loaded where
   device : Device
   model : Model (device := device) cfg
 
-/-- Loads onto `device?`, or else the device `TYR_DEVICE` names. -/
-def loadAutoConfig (path : String) (cfg : KittenTTSConfig := {}) (log : Handlers := {})
-    (device? : Option Device := none) : IO Loaded := do
+def loadAutoConfig (path : String) (device : Device) (cfg : KittenTTSConfig := {})
+    (log : Handlers := {}) : IO Loaded := do
   log.onInfo s!"Loading KittenTTS weights from {path}..."
   checkKokoroV1 cfg log
   let weights ← loadCheckpointWeights path log
-  let device ← match device? with
-    | some device => pure device
-    | none => resolveKittenDevice log
   let model ← buildModelFromCheckpointWeights weights log device
   pure { cfg := kokoro, device, model }
 

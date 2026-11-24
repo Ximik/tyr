@@ -217,9 +217,9 @@ def withDistributedWithHandlers (config) (logHandlers := {}) (action) : IO α
 `Pipeline.withDistributedWithHandlers` (not to be confused with `dist.withDistributed`)
 reads the torchrun environment — `WORLD_SIZE`, `RANK`, `LOCAL_RANK`,
 `MASTER_ADDR`, `MASTER_PORT` — and initializes NCCL only when `WORLD_SIZE > 1`
-(`Tyr/Pipeline.lean`). `resolveTrainingDevice`
-(`Tyr/Pipeline.lean`) honors `TYR_DEVICE=cpu|mps|cuda|auto` and maps
-`LOCAL_RANK` to the CUDA ordinal. Logging is silent unless you pass
+(`Tyr/Pipeline.lean`). `acquireTrainingDevice`
+(`Tyr/Pipeline.lean`) acquires the device passed with `--device`; in a
+distributed run `cuda` takes `LOCAL_RANK` as its ordinal. Logging is silent unless you pass
 `Log.Handlers` (`onInfo`/`onWarn`/`onError` callbacks, `Tyr/Log.lean`).
 
 There is a background-task API (`background`, `await`, `Tyr/Pipeline.lean`). `spawnBackground`
@@ -426,17 +426,17 @@ The binaries read torchrun's environment directly; launch them with
 ./scripts/nanochat/run_train_torchrun.sh        # TrainNanoChat, NPROC_PER_NODE=2 default
 NPROC_PER_NODE=4 ./scripts/nanochat/run_pipeline_torchrun.sh   # NanoChatPipeline
 torchrun --standalone --nnodes=1 --nproc_per_node=8 --no_python \
-  .lake/build/bin/TrainNanoChat --data data/fineweb10B --val data/fineweb_val
+  .lake/build/bin/TrainNanoChat --device cuda --data data/fineweb10B --val data/fineweb_val
 ```
 
-Script knobs (`TORCHRUN_BIN`, `NPROC_PER_NODE`, `SKIP_BUILD`, `TYR_DEVICE`,
+Script knobs (`TORCHRUN_BIN`, `NPROC_PER_NODE`, `SKIP_BUILD`,
 `PIPELINE_EXE`, resume smoke test): see
 [Getting started](getting-started.md#distributed-nanochat-scripts) and
 `scripts/nanochat/ENV_INVENTORY.md`.
 
 ## Related guides
 
-- [Getting started](getting-started.md) — torchrun wrappers, `TYR_DEVICE`, build prerequisites.
+- [Getting started](getting-started.md) — torchrun wrappers, build prerequisites.
 - [Tensors](core/tensors.md) — `Tensor σ`, `Shape`, `Device`, the ops used by the collectives.
 - [TensorStruct](core/tensorstruct.md) — the traversal that powers `broadcastParams` / `allReduceGrads`.
 - [Optimization](optimization.md) — `Optim.adamw` / `AdamWState` used by both recipe loops, and the Polar Express kernels hosted in `Tyr/Distributed.lean`.

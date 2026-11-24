@@ -83,6 +83,7 @@ namespace Qwen3ASRForConditionalGeneration
 /-- Load Qwen3-ASR from a local dir or HF repo id. -/
 def loadFromPretrained
     (source : String)
+    (device : Device)
     (defaults : Qwen3ASRConfig := {})
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
@@ -93,8 +94,8 @@ def loadFromPretrained
     includeTokenizer := false
   }
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir defaults
-  let m ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
-  pure ⟨cfg, m⟩
+  let m ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg device
+  pure ⟨cfg, device, m⟩
 
 end Qwen3ASRForConditionalGeneration
 

@@ -6,6 +6,7 @@ namespace Examples.Qwen3ASR
 open torch.qwen3asr
 
 structure Args where
+  device? : Option String := none
   source : String := "weights/qwen3-asr-0.6b"
   revision : String := "main"
   cacheDir : String := "~/.cache/huggingface/tyr-models"
@@ -42,6 +43,7 @@ private def parseFloatArg (name : String) (v : String) : IO Float :=
 private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := do
   match xs with
   | [] => pure acc
+  | "--device" :: v :: rest => parseArgsLoop rest { acc with device? := some v }
   | "--source" :: v :: rest => parseArgsLoop rest { acc with source := v }
   | "--model-dir" :: v :: rest => parseArgsLoop rest { acc with source := v }
   | "--revision" :: v :: rest => parseArgsLoop rest { acc with revision := v }
@@ -60,6 +62,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       parseArgsLoop rest { acc with sileroVADPath := some v }
   | "--help" :: _ =>
       IO.println "Usage: lake exe Qwen3ASRLiveMicTrueStream [options]"
+      IO.println "  --device <name>          cpu, mps, cuda or cuda:<n> (required)"
       IO.println "  --source <path-or-repo>  Local model dir or HF repo id"
       IO.println "  --model-dir <path>       Alias for --source (backward compatible)"
       IO.println "  --revision <rev>         HF revision/branch/tag (default: main)"
@@ -86,7 +89,9 @@ def runMain (argv : List String) : IO UInt32 := do
   if args.chunkSec <= 0.0 || args.hopSec <= 0.0 || args.runSec <= 0.0 then
     throw <| IO.userError "chunk-sec, hop-sec, and run-sec must be > 0"
 
-  let sm ← loadFromPretrained args.source args.revision args.cacheDir
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")
+  let device ← torch.Device.acquireNamed deviceName
+  let sm ← loadFromPretrained args.source device args.revision args.cacheDir
   IO.println s!"Resolved model dir: {sm.modelDir}"
   let sileroPath ←
     match args.sileroVADPath with

@@ -30,7 +30,7 @@ structure Args where
   source : String := "google/gemma-4-E4B"
   revision : String := "main"
   cacheDir : String := Hub.defaultCacheDir
-  device : String := "auto"
+  device? : Option String := none
   prompt : String := "Give a concise definition of a dependent type."
   promptFile : Option String := none
   imagePaths : Array String := #[]
@@ -48,7 +48,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--source" :: v :: rest => parseArgsLoop rest { acc with source := v }
   | "--revision" :: v :: rest => parseArgsLoop rest { acc with revision := v }
   | "--cache-dir" :: v :: rest => parseArgsLoop rest { acc with cacheDir := v }
-  | "--device" :: v :: rest => parseArgsLoop rest { acc with device := v }
+  | "--device" :: v :: rest => parseArgsLoop rest { acc with device? := some v }
   | "--prompt" :: v :: rest => parseArgsLoop rest { acc with prompt := v }
   | "--prompt-file" :: v :: rest => parseArgsLoop rest { acc with promptFile := some v }
   | "--image" :: v :: rest => parseArgsLoop rest { acc with imagePaths := acc.imagePaths.push v }
@@ -69,7 +69,7 @@ private def printHelp : IO Unit := do
   IO.println "  --source <path-or-repo>      Local model dir or HF repo id (default: google/gemma-4-E4B)"
   IO.println "  --revision <rev>             HF revision/branch/tag (default: main)"
   IO.println "  --cache-dir <path>           Local cache for downloaded files"
-  IO.println "  --device <auto|cpu|mps|cuda[:n]>  Execution device (default: auto)"
+  IO.println "  --device <cpu|mps|cuda[:n]>  Execution device (required)"
   IO.println "  --prompt <text>              Prompt text"
   IO.println "  --prompt-file <path>         One prompt per non-empty line"
   IO.println "  --image <path>               Image file for multimodal generation (repeatable, Apple-only)"
@@ -201,7 +201,8 @@ def runMain (argv : List String) : IO UInt32 := do
     printHelp
     return 0
 
-  let (device, deviceWarning?) ← resolveDevice args.device
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda[:n]>")
+  let device ← Device.acquireNamed deviceName
   let hasImages := !args.imagePaths.isEmpty
   let useMultimodal := args.multimodal || hasImages
   if hasImages && !args.multimodal then
@@ -213,9 +214,6 @@ def runMain (argv : List String) : IO UInt32 := do
     includeTokenizer := true
   }
   IO.println s!"Model directory: {modelDir}"
-  match deviceWarning? with
-  | some msg => IO.println msg
-  | none => pure ()
   IO.println s!"Using device: {deviceToString device}"
 
   let tok ← tokenizer.gemma4.loadTokenizer modelDir

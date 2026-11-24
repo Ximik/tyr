@@ -54,6 +54,7 @@ private def toSamples (sec : Float) : Nat :=
 
 def loadFromPretrained
     (source : String)
+    (device : Device)
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir) : IO StreamModel := do
   let modelDir ← hub.resolvePretrainedDir source {
@@ -68,7 +69,7 @@ def loadFromPretrained
   let ⟨melBinsMatch⟩ ← if h : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then
       pure (PLift.up h)
     else throw (IO.userError s!"Qwen3-ASR preprocessor feature_size {preprocessor.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
-  let ⟨device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg device
   pure { cfg, device, dtype, model, tok, preprocessor, melBinsMatch, modelDir }
 
 def newSession

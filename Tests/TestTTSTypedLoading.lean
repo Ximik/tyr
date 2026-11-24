@@ -116,7 +116,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
       for sharded in [false, true] do
         IO.FS.withTempDir fun dir => do
           writeCheckpoint dir bf16 projection sharded
-          let ⟨dtypes, model⟩ ← Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg
+          let ⟨dtypes, model⟩ ← Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg .CPU
           let model := { model with
             talker := TensorStruct.detach model.talker
             speakerEncoder := model.speakerEncoder.map TensorStruct.detach }
@@ -150,7 +150,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
       "talker.code_predictor.lm_head.0.weight", "talker.codec_head.weight"] do
     IO.FS.withTempDir fun dir => do
       writeCheckpoint dir true true true { dtypeOverrides := #[(name, false)] }
-      Tests.assertThrows (Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg)
+      Tests.assertThrows (Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg .CPU)
         (some "Expected dtype")
 
 @[test] def testTTSLoadingRejectsMalformedOptionalEntries : IO Unit := do
@@ -160,7 +160,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
       ("talker.code_predictor.small_to_mtp_projection.bias", #[4, 2])] do
     IO.FS.withTempDir fun dir => do
       writeCheckpoint dir true true false { shapeOverrides := #[(name, shape)] }
-      Tests.assertThrows (Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg)
+      Tests.assertThrows (Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg .CPU)
         (some "Expected shape")
 
 @[test] def testTTSLoadingRejectsPartiallyMissingProjection : IO Unit := do
@@ -168,7 +168,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
       "talker.code_predictor.small_to_mtp_projection.bias"] do
     IO.FS.withTempDir fun dir => do
       writeCheckpoint dir true true false { omitted := #[missing] }
-      Tests.assertThrows (Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg)
+      Tests.assertThrows (Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg .CPU)
         (some "projection")
 
 -- A model carries one shared talker index all the way from its embeddings to
@@ -183,7 +183,7 @@ example (cfg : Qwen3TTSConfig) (dtypes : DTypeLayout)
     IO.FS.withTempDir fun dir => do
       writeCheckpoint dir talkerBF16 false true {
         speaker := true, speakerBF16 := !talkerBF16 }
-      let ⟨dtypes, model⟩ ← Qwen3TTSForConditionalGeneration.loadSharded dir.toString baseCfg
+      let ⟨dtypes, model⟩ ← Qwen3TTSForConditionalGeneration.loadSharded dir.toString baseCfg .CPU
       let talkerDType := if talkerBF16 then DType.BFloat16 else .Float32
       let speakerDType := if talkerBF16 then DType.Float32 else .BFloat16
       LeanTest.assertEqual dtypes.talker.val talkerDType
@@ -202,7 +202,7 @@ example (cfg : Qwen3TTSConfig) (dtypes : DTypeLayout)
     writeCheckpoint dir true true true {
       speaker := true, speakerBF16 := false,
       dtypeOverrides := #[("speaker_encoder.fc.weight", true)] }
-    Tests.assertThrows (Qwen3TTSForConditionalGeneration.loadSharded dir.toString baseCfg)
+    Tests.assertThrows (Qwen3TTSForConditionalGeneration.loadSharded dir.toString baseCfg .CPU)
       (some "Expected dtype")
 
 @[test] def testTTSLoadingAllowsAbsentQKNorms : IO Unit := do
@@ -210,7 +210,7 @@ example (cfg : Qwen3TTSConfig) (dtypes : DTypeLayout)
     writeCheckpoint dir true false false { omitted := #[
       "talker.model.layers.0.self_attn.q_norm.weight",
       "talker.model.layers.0.self_attn.k_norm.weight"] }
-    let ⟨_, model⟩ ← Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg
+    let ⟨_, model⟩ ← Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg .CPU
     let some layer := model.talker.model.layers[0]? | throw (IO.userError "expected talker layer")
     LeanTest.assertTrue layer.self_attn.q_norm.isNone
     LeanTest.assertTrue layer.self_attn.k_norm.isNone

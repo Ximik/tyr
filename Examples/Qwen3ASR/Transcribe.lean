@@ -8,6 +8,7 @@ open torch.qwen3asr
 namespace Examples.Qwen3ASR
 
 structure Args where
+  device? : Option String := none
   source : String := "weights/qwen3-asr-0.6b"
   alignerSource : Option String := none
   revision : String := "main"
@@ -56,6 +57,7 @@ private def parseStreamDecodeModeArg (name : String) (v : String) : IO Streaming
 private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := do
   match xs with
   | [] => pure acc
+  | "--device" :: v :: rest => parseArgsLoop rest { acc with device? := some v }
   | "--source" :: v :: rest =>
       parseArgsLoop rest { acc with source := v }
   | "--aligner-source" :: v :: rest =>
@@ -86,6 +88,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       parseArgsLoop rest { acc with maxNewTokens := (← parseNatArg "--max-new-tokens" v) }
   | "--help" :: _ =>
       IO.println "Usage: lake exe Qwen3ASRTranscribe [options]"
+      IO.println "  --device <name>          cpu, mps, cuda or cuda:<n> (required)"
       IO.println "  --source <path-or-repo>  Local model dir or HF repo id"
       IO.println "  --aligner-source <src>   Optional forced-aligner model dir/repo id"
       IO.println "  --model-dir <path>       Alias for --source (backward compatible)"
@@ -100,7 +103,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       IO.println "  --stream-decode-mode <m> Streaming decode mode: rolling|full (default: rolling)"
       IO.println "  --max-inference-batch-size <n>  Inputs decoded per batch (default: unbounded)"
       IO.println "  --max-new-tokens <n>     Greedy decode max new tokens"
-      IO.println "Example: lake exe Qwen3ASRTranscribe --source Qwen/Qwen3-ASR-1.7B --wav-path MLKDream.wav"
+      IO.println "Example: lake exe Qwen3ASRTranscribe --device cuda --source Qwen/Qwen3-ASR-1.7B --wav-path MLKDream.wav"
       throw <| IO.userError ""
   | x :: _ =>
       throw <| IO.userError s!"Unknown argument: {x}"
@@ -218,12 +221,14 @@ def runMain (argv : List String) : IO UInt32 := do
   let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
     throw (IO.userError s!"preprocessor feature_size {pre.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
-  let ⟨_device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")
+  let device ← torch.Device.acquireNamed deviceName
+  let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg device
   IO.println s!"Qwen3-ASR target device: {repr model.thinker.lmHead.device}"
   let forcedAligner ←
     match args.alignerSource with
     | some src =>
-      pure (some (← Qwen3ForcedAligner.loadFromPretrained src args.revision args.cacheDir))
+      pure (some (← Qwen3ForcedAligner.loadFromPretrained src device args.revision args.cacheDir))
     | none =>
       pure none
   let out ←

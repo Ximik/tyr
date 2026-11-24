@@ -34,7 +34,7 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let pre ← PreprocessorConfig.loadFromPretrainedDir weights (requiredSamplingRate := some 16000)
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
     throw <| IO.userError s!"feature_size {pre.featureSize} is not num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}"
-  let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadShardedAt weights cfg {} device (some dtype)
+  let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded weights cfg device {} (some dtype)
   have : DType.RealFloating dtype.val := inferInstance
 
   let ⟨frames, features⟩ ← waveformToWhisperFeaturesDynamic pre (← normalizeAudioTo16kFromWav request.audio)

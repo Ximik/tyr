@@ -153,23 +153,8 @@ private def loadModelSharded (modelDir : String) (cfg : WhisperConfig) (dtype : 
 
 namespace WhisperForConditionalGeneration
 
-private def resolveWhisperDevice (log : Handlers := {}) : IO Device := do
-  let requested := (← IO.getEnv "TYR_DEVICE").map String.toLower
-  match requested with
-  | some "cpu" => pure Device.CPU
-  | some "cuda" =>
-    if ← cuda_is_available then
-      Device.cuda 0
-    else
-      log.onWarn "TYR_DEVICE=cuda requested but CUDA is unavailable; falling back to auto."
-      getBestDevice
-  | some "mps" => Device.mps
-  | some "auto" => getBestDevice
-  | some _ => getBestDevice
-  | none => getBestDevice
-
-def loadShardedAt (modelDir : String) (cfg : WhisperConfig := {}) (log : Handlers := {})
-    (device : Device) : IO (Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
+def loadSharded (modelDir : String) (cfg : WhisperConfig) (device : Device)
+    (log : Handlers := {}) : IO (Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   log.onInfo s!"Loading Whisper weights from {modelDir}..."
   let ⟨dtype, encoderConv1Weight⟩ ← (← safetensors.Source.open modelDir).load
     "model.encoder.conv1.weight" #[cfg.dModel, cfg.numMelBins, 3] device
@@ -185,12 +170,6 @@ def loadShardedAt (modelDir : String) (cfg : WhisperConfig := {}) (log : Handler
   log.onInfo s!"Whisper target device: {repr device}"
   pure ⟨RealFloatingDType.ofDType dtype, { model, projOut }⟩
 
-/-- Load using the environment-selected device, retaining that index in the result. -/
-def loadSharded (modelDir : String) (cfg : WhisperConfig := {}) (log : Handlers := {}) :
-    IO (Σ device : Device, Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
-  let device ← resolveWhisperDevice log
-  let model ← loadShardedAt modelDir cfg log device
-  pure ⟨device, model⟩
 
 end WhisperForConditionalGeneration
 

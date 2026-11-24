@@ -166,6 +166,8 @@ structure NanoChatEnvState where
 
 /-- NanoChat-specific pipeline configuration -/
 structure NanoChatConfig extends PipelineConfig where
+  /-- Device every stage trains and evaluates on. -/
+  device : DeviceKind
   /-- Model depth (number of transformer layers) -/
   modelDepth : Nat := 20
   /-- Aspect ratio used to derive model dimension: modelDim = depth * aspectRatio. -/
@@ -1031,7 +1033,7 @@ def pretrainBaseModel (cfg : NanoChatConfig) : PipelineM Unit := do
   let isDistributed ← dist.isInitialized
   let (rank, worldSize) ← if isDistributed then dist.getRankAndWorldSize else pure (0, 1)
   let localRank ← getLocalRankFromEnv
-  let trainDevice ← resolveTrainingDevice rank localRank isDistributed
+  let trainDevice ← acquireTrainingDevice cfg.device localRank isDistributed
   let isMaster := rank == 0
 
   -- Build parquet token streams (matches nanochat split convention:
@@ -1131,7 +1133,7 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
 
   -- Load model checkpoint
   let ckptPath := s!"{checkpointDir}/latest.ckpt"
-  let evalDevice ← resolveTrainingDevice 0 (← getLocalRankFromEnv) (← dist.isInitialized)
+  let evalDevice ← acquireTrainingDevice cfg.device (← getLocalRankFromEnv) (← dist.isInitialized)
   let maybeCkpt ← loadCheckpoint modelCfg ckptPath (device := evalDevice)
 
   match maybeCkpt with
@@ -1394,7 +1396,7 @@ def midtrain (cfg : NanoChatConfig) : PipelineM Unit := do
   let isDistributed ← dist.isInitialized
   let (rank, worldSize) ← if isDistributed then dist.getRankAndWorldSize else pure (0, 1)
   let localRank ← getLocalRankFromEnv
-  let trainDevice ← resolveTrainingDevice rank localRank isDistributed
+  let trainDevice ← acquireTrainingDevice cfg.device localRank isDistributed
   let isMaster := rank == 0
 
   -- Build task mixtures and streaming token providers.
@@ -1500,7 +1502,7 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
 
   -- Load checkpoint
   let ckptPath := s!"{checkpointDir}/latest.ckpt"
-  let evalDevice ← resolveTrainingDevice 0 (← getLocalRankFromEnv) (← dist.isInitialized)
+  let evalDevice ← acquireTrainingDevice cfg.device (← getLocalRankFromEnv) (← dist.isInitialized)
   let maybeCkpt ← loadCheckpoint modelCfg ckptPath (device := evalDevice)
 
   match maybeCkpt with
@@ -1580,7 +1582,7 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
   let isDistributed ← dist.isInitialized
   let (rank, worldSize) ← if isDistributed then dist.getRankAndWorldSize else pure (0, 1)
   let localRank ← getLocalRankFromEnv
-  let trainDevice ← resolveTrainingDevice rank localRank isDistributed
+  let trainDevice ← acquireTrainingDevice cfg.device localRank isDistributed
   let runBaseDir := (← get).config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
   let runArtifacts := RunArtifacts.ofBaseDir runBaseDir
 
@@ -1730,7 +1732,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
   let runBaseDir := (← get).config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
   let runArtifacts := RunArtifacts.ofBaseDir runBaseDir
   let localRank ← getLocalRankFromEnv
-  let trainDevice ← resolveTrainingDevice rank localRank isDistributed
+  let trainDevice ← acquireTrainingDevice cfg.device localRank isDistributed
 
   let grpoExamplesPerStepGlobal := rlEnv.examplesPerStepGlobal.val
   let grpoExamplesPerStep :=
@@ -2027,12 +2029,21 @@ def runQuickPipeline (cfg : NanoChatConfig) : PipelineM Unit := do
   log "Quick pipeline complete!"
 
 /-- Main entry point for NanoChat pipeline -/
-def main : IO Unit := do
+def main (args : List String) : IO UInt32 := do
+  let device ← match args with
+    | ["--device", name] =>
+      match DeviceKind.ofString? name with
+      | some kind => pure kind
+      | none => throw (IO.userError s!"unknown device '{name}'")
+    | _ =>
+      IO.eprintln "usage: NanoChatPipeline --device <cpu|mps|cuda>"
+      return 2
   let envState ← loadNanoChatEnvState
   let pipelineEnv := envState.pipeline
   let modelEnv := envState.model
 
   let cfg : NanoChatConfig := {
+    device
     baseDir := pipelineEnv.baseDir
     wandbEnabled := pipelineEnv.wandbEnabled
     wandbRun := pipelineEnv.wandbRun
@@ -2085,10 +2096,10 @@ def main : IO Unit := do
       runQuickPipeline cfg
     else
       runNanoChatPipeline cfg
+  return 0
 
 end torch.NanoChat.Pipeline
 
 /-- Executable entrypoint wrapper. -/
-unsafe def main (_args : List String) : IO UInt32 := do
-  torch.NanoChat.Pipeline.main
-  pure 0
+unsafe def main (args : List String) : IO UInt32 :=
+  torch.NanoChat.Pipeline.main args

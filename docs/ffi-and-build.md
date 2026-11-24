@@ -537,7 +537,7 @@ Build and run through Lake:
 
 ```bash
 lake build                                  # target libtyr → FFI header → make -C cc dylib
-lake exe TrainGPT                           # build if needed, then run
+lake exe TrainGPT --device cpu              # build if needed, then run
 # CUDA build for a specific GPU target:
 lake -R -Kcuda=/usr/local/cuda -Kgpu=H100 build
 # Probes of the fatal failure paths (libtorch | admission | admission-ok):

@@ -353,8 +353,8 @@ namespace Qwen3TTSForConditionalGeneration
     which each of their weights must have. -/
 def loadSharded
     (modelDir : String)
-    (cfg : Qwen3TTSConfig := {})
-    (targetDevice : Device := Device.CPU)
+    (cfg : Qwen3TTSConfig)
+    (targetDevice : Device)
     (log : Handlers := {})
     (dtype? : Option RealFloatingDType := none)
     : IO (Σ dtypes : DTypeLayout, Qwen3TTSForConditionalGeneration (device := targetDevice) cfg dtypes) := do

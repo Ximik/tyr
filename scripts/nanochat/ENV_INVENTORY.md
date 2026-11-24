@@ -28,8 +28,6 @@ Source: `scripts/nanochat/run_pipeline_torchrun.sh:14`
   - `NANOCHAT_USE_RUN_ID_DIR`
   - `NANOCHAT_RUN_ID`
   - `NANOCHAT_DIR`
-- Device selection:
-  - `TYR_DEVICE`
 - Cache/symlink behavior:
   - `AUTO_REUSE_CACHE`
 - Pipeline checkpoint file reset:
@@ -165,7 +163,6 @@ Sources:
 - `WORLD_SIZE`
 - `MASTER_ADDR`
 - `MASTER_PORT`
-- `TYR_DEVICE`
 
 ## 10) Chat Runtime
 
@@ -174,7 +171,6 @@ Source: `Examples/NanoChat/RunChat.lean:99`
 - `NANOCHAT_DIR`
 - `MODEL_DEPTH`
 - `VOCAB_SIZE`
-- `TYR_DEVICE`
 
 ## 11) Path Expansion
 

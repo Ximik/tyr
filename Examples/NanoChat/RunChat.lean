@@ -25,23 +25,21 @@ private structure ChatEnvState where
   baseDir : String := "~/.cache/nanochat"
   modelDepth : Nat := 20
   vocabSize : Nat := 65536
-  requestedDevice? : Option String := none
   deriving Repr
 
 private def loadChatEnvState : IO ChatEnvState := do
   let baseDir := (← IO.getEnv "NANOCHAT_DIR").getD "~/.cache/nanochat"
   let modelDepth := ((← IO.getEnv "MODEL_DEPTH").bind String.toNat?) |>.getD 20
   let vocabSize := ((← IO.getEnv "VOCAB_SIZE").bind String.toNat?) |>.getD 65536
-  let requestedDevice? := (← IO.getEnv "TYR_DEVICE").map String.toLower
   pure {
     baseDir := baseDir
     modelDepth := modelDepth
     vocabSize := vocabSize
-    requestedDevice? := requestedDevice?
   }
 
 structure Args where
   baseDir : String
+  device? : Option String := none
   checkpoint : Option String := none
   stage : String := "rl"
   tokenizer : Option String := none
@@ -78,6 +76,7 @@ private def withPrompt (acc : Args) (piece : String) : Args :=
 
 private partial def parseArgsLoop : List String → Args → Args
   | [], acc => acc
+  | "--device" :: v :: rest, acc => parseArgsLoop rest { acc with device? := some v }
   | "--base-dir" :: v :: rest, acc => parseArgsLoop rest { acc with baseDir := v }
   | "--checkpoint" :: v :: rest, acc => parseArgsLoop rest { acc with checkpoint := some v }
   | "--stage" :: v :: rest, acc => parseArgsLoop rest { acc with stage := v }
@@ -126,6 +125,7 @@ private def printUsage : IO Unit := do
   IO.println "Usage: lake exe NanoChatChat [options] [prompt text]"
   IO.println ""
   IO.println "Options:"
+  IO.println "  --device <name>         cpu, mps, cuda or cuda:<n> (required)"
   IO.println "  --base-dir <path>       Base nanochat directory (default: $NANOCHAT_DIR or ~/.cache/nanochat)"
   IO.println "  --checkpoint <path>     Explicit checkpoint path (overrides --stage)"
   IO.println "  --stage <name>          Checkpoint stage under base dir (default: rl)"
@@ -173,17 +173,6 @@ private def deviceToString (device : Device) : String :=
   | DeviceKind.MPS => "MPS"
   | DeviceKind.CPU => "CPU"
   | DeviceKind.CUDA n => s!"CUDA:{n}"
-
-private def resolveDevice (env : ChatEnvState) : IO Device := do
-  let requested? := env.requestedDevice?
-  match requested? with
-  | some "cpu" => pure Device.CPU
-  | some "mps" => Device.mps
-  | some "cuda" =>
-    if ← cuda_is_available then Device.cuda 0 else pure Device.CPU
-  | some "auto" | none => getBestDevice
-  | some _ => getBestDevice
-
 
 private def findSpecialId? (tok : BPETokenizer) (names : Array String) : Option UInt64 := Id.run do
   for name in names do
@@ -287,7 +276,8 @@ unsafe def main (rawArgs : List String) : IO UInt32 := do
   let checkpointPath ← resolveCheckpointPath args
   let tokenizerPath ← resolveTokenizerPath args
   let cfg ← IO.ofExcept (buildModelConfig args)
-  let device ← resolveDevice envState
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")
+  let device ← Device.acquireNamed deviceName
   let tok ← tokenizer.load tokenizerPath
   let markers ← resolveChatMarkers tok
   let eosToken := args.eosToken.getD (if args.useChatMarkers then markers.assistantEnd else markers.bos)

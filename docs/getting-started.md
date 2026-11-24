@@ -37,9 +37,10 @@ def exampleTensor : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU
 
 `Tensor σ` records shape, dtype, and concrete device. The example fixes shape, dtype,
 and CPU placement. `Device.CPU` is always available; acquire accelerators with
-`Device.cuda index` or `Device.mps` in IO. `getBestDevice` from `Tyr.Torch`
-acquires MPS, then CUDA, then CPU according to availability. The acquired value
-remains the device index for subsequent tensor operations. Native handles are
+`Device.cuda index` or `Device.mps` in IO; `Device.acquireNamed` acquires the
+device a `cpu`/`mps`/`cuda`/`cuda:<n>` string names and throws if it is
+unavailable. Model loaders take the device as a parameter, and every example
+takes `--device`. The acquired value remains the device index for subsequent tensor operations. Native handles are
 confined to adapters behind the indexed API.
 
 ## Dependencies
@@ -116,7 +117,6 @@ Runtime variables a user actually sets:
 
 | Variable | Used by | Effect |
 |---|---|---|
-| `TYR_DEVICE` | `Examples/TrainGPT.lean`, NanoChat scripts | `auto` / `cpu` / `cuda` / `mps` device selection (default CPU in TrainGPT, `cuda` in the torchrun scripts) |
 | `RANK` / `LOCAL_RANK` / `WORLD_SIZE` / `MASTER_ADDR` / `MASTER_PORT` | distributed trainers | set by `torchrun`; see `scripts/nanochat/ENV_INVENTORY.md` |
 
 ## Running tests
@@ -144,10 +144,10 @@ Per-example details live in `Examples/README.md`; the common pattern is
 
 | Executable | What it does | Notes |
 |---|---|---|
-| `TrainGPT` | char-level GPT on Shakespeare | `lake exe TrainGPT`; reads `data/shakespeare_char/{train,val}.bin` (in repo), falls back to random tokens; checkpoints to `checkpoints/gpt` |
+| `TrainGPT` | char-level GPT on Shakespeare | `lake exe TrainGPT --device cpu`; reads `data/shakespeare_char/{train,val}.bin` (in repo), falls back to random tokens; checkpoints to `checkpoints/gpt` |
 | `TrainDiffusion` | discrete masked diffusion on ASCII text | flags `--generate/-g`, `--checkpoint/-c`, `--prompt/-p`, `--blocks/-n`, `--temperature/-t` |
-| `TrainNanoChat` | modded-nanogpt distributed training | flags `--data`, `--val`, `--checkpoint-dir`, `--resume`, `--debug` |
-| `NanoChatPipeline` / `NanoChatChat` | multi-stage pipeline / checkpoint chat | configured via env, see `scripts/nanochat/ENV_INVENTORY.md` |
+| `TrainNanoChat` | modded-nanogpt distributed training | flags `--device` (required), `--data`, `--val`, `--checkpoint-dir`, `--resume`, `--debug` |
+| `NanoChatPipeline` / `NanoChatChat` | multi-stage pipeline / checkpoint chat | `--device` (required); the rest via env, see `scripts/nanochat/ENV_INVENTORY.md` |
 | `FluxDemo` | Flux Klein 4B image generation | needs weights under `weights/`; writes `output.ppm` |
 
 ## Distributed NanoChat scripts
@@ -171,7 +171,7 @@ Knobs (all verified in the scripts):
 
 - `TORCHRUN_BIN` — torchrun launcher (default: `torchrun` from `PATH`).
 - `NPROC_PER_NODE` (default 2), `SKIP_BUILD=1` (skip the `lake build
-  TrainNanoChat` step), `TYR_DEVICE` (default `cuda` in these wrappers).
+  TrainNanoChat` step). The wrappers pass `--device cuda`.
 - `bench_distributed.sh`: `SIZES="1 2 4"`, `RUN_ARGS`, `LOG_DIR` (default
   `/tmp`); it greps for `Training complete!` and fails otherwise.
 - `run_pipeline_torchrun.sh` — the multi-stage pipeline variant
@@ -185,7 +185,7 @@ The full environment surface of the pipeline and trainers is inventoried in
 
 ```bash
 torchrun --standalone --nnodes=1 --nproc_per_node=8 --no_python \
-  .lake/build/bin/TrainNanoChat --data data/fineweb10B --val data/fineweb_val
+  .lake/build/bin/TrainNanoChat --device cuda --data data/fineweb10B --val data/fineweb_val
 ```
 
 ## Usage example
@@ -211,8 +211,7 @@ open torch.gpt
 open torch.train
 
 def main : IO Unit := do
-  -- device: TYR_DEVICE=auto|cpu|cuda|mps, else CPU (TrainGPT.lean)
-  let device ← getBestDevice
+  let device ← Device.acquireNamed "cpu"
 
   let modelCfg := Config.nanogpt_cpu_shakespeare      -- GPT.lean
   let trainCfg : TrainConfig := {                      -- Train.lean

@@ -24,6 +24,7 @@ variable {dtypes : DTypeLayout}
 open tokenizer.qwen3
 
 structure Args where
+  device? : Option String := none
   modelDir : String := "weights/qwen3-tts"
   text : String := "Hello from Lean Qwen3-TTS."
   styleText : Option String := none
@@ -110,6 +111,7 @@ private inductive ThinkMode where
 
 private partial def parseArgsLoop : List String → Args → Args
   | [], acc => acc
+  | "--device" :: v :: rest, acc => parseArgsLoop rest { acc with device? := some v }
   | "--model-dir" :: v :: rest, acc => parseArgsLoop rest { acc with modelDir := v }
   | "--text" :: v :: rest, acc => parseArgsLoop rest { acc with text := v }
   | "--style-text" :: v :: rest, acc => parseArgsLoop rest { acc with styleText := some v }
@@ -183,7 +185,7 @@ private def parseArgs (raw : List String) : Args :=
 
 private def takesValueFlag (flag : String) : Bool :=
   #[
-    "--model-dir", "--text", "--style-text", "--max-text-len", "--max-frames",
+    "--device", "--model-dir", "--text", "--style-text", "--max-text-len", "--max-frames",
     "--language", "--think-mode", "--seed", "--temperature", "--top-k", "--top-p",
     "--repetition-penalty", "--suppress-tail", "--subtalker-temperature",
     "--subtalker-top-k", "--subtalker-top-p", "--subtalker-temp-by-group",
@@ -245,6 +247,7 @@ private def printUsage : IO Unit := do
   IO.println "Usage: lake exe Qwen3TTSEndToEnd [options]"
   IO.println ""
   IO.println "Options:"
+  IO.println "  --device <name>               cpu, mps, cuda or cuda:<n> (required)"
   IO.println "  --model-dir <path>            Qwen3-TTS model directory (contains config.json + sharded weights)"
   IO.println "  --text <prompt>               Text prompt"
   IO.println "  --style-text <prompt>         Optional style prefix text prepended to prompt"
@@ -486,16 +489,6 @@ private def buildBridgeConfig (args : Args) : SpeechTokenizerBridgeConfig := {
   deviceMap := args.deviceMap
 }
 
-private def resolveRuntimeDevice : IO Device := do
-  let requested := (← IO.getEnv "TYR_DEVICE").map String.toLower
-  match requested with
-  | some "cpu" => pure Device.CPU
-  | some "cuda" => Device.cuda 0
-  | some "mps" => Device.mps
-  | some "auto" => getBestDevice
-  | some _ => getBestDevice
-  | none => getBestDevice
-
 def runEndToEnd (args : Args) : IO Unit := do
   let modelDir ← expandHome args.modelDir
   let codesPath ← expandHome args.codesPath
@@ -504,7 +497,8 @@ def runEndToEnd (args : Args) : IO Unit := do
   let tokenIdsPath ← expandHome args.tokenIdsPath
   let speakerMelPath ← expandHome args.speakerMelPath
   let speakerMelFramesPath ← expandHome args.speakerMelFramesPath
-  let targetDevice ← resolveRuntimeDevice
+  let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")
+  let targetDevice ← Device.acquireNamed deviceName
   let bridgeCfgBase := buildBridgeConfig args
   let bridgeCfg : SpeechTokenizerBridgeConfig :=
     match bridgeCfgBase.deviceMap with

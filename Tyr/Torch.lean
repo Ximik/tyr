@@ -24,12 +24,6 @@ def mps_is_available_stable (retries : Nat := 4) (delayMs : Nat := 250) : IO Boo
         loop remaining
   loop retries
 
-/-- Get the best available device: MPS > CUDA > CPU -/
-def getBestDevice : IO Device := do
-  if ← mps_is_available_stable then return ← Device.mps
-  if ← cuda_is_available then return ← Device.cuda 0
-  return Device.CPU
-
 /-- Output length of a 1D convolution, in the form the typed `conv1d` result uses. -/
 @[simp] def convOutputSize (input_size kernel_size : Nat) (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) : Nat :=
   (input_size + 2 * padding - (dilation * (kernel_size - 1) + 1)) / stride + 1
