@@ -56,7 +56,7 @@ structure DiffusionParams (cfg : Config) where
   -- Time embedding for timesteps
   time_emb : Activation #[cfg.diffusion_steps, cfg.n_embd]
   -- Transformer blocks with equal query and KV head counts.
-  blocks : Array (BlockParams cfg.n_head cfg.half_head_dim cfg.n_head)
+  blocks : Vector (BlockParams cfg.n_head cfg.half_head_dim cfg.n_head) cfg.n_layer
   -- Output head (NOT tied to token_emb)
   output_head : Activation #[cfg.vocab_size, cfg.n_embd]
 
@@ -74,10 +74,8 @@ def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
   let time_emb ← Tensor.randn #[cfg.diffusion_steps, cfg.n_embd] false
 
   -- Transformer blocks
-  let mut blocks := #[]
-  for _ in [:cfg.n_layer] do
-    let block ← BlockParams.init cfg.n_head cfg.half_head_dim cfg.n_head
-    blocks := blocks.push block
+  let blocks ← Vector.ofFnM fun (_ : Fin cfg.n_layer) =>
+    BlockParams.init cfg.n_head cfg.half_head_dim cfg.n_head
 
   -- Output head (zero-initialized like tiny-diffusion)
   let output_head := Tensor.zeros #[cfg.vocab_size, cfg.n_embd]
