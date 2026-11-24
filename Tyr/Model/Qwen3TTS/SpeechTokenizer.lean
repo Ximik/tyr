@@ -205,7 +205,7 @@ structure SpeechTokenizer12HzDecoder (dtypes : SpeechTokenizerDTypes := float32S
 
   preTransformerInputProj : Tensor { shape := #[512, 1024], dtype := dtypes.compute.val, device := device }
   preTransformerInputBias : Tensor { shape := #[512], dtype := dtypes.compute.val, device := device }
-  preTransformerLayers : Array (DecoderTransformerLayer (device := device) (dtypes := dtypes))
+  preTransformerLayers : Vector (DecoderTransformerLayer (device := device) (dtypes := dtypes)) 8
   preTransformerNormWeight : Tensor { shape := #[512], dtype := dtypes.compute.val, device := device }
   preTransformerOutputProj : Tensor { shape := #[1024, 512], dtype := dtypes.compute.val, device := device }
   preTransformerOutputBias : Tensor { shape := #[1024], dtype := dtypes.compute.val, device := device }
@@ -353,10 +353,7 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
   let preTransformerInputProj ← loadFrozen (dtype := dtypes.compute.val) weightsPath "decoder.pre_transformer.input_proj.weight" #[512, 1024]
   let preTransformerInputBias ← loadFrozen (dtype := dtypes.compute.val) weightsPath "decoder.pre_transformer.input_proj.bias" #[512]
 
-  let mut preTransformerLayers : Array (DecoderTransformerLayer (device := device) (dtypes := dtypes)) := #[]
-  for i in [:8] do
-    let layer ← loadTransformerLayer weightsPath i
-    preTransformerLayers := preTransformerLayers.push layer
+  let preTransformerLayers ← Vector.ofFnM fun (i : Fin 8) => loadTransformerLayer weightsPath i
 
   let preTransformerNormWeight ← loadFrozen (dtype := dtypes.compute.val) weightsPath "decoder.pre_transformer.norm.weight" #[512]
   let preTransformerOutputProj ← loadFrozen (dtype := dtypes.compute.val) weightsPath "decoder.pre_transformer.output_proj.weight" #[1024, 512]

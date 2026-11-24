@@ -172,10 +172,8 @@ private def loadTalkerModelSharded (modelDir : String) (cast : Bool) (cfg : Talk
   let textProjectionFc2Bias ← loadTensorShardedTarget modelDir cast "talker.text_projection.linear_fc2.bias"
     #[cfg.hiddenSize]
 
-  let mut layers : Array (TalkerLayer (device := device) (dtype := dtype) cfg) := #[]
-  for i in [:cfg.numHiddenLayers] do
-    let layer ← loadTalkerLayerSharded modelDir cast i cfg
-    layers := layers.push layer
+  let layers ← Vector.ofFnM fun (i : Fin cfg.numHiddenLayers) =>
+    loadTalkerLayerSharded modelDir cast i cfg
 
   let norm ← loadRMSNormSharded modelDir cast "talker.model.norm" cfg.hiddenSize cfg.rmsNormEps
   pure {
@@ -203,10 +201,8 @@ private def loadCodePredictorSharded (modelDir : String) (cast : Bool) (cfg : Ta
 
   let (inputProjection, inputProjectionBias) ← loadCodePredictorProjectionSharded modelDir cast cfg
 
-  let mut layers : Array (CodePredictorLayer (device := device) (dtype := dtype) cp) := #[]
-  for i in [:cp.numHiddenLayers] do
-    let layer ← loadCodePredictorLayerSharded modelDir cast i cfg
-    layers := layers.push layer
+  let layers ← Vector.ofFnM fun (i : Fin cp.numHiddenLayers) =>
+    loadCodePredictorLayerSharded modelDir cast i cfg
 
   let norm ← loadRMSNormSharded modelDir cast "talker.code_predictor.model.norm" cp.hiddenSize cp.rmsNormEps
 
