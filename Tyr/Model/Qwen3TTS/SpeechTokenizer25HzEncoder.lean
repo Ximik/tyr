@@ -156,7 +156,7 @@ structure SpeechTokenizer25HzEncoder (dtype : RealFloatingDType := float32DType)
   conv2Weight : Tensor { shape := #[1280, 1280, 3], dtype := dtype.val, device := device }
   conv2Bias : Tensor { shape := #[1280], dtype := dtype.val, device := device }
   positionalEmbedding : Tensor { shape := #[1500, 1280], dtype := dtype.val, device := device }
-  blocks : Array (EncoderBlock25Hz (device := device) (dtype := dtype))
+  blocks : Vector (EncoderBlock25Hz (device := device) (dtype := dtype)) 6
   vqDownWeight : Tensor { shape := #[1280, 1280, 2], dtype := dtype.val, device := device }
   vqDownBias : Tensor { shape := #[1280], dtype := dtype.val, device := device }
   vqCodebook : Tensor { shape := #[32768, 1280], dtype := dtype.val, device := device }
@@ -220,10 +220,7 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
   let conv2Bias ← loadFrozen weightsPath "encoder.tokenizer.conv2.bias" #[1280]
   let positionalEmbedding ← loadFrozen weightsPath "encoder.tokenizer.positional_embedding" #[1500, 1280]
 
-  let mut blocks : Array (EncoderBlock25Hz (device := device) (dtype := dtype)) := #[]
-  for i in [:6] do
-    let b ← loadBlock weightsPath i
-    blocks := blocks.push b
+  let blocks ← Vector.ofFnM fun (i : Fin 6) => loadBlock weightsPath i
 
   let vqDownWeight ← loadFrozen weightsPath "encoder.tokenizer.audio_vq_downsample.weight" #[1280, 1280, 2]
   let vqDownBias ← loadFrozen weightsPath "encoder.tokenizer.audio_vq_downsample.bias" #[1280]

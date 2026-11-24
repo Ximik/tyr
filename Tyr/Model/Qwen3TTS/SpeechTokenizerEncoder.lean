@@ -196,7 +196,7 @@ structure SpeechTokenizer12HzEncoder (dtypes : SpeechTokenizerDTypes := float32S
   finalConvWeight : Tensor { shape := #[512, 1024, 3], dtype := dtypes.compute.val, device := device }
   finalConvBias : Tensor { shape := #[512], dtype := dtypes.compute.val, device := device }
 
-  transformerLayers : Array (EncoderTransformerLayer (device := device) (dtypes := dtypes))
+  transformerLayers : Vector (EncoderTransformerLayer (device := device) (dtypes := dtypes)) 8
   downsampleWeight : Tensor { shape := #[512, 512, 4], dtype := dtypes.compute.val, device := device }
 
   semanticRVQ : (EncodeRVQ (device := device) (dtypes := dtypes))
@@ -297,10 +297,7 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
   let finalConvWeight ← loadFrozen (dtype := dtypes.compute.val) weightsPath "encoder.encoder.layers.14.conv.weight" #[512, 1024, 3]
   let finalConvBias ← loadFrozen (dtype := dtypes.compute.val) weightsPath "encoder.encoder.layers.14.conv.bias" #[512]
 
-  let mut transformerLayers : Array (EncoderTransformerLayer (device := device) (dtypes := dtypes)) := #[]
-  for i in [:8] do
-    let layer ← loadTransformerLayer weightsPath i
-    transformerLayers := transformerLayers.push layer
+  let transformerLayers ← Vector.ofFnM fun (i : Fin 8) => loadTransformerLayer weightsPath i
 
   let downsampleWeight ← loadFrozen (dtype := dtypes.compute.val) weightsPath "encoder.downsample.conv.weight" #[512, 512, 4]
   let semanticRVQ ← loadEncodeRVQ weightsPath "encoder.quantizer.semantic_residual_vector_quantizer" 1
@@ -364,10 +361,7 @@ def loadFromDirFlexible (speechTokenizerDir : String) (device : Device := Device
   let finalConvWeight ← loadFrozen (dtype := dtypes.compute.val) weightsPath "encoder.encoder.layers.14.conv.weight" #[512, 1024, 3]
   let finalConvBias ← loadFrozen (dtype := dtypes.compute.val) weightsPath "encoder.encoder.layers.14.conv.bias" #[512]
 
-  let mut transformerLayers : Array (EncoderTransformerLayer (device := device) (dtypes := dtypes)) := #[]
-  for i in [:8] do
-    let layer ← loadTransformerLayer weightsPath i
-    transformerLayers := transformerLayers.push layer
+  let transformerLayers ← Vector.ofFnM fun (i : Fin 8) => loadTransformerLayer weightsPath i
 
   let downsampleWeight ← loadFrozen (dtype := dtypes.compute.val) weightsPath "encoder.downsample.conv.weight" #[512, 512, 4]
   let semanticRVQ ← loadEncodeRVQ weightsPath "encoder.quantizer.semantic_residual_vector_quantizer" semanticLayers

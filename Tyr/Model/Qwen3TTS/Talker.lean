@@ -44,7 +44,7 @@ structure TalkerModel (cfg : TalkerConfig) (dtype : RealFloatingDType := float32
   textProjectionFc1Bias : Tensor { shape := #[cfg.textHiddenSize], dtype := dtype.val, device := device }
   textProjectionFc2 : Tensor { shape := #[cfg.hiddenSize, cfg.textHiddenSize], dtype := dtype.val, device := device }
   textProjectionFc2Bias : Tensor { shape := #[cfg.hiddenSize], dtype := dtype.val, device := device }
-  layers : Array (TalkerLayer (dtype := dtype) (device := device) cfg)
+  layers : Vector (TalkerLayer (dtype := dtype) (device := device) cfg) cfg.numHiddenLayers
   norm : RMSNorm (device := device) cfg.hiddenSize dtype.val
   deriving TensorStruct
 
@@ -58,12 +58,10 @@ def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : RealFloatingDTy
   let textProjectionFc2 ← initWeight (device := device) #[cfg.hiddenSize, cfg.textHiddenSize] cfg.textHiddenSize
   let textProjectionFc2Bias ← initWeight (device := device) #[cfg.hiddenSize] cfg.textHiddenSize
 
-  let mut layers := #[]
-  for _ in [:cfg.numHiddenLayers] do
-    let layer ← qwen.QwenLayer.init (device := device)
+  let layers ← Vector.ofFnM fun (_ : Fin cfg.numHiddenLayers) =>
+    qwen.QwenLayer.init (device := device)
       cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads
       cfg.headDim cfg.intermediateSize cfg.rmsNormEps dtype.val
-    layers := layers.push layer
 
   let norm ← RMSNorm.init (device := device) cfg.hiddenSize cfg.rmsNormEps dtype.val
   pure {
@@ -154,7 +152,7 @@ structure TalkerCodePredictor (cfg : TalkerConfig) (dtype : RealFloatingDType :=
   inputEmbeddings : Vector (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }) (cfg.numCodeGroups - 1)
   inputProjection : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], dtype := dtype.val, device := device }
   inputProjectionBias : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device }
-  layers : Array (CodePredictorLayer (dtype := dtype) (device := device) cfg.codePredictorConfig)
+  layers : Vector (CodePredictorLayer (dtype := dtype) (device := device) cfg.codePredictorConfig) cfg.codePredictorConfig.numHiddenLayers
   norm : RMSNorm (device := device) cfg.codePredictorConfig.hiddenSize dtype.val
   lmHeads : Vector (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device }) (cfg.numCodeGroups - 1)
   deriving TensorStruct
@@ -173,16 +171,14 @@ def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : RealFloatingDTy
     cfg.hiddenSize
   let inputProjectionBias ← initWeight (device := device) #[cfg.codePredictorConfig.hiddenSize] cfg.hiddenSize
 
-  let mut layers := #[]
-  for _ in [:cfg.codePredictorConfig.numHiddenLayers] do
-    let layer ← qwen.QwenLayer.init (device := device)
+  let layers ← Vector.ofFnM fun (_ : Fin cfg.codePredictorConfig.numHiddenLayers) =>
+    qwen.QwenLayer.init (device := device)
       cfg.codePredictorConfig.hiddenSize
       cfg.codePredictorConfig.numAttentionHeads
       cfg.codePredictorConfig.numKeyValueHeads
       cfg.codePredictorConfig.headDim
       cfg.codePredictorConfig.intermediateSize
       cfg.codePredictorConfig.rmsNormEps dtype.val
-    layers := layers.push layer
 
   let norm ← RMSNorm.init (device := device) cfg.codePredictorConfig.hiddenSize cfg.codePredictorConfig.rmsNormEps dtype.val
 
@@ -396,10 +392,6 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
   let residualGroups := cfg.numCodeGroups - 1
   if hr : residualGroups > 0 then
     let cpCfg := cfg.codePredictorConfig
-    if m.codePredictor.layers.size != cpCfg.numHiddenLayers then
-      throw <| IO.userError
-        s!"Code predictor layer/cache mismatch: model has {m.codePredictor.layers.size} layers but cfg.numHiddenLayers={cpCfg.numHiddenLayers}."
-
     let cpDevice := lastHidden.device
     let cpMaxSeq : Nat := cfg.numCodeGroups + 1
     let (cpCosAll, cpSinAll) : (Tensor { shape := #[cpMaxSeq, cpCfg.halfHeadDim], dtype := .Float32, device := device } × Tensor { shape := #[cpMaxSeq, cpCfg.halfHeadDim], dtype := .Float32, device := device }) :=
@@ -439,11 +431,9 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
         let sin : Tensor { shape := #[1, cpCfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice cpSinAll 0 n 1
         let mut h : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } := xProj
         let mut next : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq (n + 1) dtype.val) := Array.mkEmpty caches.size
-        for i in [:m.codePredictor.layers.size] do
-          let layer : CodePredictorLayer (dtype := dtype) (device := device) cpCfg ←
-            match m.codePredictor.layers[i]? with
-            | some layer => pure layer
-            | none => throw <| IO.userError s!"missing code predictor layer at index {i}"
+        for hi : i in [:m.codePredictor.layers.size] do
+          let layer : CodePredictorLayer (dtype := dtype) (device := device) cpCfg :=
+            m.codePredictor.layers[i]'hi.upper
           let cache : qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq n dtype.val ←
             match caches[i]? with
             | some cache => pure cache
@@ -607,10 +597,6 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
     if maxFrames == 0 then
       return Array.replicate batch 0
 
-    if m.model.layers.size != cfg.numHiddenLayers then
-      throw <| IO.userError
-        s!"Talker layer/cache mismatch: model has {m.model.layers.size} layers but cfg.numHiddenLayers={cfg.numHiddenLayers}."
-
     let cacheDevice := talkerInputs.device
     let support ← dtype.val.acquireConstantSupport cacheDevice
     let _ := support.down
@@ -637,11 +623,8 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
         let sin : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice sinAll 0 n 1
         let mut h : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := x
         let mut next : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen (n + 1) dtype.val) := Array.mkEmpty caches.size
-        for i in [:m.model.layers.size] do
-          let layer : TalkerLayer (dtype := dtype) (device := device) cfg ←
-            match m.model.layers[i]? with
-            | some layer => pure layer
-            | none => throw <| IO.userError s!"missing talker layer at index {i}"
+        for hi : i in [:m.model.layers.size] do
+          let layer : TalkerLayer (dtype := dtype) (device := device) cfg := m.model.layers[i]'hi.upper
           let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen n dtype.val ←
             match caches[i]? with
             | some cache => pure cache
