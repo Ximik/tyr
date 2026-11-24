@@ -153,8 +153,6 @@ private def writeFluxCheckpoint (path : System.FilePath) (bf16 : Bool)
     let path := dir / (if bf16 then "bf16.safetensors" else "fp32.safetensors")
     writeFluxCheckpoint path bf16
     let ⟨storedDType, model⟩ ← loadFluxModel path.toString cfg
-    LeanTest.assertEqual model.double_blocks.size 1
-    LeanTest.assertEqual model.single_blocks.size 1
     let dtype := if bf16 then DType.BFloat16 else .Float32
     LeanTest.assertEqual model.img_in.actualSpec.dtype dtype
     let some block := model.double_blocks[0]? | throw (IO.userError "missing double block")

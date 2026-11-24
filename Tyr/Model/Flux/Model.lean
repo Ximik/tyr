@@ -73,9 +73,9 @@ structure FluxModel (cfg : FluxConfig) (dtype : DType := .Float32) where
   /-- Timestep embedder -/
   time_in : MLPEmbedder (device := device) (dtype := dtype) cfg.time_dim cfg.hidden_size
   /-- Double-stream blocks (Flux Klein uses mlp_ratio=3.0) -/
-  double_blocks : Array (DoubleStreamBlock (device := device) (dtype := dtype) cfg.hidden_size cfg.num_heads cfg.head_dim (FluxConfig.mlpHiddenDim cfg))
+  double_blocks : Vector (DoubleStreamBlock (device := device) (dtype := dtype) cfg.hidden_size cfg.num_heads cfg.head_dim (FluxConfig.mlpHiddenDim cfg)) cfg.num_double_layers
   /-- Single-stream blocks (Flux Klein uses mlp_ratio=3.0) -/
-  single_blocks : Array (SingleStreamBlock (device := device) (dtype := dtype) cfg.hidden_size cfg.num_heads cfg.head_dim (FluxConfig.mlpHiddenDim cfg))
+  single_blocks : Vector (SingleStreamBlock (device := device) (dtype := dtype) cfg.hidden_size cfg.num_heads cfg.head_dim (FluxConfig.mlpHiddenDim cfg)) cfg.num_single_layers
   /-- Model-level modulation for double-stream image path -/
   double_stream_modulation_img : Modulation (device := device) (dtype := dtype) cfg.hidden_size true
   /-- Model-level modulation for double-stream text path -/
@@ -105,16 +105,12 @@ def init (cfg : FluxConfig) (device : Device := .CPU) (dtype : DType := .Float32
   let mlp_hidden := FluxConfig.mlpHiddenDim cfg
 
   -- Double blocks (Flux Klein uses mlp_ratio=3.0)
-  let mut double_blocks := #[]
-  for _ in [:cfg.num_double_layers] do
-    let block ← DoubleStreamBlock.init (dtype := dtype) (device := device) cfg.hidden_size cfg.num_heads cfg.head_dim mlp_hidden
-    double_blocks := double_blocks.push block
+  let double_blocks ← Vector.ofFnM fun (_ : Fin cfg.num_double_layers) =>
+    DoubleStreamBlock.init (dtype := dtype) (device := device) cfg.hidden_size cfg.num_heads cfg.head_dim mlp_hidden
 
   -- Single blocks (Flux Klein uses mlp_ratio=3.0)
-  let mut single_blocks := #[]
-  for _ in [:cfg.num_single_layers] do
-    let block ← SingleStreamBlock.init (dtype := dtype) (device := device) cfg.hidden_size cfg.num_heads cfg.head_dim mlp_hidden
-    single_blocks := single_blocks.push block
+  let single_blocks ← Vector.ofFnM fun (_ : Fin cfg.num_single_layers) =>
+    SingleStreamBlock.init (dtype := dtype) (device := device) cfg.hidden_size cfg.num_heads cfg.head_dim mlp_hidden
 
   -- Model-level modulation (Flux2 style)
   let double_stream_modulation_img ← Modulation.init (dtype := dtype) (device := device) cfg.hidden_size true
@@ -150,8 +146,8 @@ def init (cfg : FluxConfig) (device : Device := .CPU) (dtype : DType := .Float32
     txt_ids: [batch, txt_seq, 4] - text position IDs for RoPE
     Returns: [batch, img_seq, in_channels] - predicted noise -/
 -- Helper to process double blocks using fold (avoids Id.run array iteration bug)
-private def processDoubleBlocks {batch img_seq txt_seq hidden_size num_heads half mlp_hidden : Nat}
-    (blocks : Array (DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads (2 * half) mlp_hidden))
+private def processDoubleBlocks {batch img_seq txt_seq hidden_size num_heads half mlp_hidden n : Nat}
+    (blocks : Vector (DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads (2 * half) mlp_hidden) n)
     (img : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] })
     (txt : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] })
     (img_pe : Tensor { device := device, shape := #[batch, 1, img_seq, half, 2, 2], dtype := .Float32 })
@@ -159,18 +155,17 @@ private def processDoubleBlocks {batch img_seq txt_seq hidden_size num_heads hal
     (mod_img : Tensor { dtype := dtype, device := device, shape := #[batch, 6, hidden_size] })
     (mod_txt : Tensor { dtype := dtype, device := device, shape := #[batch, 6, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] } × Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] } :=
-  blocks.foldl (init := (img, txt)) fun (img, txt) block =>
-    block.forward img txt img_pe txt_pe mod_img mod_txt
+  blocks.foldl (fun (img, txt) block =>
+    block.forward img txt img_pe txt_pe mod_img mod_txt) (img, txt)
 
 -- Helper to process single blocks using fold
-private def processSingleBlocks {batch seq hidden_size num_heads half mlp_hidden : Nat}
-    (blocks : Array (SingleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads (2 * half) mlp_hidden))
+private def processSingleBlocks {batch seq hidden_size num_heads half mlp_hidden n : Nat}
+    (blocks : Vector (SingleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads (2 * half) mlp_hidden) n)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] })
     (pe : Tensor { device := device, shape := #[batch, 1, seq, half, 2, 2], dtype := .Float32 })
     (mod : Tensor { dtype := dtype, device := device, shape := #[batch, 3, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] } :=
-  blocks.foldl (init := x) fun x block =>
-    block.forward x pe mod
+  blocks.foldl (fun x block => block.forward x pe mod) x
 
 def forward {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
     (model : FluxModel (device := device) (dtype := dtype) cfg)

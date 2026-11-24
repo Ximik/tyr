@@ -147,17 +147,13 @@ def loadFluxModel (path : String) (cfg : FluxConfig)
   let single_stream_modulation ← loadModulationFlux2 (dtype := dtype) (device := device) path "single_stream_modulation" cfg.hidden_size false
 
   -- Double blocks (using Flux2 loading)
-  let mut double_blocks := #[]
-  for i in [:cfg.num_double_layers] do
-    let block ← loadDoubleStreamBlockFlux2 (dtype := dtype) (device := device) path s!"double_blocks.{i}" cfg
-    double_blocks := double_blocks.push block
+  let double_blocks ← Vector.ofFnM fun (i : Fin cfg.num_double_layers) =>
+    loadDoubleStreamBlockFlux2 (dtype := dtype) (device := device) path s!"double_blocks.{i}" cfg
   log.onInfo s!"  Loaded {cfg.num_double_layers} double blocks"
 
   -- Single blocks (using Flux2 loading)
-  let mut single_blocks := #[]
-  for i in [:cfg.num_single_layers] do
-    let block ← loadSingleStreamBlockFlux2 (dtype := dtype) (device := device) path s!"single_blocks.{i}" cfg
-    single_blocks := single_blocks.push block
+  let single_blocks ← Vector.ofFnM fun (i : Fin cfg.num_single_layers) =>
+    loadSingleStreamBlockFlux2 (dtype := dtype) (device := device) path s!"single_blocks.{i}" cfg
   log.onInfo s!"  Loaded {cfg.num_single_layers} single blocks"
 
   -- Final layer (Flux2 uses elementwise_affine=False for norm)
