@@ -5,6 +5,7 @@ import Tyr.Torch
 import Tyr.TensorStruct
 import Tyr.Optim
 import Examples.GPT.GPT
+import Tyr.Util
 
 namespace torch.train
 
@@ -42,8 +43,7 @@ def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=
     -- Cosine decay
     let decayRatio := (iterNum - cfg.warmupIters).toFloat /
                       (cfg.lrDecayIters - cfg.warmupIters).toFloat
-    let pi : Float := 3.14159265358979323846
-    let coeff := 0.5 * (1.0 + Float.cos (pi * decayRatio))
+    let coeff := 0.5 * (1.0 + Float.cos (Float.pi * decayRatio))
     cfg.minLr + coeff * (cfg.learningRate - cfg.minLr)
 
 /-- Get a random batch of data from token array

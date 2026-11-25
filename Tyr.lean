@@ -1,6 +1,7 @@
 -- Core infrastructure
 import Tyr.FFI.Basic
 import Tyr.Log
+import Tyr.Util
 import Tyr.Torch
 import Tyr.Typed
 import Tyr.SafeTensors

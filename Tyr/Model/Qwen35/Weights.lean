@@ -10,6 +10,7 @@ import Tyr.Log
 import Tyr.SafeTensors.Source
 import Tyr.Model.Utils
 import Tyr.Model.Qwen35.Model
+import Tyr.Util
 
 namespace torch.qwen35
 
@@ -17,7 +18,7 @@ variable {device : Device}
 
 open torch.Log
 open torch.Model (dequantizeFP8 dequantizeFP8Experts checkFP8Blocks)
-open torch.safetensors (pushUnique Source)
+open torch.safetensors (Source)
 
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
     SomeDTypeTensor shape device := ⟨tensor.1, tensor.2.detach⟩
@@ -37,14 +38,14 @@ private def finalizeDequantizedForDevice {s : Shape} (device : Device)
 
 private def nameCandidates (name : String) : Array String :=
   let out : Array String := #[]
-  let out := pushUnique out name
-  let out := pushUnique out s!"language_model.{name}"
-  let out := pushUnique out s!"model.language_model.{name}"
+  let out := out.pushUnique name
+  let out := out.pushUnique s!"language_model.{name}"
+  let out := out.pushUnique s!"model.language_model.{name}"
   let out :=
     if name.startsWith "model." then
       let suffix := name.drop 6
-      let out := pushUnique out s!"model.language_model.{suffix}"
-      pushUnique out s!"language_model.{suffix}"
+      let out := out.pushUnique s!"model.language_model.{suffix}"
+      out.pushUnique s!"language_model.{suffix}"
     else
       out
   out

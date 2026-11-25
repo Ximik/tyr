@@ -78,9 +78,4 @@ def loadAs (src : Source) (name : String) (spec : TensorSpec) (device : Device :
 
 end Source
 
-/-- Append `x` to `xs` unless already present. Used by checkpoint
-    tensor-name candidate generators. -/
-def pushUnique (xs : Array String) (x : String) : Array String :=
-  if xs.contains x then xs else xs.push x
-
 end torch.safetensors

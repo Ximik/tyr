@@ -48,25 +48,26 @@ import Tyr.Log
 import Tyr.SafeTensors.Source
 import Tyr.Model.Utils
 import Tyr.Model.Laguna.Model
+import Tyr.Util
 
 namespace torch.laguna
 
 variable {device : Device}
 open torch.Log
-open torch.safetensors (pushUnique Source)
+open torch.safetensors (Source)
 
 /-- Candidate names for one checkpoint tensor, tolerant of common
     wrapper prefixes (mirrors the Qwen35 loader). -/
 private def nameCandidates (name : String) : Array String :=
   let out : Array String := #[]
-  let out := pushUnique out name
-  let out := pushUnique out s!"language_model.{name}"
-  let out := pushUnique out s!"model.language_model.{name}"
+  let out := out.pushUnique name
+  let out := out.pushUnique s!"language_model.{name}"
+  let out := out.pushUnique s!"model.language_model.{name}"
   let out :=
     if name.startsWith "model." then
       let suffix := name.drop 6
-      let out := pushUnique out s!"model.language_model.{suffix}"
-      pushUnique out s!"language_model.{suffix}"
+      let out := out.pushUnique s!"model.language_model.{suffix}"
+      out.pushUnique s!"language_model.{suffix}"
     else
       out
   out

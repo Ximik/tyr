@@ -11,6 +11,7 @@ import Tyr.Model.Qwen3ASR.Model
 import Tyr.Model.Qwen3ASR.Frontend
 import Tyr.Model.Qwen3ASR.Processor
 import Tyr.Tokenizer.Qwen3
+import Tyr.Util
 
 namespace torch.qwen3asr
 
@@ -310,9 +311,6 @@ private def findSingleContiguousAudioSpanStart
           none
       | none => none
 
-private def ceilDivNat (num den : Nat) : Nat :=
-  if den == 0 then 0 else (num + den - 1) / den
-
 private def buildStreamingFrontendPackWithCache
     {cfg : Qwen3ASRConfig}
     (preprocessor : PreprocessorConfig)
@@ -368,7 +366,7 @@ private def buildStreamingFrontendPackWithCache
         let hopNat := preprocessor.hopLength
         let nFftNat := preprocessor.nFft
         let halfWindow := nFftNat / 2
-        let contextFrames := ceilDivNat halfWindow hopNat + 1
+        let contextFrames := halfWindow.ceilDiv hopNat + 1
         let prevFramesNat := fc.frames
         let replaceStartFrameNat :=
           if prevFramesNat > contextFrames then
