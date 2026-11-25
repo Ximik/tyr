@@ -32,7 +32,6 @@ def init (dim : Nat) (eps : Float := 1e-6) (dtype : DType := .Float32)
     (device : Device := .CPU) : IO (RMSNorm dim dtype device) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
-  IO.ofExcept (Shape.validateAllocation #[dim])
   let weight ← Tensor.parameter (Tensor.onesFor { shape := #[dim], dtype, device })
   pure { weight, eps := ⟨eps⟩ }
 

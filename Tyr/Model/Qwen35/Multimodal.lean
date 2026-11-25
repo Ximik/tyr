@@ -86,7 +86,6 @@ structure Qwen35VisionLayerNorm (dim : Nat) where
 namespace Qwen35VisionLayerNorm
 
 def init (dim : Nat) (eps : Float := 1e-6) (device : Device := .CPU) : IO (Qwen35VisionLayerNorm (device := device) dim) := do
-  IO.ofExcept (Shape.validateAllocation #[dim])
   pure {
     weight := ⟨.Float32, (← Tensor.parameter (Tensor.ones #[dim] (device := device)))⟩
     bias := ⟨.Float32, (← Tensor.parameter (Tensor.zeros #[dim] (device := device)))⟩

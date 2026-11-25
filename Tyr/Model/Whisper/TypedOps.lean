@@ -18,7 +18,6 @@ def zerosFor (s : Shape) (grad : Bool := false) (device : Device := .CPU)
 
 def initLayerNorm (dim : Nat) (eps : Float := 1e-5) (device : Device := .CPU)
     (dtype : DType := .Float32) : IO (LayerNorm (device := device) dim dtype) := do
-  IO.ofExcept (Shape.validateAllocation #[dim])
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   pure {

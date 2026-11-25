@@ -65,7 +65,6 @@ def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : Nat)
     throw <| IO.userError "KV cache dimensions must be positive"
   let support ← DType.BFloat16.acquireConstantSupport device
   let _ := support.down
-  IO.ofExcept (Shape.validateAllocation #[batch, numKvHeads, maxSeqLen, headDim])
   -- The pure zero template can be shared. Each explicit IO clone owns
   -- independent cache storage, both for K/V and across layers.
   let template := Tensor.zerosFor

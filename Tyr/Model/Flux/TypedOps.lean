@@ -11,7 +11,6 @@ def randomWeight (s : Shape) (device : Device := .CPU) (dtype : DType := .Float3
 
 def initLayerNorm (dim : Nat) (eps : Float := 1e-5) (train : Bool := true) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (LayerNorm (device := device) dim dtype) := do
-  IO.ofExcept (Shape.validateAllocation #[dim])
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   let weight := Tensor.onesFor { shape := #[dim], dtype, device }

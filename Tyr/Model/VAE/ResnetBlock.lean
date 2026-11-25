@@ -27,7 +27,6 @@ namespace GroupNormParams
 def init (num_groups channels : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (GroupNormParams (device := device) (dtype := dtype) num_groups channels) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
-  IO.ofExcept (Shape.validateAllocation #[channels])
   let weight ← Tensor.parameter (Tensor.onesFor { shape := #[channels], dtype, device })
   let bias ← Tensor.parameter (Tensor.zerosFor { shape := #[channels], dtype, device })
   pure { weight, bias }

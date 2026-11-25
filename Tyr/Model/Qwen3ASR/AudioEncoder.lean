@@ -28,7 +28,6 @@ private def initBias (shape : Shape) (device : Device := .CPU) (dtype : DType :=
   Model.initBias (device := device) shape dtype
 
 private def initLayerNorm (dim : Nat) (eps : Float := 1e-5) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LayerNorm (device := device) dim dtype) := do
-  IO.ofExcept (Shape.validateAllocation #[dim])
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   pure {

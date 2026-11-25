@@ -30,7 +30,6 @@ def initWeight (shape : Shape) (fanIn : Nat) (dtype : DType := .Float32) (device
 def initBias (shape : Shape) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) := do
   let support ← dtype.acquireConstantSupport device
   let _ : DType.ConstantSupported dtype device := support.down
-  IO.ofExcept (Shape.validateAllocation shape)
   Tensor.parameter (Tensor.zerosFor { shape, dtype, device })
 
 /-- Blockwise FP8 scales cover whole 128x128 blocks; checked where the scales are loaded. -/

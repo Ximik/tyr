@@ -24,7 +24,6 @@ namespace LayerNorm
 /-- Initialize layer norm with ones for weight and zeros for bias -/
 def init (dim : Nat) (eps : Float := 1e-5) (device : Device := .CPU) :
     IO (LayerNorm dim .Float32 device) := do
-  IO.ofExcept (Shape.validateAllocation #[dim])
   let weight ← Tensor.parameter (Tensor.ones #[dim] (device := device))
   let bias ← Tensor.parameter (Tensor.zeros #[dim] (device := device))
   pure { weight, bias, eps := ⟨eps⟩ }

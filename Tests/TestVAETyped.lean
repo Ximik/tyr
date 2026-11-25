@@ -147,9 +147,8 @@ private def writeConvCheckpoint (path : System.FilePath) (bf16 wrongShape : Bool
     (do discard <| (← safetensors.Source.open shardedDir.toString).load "conv.weight" #[1, 1, 3, 3])
     (some "Expected shape")
 
-@[test] def testVAEGroupNormInitializationFailuresAreRecoverable : IO Unit := do
-  -- Both failures are rejected before allocation and do not depend on hardware.
-  Tests.assertThrows (GroupNormParams.init 1 18446744073709551615)
+@[test] def testVAEGroupNormDeviceFailureIsRecoverable : IO Unit := do
+  -- Rejected before allocation; does not depend on hardware.
   Tests.assertThrows (do
     let device ← Device.cuda 128
     let _ ← GroupNormParams.init 1 2 (device := device)

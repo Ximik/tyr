@@ -70,11 +70,13 @@ example (_dtype : DType) : True := by
 
 -- Shape compatibility cannot rescue undefined promotion. Matrix multiplication
 -- additionally rejects unequal dtypes even when ordinary promotion is defined.
-example : TensorSpec.pointwise? ⟨#[2], .QInt8⟩ ⟨#[2], .Float32⟩ = none := by decide
-example : TensorSpec.division? ⟨#[2], .Float8E4M3FN⟩ ⟨#[2], .Float32⟩ = none := by decide
-example : TensorSpec.matmul? ⟨#[2, 3], .Float32⟩ ⟨#[3, 4], .Float64⟩ = none := by decide
-example : TensorSpec.matmul? ⟨#[2, 3], .Float32⟩ ⟨#[3, 4], .Float32⟩ =
-    some ⟨#[2, 4], .Float32⟩ := by decide
+example : TensorSpec.pointwiseDType? ⟨#[2], .QInt8⟩ ⟨#[2], .Float32⟩ = none := by decide
+example : TensorSpec.pointwiseDType? ⟨#[2], .Float8E4M3FN⟩ ⟨#[2], .Float32⟩ = none := by decide
+example (a : Tensor ⟨#[2, 3], .Float32, .CPU⟩) (b : Tensor ⟨#[3, 4], .Float32, .CPU⟩) :
+    Tensor ⟨#[2, 4], .Float32, .CPU⟩ := a.matmul b
+example (_a : Tensor ⟨#[2, 3], .Float32, .CPU⟩) (_b : Tensor ⟨#[3, 4], .Float64, .CPU⟩) : True := by
+  fail_if_success have _ := _a.matmul _b
+  trivial
 
 -- These functions are elaborated without allocating tensors or invoking kernels.
 example (a : Tensor ⟨#[2], .UInt8, .CPU⟩) (b : Tensor ⟨#[2], .Int8, .CPU⟩) :

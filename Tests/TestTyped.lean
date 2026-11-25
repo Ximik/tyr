@@ -90,14 +90,6 @@ def testDTypePromotionPolicy : IO Unit := do
 @[test]
 def testTensorSpecAlgebra : IO Unit := do
   LeanTest.assertEqual (Shape.numel #[2, 3, 4]) 24
-  LeanTest.assertEqual (TensorSpec.broadcastShapes? #[3] #[2, 3]) (some #[2, 3])
-  LeanTest.assertEqual (TensorSpec.broadcastShapes? #[2, 3] #[4, 3]) none
-  LeanTest.assertEqual (TensorSpec.matmulShape? #[2, 3] #[3, 4]) (some #[2, 4])
-  LeanTest.assertEqual (TensorSpec.matmulShape? #[2, 3] #[5, 4]) none
-  let lhs : TensorSpec := { shape := #[2, 3], dtype := .Float16 }
-  let rhs : TensorSpec := { shape := #[3], dtype := .BFloat16 }
-  LeanTest.assertTrue (TensorSpec.pointwise? lhs rhs == some { shape := #[2, 3], dtype := .Float32 })
-    "pointwise specs should combine broadcast shape and promoted dtype"
 
 @[test]
 def testStrictSpecChecks : IO Unit := do
@@ -275,28 +267,18 @@ def testTypedOpsShapeAndUnaryParity : IO Unit := do
   assertValid x.toBFloat16.toFloat32 "toFloat32"
   assertValid x.toInt64 "toInt64"
 
-/-- Pure broadcast-shape algebra (NumPy/PyTorch rules: right-align, pad with
-    leading 1s, dims must match or be 1). -/
-@[test]
-def testBroadcastShapeAlgebra : IO Unit := do
-  LeanTest.assertEqual (TensorSpec.broadcastShapes? #[2, 3] #[3]) (some #[2, 3])
-    "trailing-dim bias pattern"
-  LeanTest.assertEqual (TensorSpec.broadcastShapes? #[3, 2, 1] #[2, 7]) (some #[3, 2, 7])
-    "rank extension plus dim-1 expansion"
-  LeanTest.assertEqual (TensorSpec.broadcastShapes? #[1, 3] #[2, 1]) (some #[2, 3])
-    "mutual expansion produces a shape neither input has"
-  LeanTest.assertEqual (TensorSpec.broadcastShapes? #[] #[2, 3]) (some #[2, 3])
-    "scalar broadcasts to anything"
-  LeanTest.assertEqual (TensorSpec.broadcastShapes? #[2, 3] #[4, 3]) none
-    "mismatched non-1 dims must fail"
-  LeanTest.assertEqual (TensorSpec.broadcastList? [#[1, 2, 3], #[2, 3], #[]]) (some #[1, 2, 3])
-    "n-ary broadcast folds the binary rule"
-  LeanTest.assertEqual (TensorSpec.broadcastList? []) none
-    "empty list has no broadcast shape"
-  LeanTest.assertTrue (TensorSpec.broadcastShapes? #[3] #[2, 3] == some #[2, 3])
-    "fixed-side check: #[3] broadcastsTo #[2, 3]"
-  LeanTest.assertTrue (TensorSpec.broadcastShapes? #[2, 3] #[3] != some #[3])
-    "fixed-side check: #[2, 3] does not broadcastTo #[3]"
+-- Broadcasting right-aligns shapes and pads with leading 1s; extents must match or be 1.
+example : Shape.broadcast #[2, 3] #[3] = #[2, 3] := by decide
+example : Shape.broadcast #[3, 2, 1] #[2, 7] = #[3, 2, 7] := by decide
+example : Shape.broadcast #[1, 3] #[2, 1] = #[2, 3] := by decide
+example : Shape.broadcast #[] #[2, 3] = #[2, 3] := by decide
+example : Shape.BroadcastCompatible #[1, 3] #[2, 1] := by decide
+example : ¬ Shape.BroadcastCompatible #[2, 3] #[4, 3] := by decide
+example : Shape.BroadcastToCompatible #[3] #[2, 3] := by decide
+example : ¬ Shape.BroadcastToCompatible #[2, 3] #[3] := by decide
+example : Shape.matmul #[2, 3] #[3, 4] = #[2, 4] := by decide
+example : Shape.MatmulCompatible #[8, 2, 3] #[3, 4] := by decide
+example : ¬ Shape.MatmulCompatible #[2, 3] #[5, 4] := by decide
 
 /-- Broadcasting typed ops: output shape is inferred at compile time via the
     `rfl` auto-param; these assert the runtime (native libtorch broadcasting

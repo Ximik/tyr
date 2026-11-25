@@ -68,7 +68,6 @@ def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : Nat) : IO (Tenso
 /-- Allocate private collective storage with the input's exact dtype and device. -/
 private def collectiveOutput {σ : StaticSpec} (shape : Shape) (_input : Tensor σ) :
     IO (Tensor (σ.withShape shape)) := do
-  IO.ofExcept (Shape.validateAllocation shape)
   let support ← σ.dtype.acquireConstantSupport σ.device
   let _ := support.down
   let template := Tensor.zerosFor { shape, dtype := σ.dtype, device := σ.device }

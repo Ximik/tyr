@@ -15,7 +15,6 @@ def softplusDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtyp
 
 def randDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (Tensor { device, shape, dtype }) := do
-  IO.ofExcept (Shape.validateAllocation shape)
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   Tensor.uniformLike (Tensor.zerosFor { shape, dtype, device })
