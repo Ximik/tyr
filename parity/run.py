@@ -84,11 +84,6 @@ def malformed(tests: dict) -> list[str]:
 
 
 def run_stage(args) -> None:
-    if args.stage == "reference" and args.device[0] == "cuda":
-        import torch
-
-        # PyTorch lets cuDNN convolutions compute in TF32 by default; the references stand for exact float32.
-        torch.backends.cudnn.allow_tf32 = False
     module = importlib.import_module(f"tests.{args.test}")
     getattr(module, args.stage)(
         PARITY / "cases" / f"{args.case}.json", Path(args.weights), args.device[0], args.dtype, Path(args.out),
