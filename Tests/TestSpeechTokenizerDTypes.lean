@@ -65,7 +65,7 @@ private def writeAnchors (path : System.FilePath) (computeShape : Array Nat)
   let mut data := ByteArray.empty
   for (name, shape, isBF16) in entries do
     let start := data.size
-    let byteCount := TensorSpec.numelOfShape shape * (if isBF16 then 2 else 4)
+    let byteCount := Shape.numel shape * (if isBF16 then 2 else 4)
     data := data ++ ByteArray.mk (Array.replicate byteCount 0)
     header := header ++ [(name, Lean.Json.mkObj [
       ("dtype", Lean.toJson (if isBF16 then "BF16" else "F32")),

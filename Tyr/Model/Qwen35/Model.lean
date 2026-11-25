@@ -642,7 +642,7 @@ private def causalDepthwiseConv {batch seq : Nat} (cfg : Config)
     let raw := Tensor.conv1dGroups x weight bias 1 (cfg.linear_conv_kernel_dim - 1) 1
       (Config.linearConvDim cfg) hv
       ⟨Qwen35Config.linearConvDim_pos cfg, (Nat.one_mul _).symm, Nat.dvd_refl _⟩
-    Tensor.slice raw 2 0 seq (_bounds := by simp [Tensor.convExtent]; omega)
+    Tensor.slice raw 2 0 seq (_bounds := by simp [Shape.convLength]; omega)
   else
     have hSeq : seq = 0 := by unfold Tensor.ConvValid at hv; omega
     hSeq ▸ (Tensor.zerosFor _ :
@@ -704,8 +704,8 @@ def forward {batch seq : Nat}
         let stNext : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim], dtype := dtype } :=
           Tensor.slice catIn 2 1 cfg.linear_conv_kernel_dim
         have hK := cfg.convKernelPos
-        have hExtent : Tensor.convExtent (cfg.linear_conv_kernel_dim + 1) cfg.linear_conv_kernel_dim 1 0 1 = 2 := by
-          simp [Tensor.convExtent]; omega
+        have hExtent : Shape.convLength (cfg.linear_conv_kernel_dim + 1) cfg.linear_conv_kernel_dim 1 0 1 = 2 := by
+          simp [Shape.convLength]; omega
         let raw : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, 2], dtype := dtype } :=
           (Tensor.conv1dGroups convIn m.conv1d_weight m.conv1d_bias 1 0 1 (Config.linearConvDim cfg)
             ⟨by decide, by decide, hK, by omega⟩

@@ -10,10 +10,10 @@ open Tyr.Modular
 open Tyr.Manifolds
 
 private def vectorToColumn {n : Nat} (v : Tensor { shape := #[n], dtype := .Float32, device := .CPU }) : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
-  Tensor.reshape v #[n, 1] (by simp [TensorSpec.numelOfShape])
+  Tensor.reshape v #[n, 1] (by simp [Shape.numel])
 
 private def columnToVector {n : Nat} (v : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU }) : Tensor { shape := #[n], dtype := .Float32, device := .CPU } :=
-  Tensor.reshape v #[n] (by simp [TensorSpec.numelOfShape])
+  Tensor.reshape v #[n] (by simp [Shape.numel])
 
 @[test]
 def testMetricFactorPullbackMatchesExplicitMatmul : IO Unit := do

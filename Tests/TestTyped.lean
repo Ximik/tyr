@@ -89,7 +89,7 @@ def testDTypePromotionPolicy : IO Unit := do
 
 @[test]
 def testTensorSpecAlgebra : IO Unit := do
-  LeanTest.assertEqual (TensorSpec.numelOfShape #[2, 3, 4]) 24
+  LeanTest.assertEqual (Shape.numel #[2, 3, 4]) 24
   LeanTest.assertEqual (TensorSpec.broadcastShapes? #[3] #[2, 3]) (some #[2, 3])
   LeanTest.assertEqual (TensorSpec.broadcastShapes? #[2, 3] #[4, 3]) none
   LeanTest.assertEqual (TensorSpec.matmulShape? #[2, 3] #[3, 4]) (some #[2, 4])

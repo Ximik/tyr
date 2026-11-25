@@ -340,8 +340,8 @@ private def chunkLensFromCumsum (cs : Array Nat) : Array Nat :=
     out
 
 theorem convExtent_downsampleOnce {n : Nat} (h : 0 < n) :
-    Tensor.convExtent n 3 2 1 1 = AudioEncoderConfig.downsampleOnce n := by
-  unfold Tensor.convExtent AudioEncoderConfig.downsampleOnce; split <;> simp_all <;> omega
+    Shape.convLength n 3 2 1 1 = AudioEncoderConfig.downsampleOnce n := by
+  unfold Shape.convLength AudioEncoderConfig.downsampleOnce; split <;> simp_all <;> omega
 
 theorem downsampleOnce_pos {n : Nat} (h : 0 < n) : 0 < AudioEncoderConfig.downsampleOnce n := by
   unfold AudioEncoderConfig.downsampleOnce; split <;> simp_all

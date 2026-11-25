@@ -140,11 +140,11 @@ def forward {batch height width : Nat}
   -- Post-quant conv: [batch, 32, 32, 32] → [batch, 32, 32, 32]
   let z := Tensor.conv2dBias z dec.post_quant_conv.weight dec.post_quant_conv.bias (1, 1) (0, 0)
   let z := Tensor.reshape z #[batch, 32, height, width]
-    (by simp [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1)])
+    (by simp [Shape.convLength_same hh (by decide : 2 * 0 + 1 = 1), Shape.convLength_same hw (by decide : 2 * 0 + 1 = 1)])
   -- Initial conv: [batch, 32, 32, 32] → [batch, 512, 32, 32]
   let h := Tensor.conv2dBias z dec.conv_in.weight dec.conv_in.bias (1, 1) (1, 1)
   let h := Tensor.reshape h #[batch, 512, height, width]
-    (by simp [Tensor.convExtent_same hh (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw (by decide : 2 * 1 + 1 = 3)])
+    (by simp [Shape.convLength_same hh (by decide : 2 * 1 + 1 = 3), Shape.convLength_same hw (by decide : 2 * 1 + 1 = 3)])
   -- Middle block
   let h := dec.mid_block_1.forward h hh hw
   let h := dec.mid_attn.forward h hh hw
@@ -173,7 +173,7 @@ def forward {batch height width : Nat}
   let h := swish h
   let h := Tensor.conv2dBias h dec.conv_out.weight dec.conv_out.bias (1, 1) (1, 1)
   Tensor.reshape h #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2]
-    (by simp [Tensor.convExtent_same hh3 (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw3 (by decide : 2 * 1 + 1 = 3)])
+    (by simp [Shape.convLength_same hh3 (by decide : 2 * 1 + 1 = 3), Shape.convLength_same hw3 (by decide : 2 * 1 + 1 = 3)])
 
 end Decoder
 

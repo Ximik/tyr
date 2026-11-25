@@ -96,23 +96,13 @@ def elu {σ : StaticSpec} (t : Tensor σ)
 /-- Mean for floating or complex checkpoint tensors; invalid axes, integral
 inputs and missing kernels are recoverable errors. -/
 def meanDim! {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false) :
-    Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
+    Tensor (σ.withShape (Shape.reduce σ.shape dim keepdim)) :=
   Tensor.ofRaw! (RawTensor.mean! t.raw (some #[dim]) keepdim)
 
 def meanDim {σ : StaticSpec} [DType.Mean σ.dtype] (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
     (_axis : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) :
-    Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
+    Tensor (σ.withShape (Shape.reduce σ.shape dim keepdim)) :=
   meanDim! t dim keepdim
-
-/-- Spatial extent computed without fixed-width arithmetic wrapping. -/
-def convExtent (input kernel stride padding dilation : Nat) : Nat :=
-  ((input + 2 * padding - (dilation * (kernel - 1) + 1)) /
-    stride + 1)
-
-/-- A stride-1 convolution padded by half its odd kernel keeps any nonempty extent. -/
-theorem convExtent_same {n kernel padding : Nat} (hn : 0 < n) (hk : 2 * padding + 1 = kernel) :
-    convExtent n kernel 1 padding 1 = n := by
-  unfold convExtent; omega
 
 def conv2dBias! {batch cin cout height width kh kw : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, cin, height, width], d, dev⟩)
@@ -121,8 +111,8 @@ def conv2dBias! {batch cin cout height width kh kw : Nat} {d : DType} {dev : Dev
     (stride : Nat × Nat := (1, 1)) (padding : Nat × Nat := (0, 0))
     (dilation : Nat × Nat := (1, 1)) :
     Tensor ⟨#[batch, cout,
-      convExtent height kh stride.1 padding.1 dilation.1,
-      convExtent width kw stride.2 padding.2 dilation.2], d, dev⟩ :=
+      Shape.convLength height kh stride.1 padding.1 dilation.1,
+      Shape.convLength width kw stride.2 padding.2 dilation.2], d, dev⟩ :=
   Tensor.ofRaw! (RawTensor.conv2dBias! input.raw weight.raw bias.raw
     #[stride.1, stride.2] #[padding.1, padding.2] #[dilation.1, dilation.2])
 
@@ -137,8 +127,8 @@ def conv2dBias {batch cin cout height width kh kw : Nat} {d : DType} {dev : Devi
     (_height : ConvValid height kh stride.1 padding.1 dilation.1 := by conv_valid)
     (_width : ConvValid width kw stride.2 padding.2 dilation.2 := by conv_valid) :
     Tensor ⟨#[batch, cout,
-      convExtent height kh stride.1 padding.1 dilation.1,
-      convExtent width kw stride.2 padding.2 dilation.2], d, dev⟩ :=
+      Shape.convLength height kh stride.1 padding.1 dilation.1,
+      Shape.convLength width kw stride.2 padding.2 dilation.2], d, dev⟩ :=
   conv2dBias! input weight bias stride padding dilation
 
 def splitHeads {batch seq heads dim : Nat} {d : DType} {dev : Device}
@@ -400,7 +390,7 @@ def conv1dGroups! {batch cin cout cinPerGroup length kernel : Nat} {d : DType} {
     (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
     (weight : Tensor ⟨#[cout, cinPerGroup, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
     (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) (groups : Nat := 1) :
-    Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩ :=
+    Tensor ⟨#[batch, cout, Shape.convLength length kernel stride padding dilation], d, dev⟩ :=
   Tensor.ofRaw! (RawTensor.conv1dGroups! input.raw weight.raw bias.raw
     stride padding dilation groups)
 
@@ -412,7 +402,7 @@ def conv1dGroups {batch cin cout cinPerGroup length kernel : Nat} {d : DType} {d
     (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) (groups : Nat := 1)
     (_valid : ConvValid length kernel stride padding dilation := by conv_valid)
     (_groups : ConvGroups cin cinPerGroup cout groups := by conv_groups) :
-    Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩ :=
+    Tensor ⟨#[batch, cout, Shape.convLength length kernel stride padding dilation], d, dev⟩ :=
   conv1dGroups! input weight bias stride padding dilation groups
 
 /-- Positive stride, dilation, kernel and input length; output padding below the
@@ -430,8 +420,8 @@ def convTranspose1d! {batch cin cout length kernel : Nat} {d : DType} {dev : Dev
     (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
     (weight : Tensor ⟨#[cin, cout, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
     (stride : Nat := 1) (padding : Nat := 0) (outputPadding : Nat := 0) (dilation : Nat := 1) :
-    Tensor ⟨#[batch, cout, ((length - 1) * stride + dilation * (kernel - 1)
-      + outputPadding + 1 - 2 * padding)], d, dev⟩ :=
+    Tensor ⟨#[batch, cout,
+      Shape.convTransposeLength length kernel stride padding outputPadding dilation], d, dev⟩ :=
   Tensor.ofRaw! (RawTensor.convTranspose1d! input.raw weight.raw bias.raw
     stride padding outputPadding dilation)
 
@@ -443,8 +433,8 @@ def convTranspose1d {batch cin cout length kernel : Nat} {d : DType} {dev : Devi
     (stride : Nat := 1) (padding : Nat := 0) (outputPadding : Nat := 0) (dilation : Nat := 1)
     (_valid : ConvTransposeValid length kernel stride padding outputPadding dilation := by
       exact of_decide_eq_true rfl) :
-    Tensor ⟨#[batch, cout, ((length - 1) * stride + dilation * (kernel - 1)
-      + outputPadding + 1 - 2 * padding)], d, dev⟩ :=
+    Tensor ⟨#[batch, cout,
+      Shape.convTransposeLength length kernel stride padding outputPadding dilation], d, dev⟩ :=
   convTranspose1d! input weight bias stride padding outputPadding dilation
 
 def attentionWindow! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
@@ -575,7 +565,7 @@ def getOp {σ : StaticSpec} (input : Tensor σ) (idx : Nat)
 
 def unbind {σ : StaticSpec} (input : Tensor σ) (dim : Nat := 0)
     (h : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
-    Array (Tensor (σ.withShape (unbindShape σ.shape dim h))) :=
+    Array (Tensor (σ.withShape (Shape.unbind σ.shape dim h))) :=
   (RawTensor.unbind input.raw dim).map fun raw =>
     (Tensor.ofRaw! raw)
 

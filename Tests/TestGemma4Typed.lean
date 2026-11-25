@@ -22,7 +22,7 @@ private def cfg : Config := {
 }
 
 private def weight (s : Shape) (offset : Float := 0.0) (dtype : DType := .Float32) : Tensor { shape := s, dtype, device := .CPU } :=
-  let n := TensorSpec.numelOfShape s
+  let n := Shape.numel s
   let vals := Array.ofFn (n := n) fun i => Float.sin (i.val.toFloat * 0.71 + offset) * 0.2
   ((Tensor.fromFloatArray vals).reshape s).castDType dtype
 

@@ -348,7 +348,7 @@ def encode {batch frames : Nat} {featureDType : DType}
     Tensor.reshape
       (Tensor.gelu (Tensor.conv1dGroups inputFeatures m.encoderConv1Weight m.encoderConv1Bias 1 1 1 1))
       #[batch, cfg.dModel, frames]
-      (by have : Tensor.convExtent frames 3 1 1 1 = frames := by unfold Tensor.convExtent; omega
+      (by have : Shape.convLength frames 3 1 1 1 = frames := by unfold Shape.convLength; omega
           simp [this])
   let outSeq := WhisperConfig.conv2OutputSeq frames
   let ⟨hOut⟩ ← if h : outSeq ≤ cfg.maxSourcePositions then pure (PLift.up h) else
@@ -358,8 +358,8 @@ def encode {batch frames : Nat} {featureDType : DType}
     Tensor.reshape
       (Tensor.gelu (Tensor.conv1dGroups x1 m.encoderConv2Weight m.encoderConv2Bias 2 1 1 1))
       #[batch, cfg.dModel, outSeq]
-      (by have : Tensor.convExtent frames 3 2 1 1 = WhisperConfig.conv2OutputSeq frames := by
-            unfold Tensor.convExtent WhisperConfig.conv2OutputSeq; omega
+      (by have : Shape.convLength frames 3 2 1 1 = WhisperConfig.conv2OutputSeq frames := by
+            unfold Shape.convLength WhisperConfig.conv2OutputSeq; omega
           simp +zetaDelta [this])
   let x2t : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := (Tensor.permute x2 #[0, 2, 1]).reshape #[batch, outSeq, cfg.dModel]
   let pos : Tensor { dtype := dtype, device := device, shape := #[outSeq, cfg.dModel] } := Tensor.slice m.encoderPositionalEmbedding 0 0 outSeq

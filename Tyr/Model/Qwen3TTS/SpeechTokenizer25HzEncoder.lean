@@ -107,7 +107,7 @@ private def conv1dWithBias {batch inC outC inFrames kernel : Nat}
     (b : Tensor { shape := #[outC], dtype := dtype.val, device := device })
     (stride pad dilation : Nat)
     (valid : Tensor.ConvValid inFrames kernel stride pad dilation := by conv_valid) :
-    Tensor { shape := #[batch, outC, (inFrames + 2 * pad - (dilation * (kernel - 1) + 1)) / stride + 1], dtype := dtype.val, device := device } :=
+    Tensor { shape := #[batch, outC, Shape.convLength inFrames kernel stride pad dilation], dtype := dtype.val, device := device } :=
   addBias3d (Tensor.conv1d x w stride pad dilation valid) b
 
 private def affine3d {batch seq inDim outDim : Nat}
@@ -295,12 +295,12 @@ private def encodeMelChunk {melFrames : Nat}
       let x0 : Tensor { shape := #[1, 128, melFrames], dtype := dtype.val, device := device } := Tensor.reshape mel #[1, 128, melFrames]
       let h1 : Tensor { shape := #[1, 1280, melFrames], dtype := dtype.val, device := device } :=
         Tensor.gelu (Tensor.reshape (conv1dWithBias x0 m.conv1Weight m.conv1Bias 1 1 1) #[1, 1280, melFrames]
-          (by have : (melFrames + 2 * 1 - (1 * (3 - 1) + 1)) / 1 + 1 = melFrames := by omega
+          (by have : Shape.convLength melFrames 3 1 1 1 = melFrames := by unfold Shape.convLength; omega
               rw [this]))
       let h2 : Tensor { shape := #[1, 1280, c2Frames], dtype := dtype.val, device := device } :=
         Tensor.gelu (Tensor.reshape (conv1dWithBias h1 m.conv2Weight m.conv2Bias 2 1 1) #[1, 1280, c2Frames]
-          (by have : (melFrames + 2 * 1 - (1 * (3 - 1) + 1)) / 2 + 1 = c2Frames := by
-                simp only [c2Frames, conv2Frames]; omega
+          (by have : Shape.convLength melFrames 3 2 1 1 = c2Frames := by
+                simp only [Shape.convLength, c2Frames, conv2Frames]; omega
               rw [this]))
 
       let xSeq0 : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose h2 1 2) #[1, c2Frames, 1280]
@@ -315,8 +315,8 @@ private def encodeMelChunk {melFrames : Nat}
       have hc2 : 2 ≤ c2Frames := by simp only [qFrames, c2Frames, vqFrames, conv2Frames] at hq ⊢; omega
       let vqDown : Tensor { shape := #[1, 1280, qFrames], dtype := dtype.val, device := device } :=
         Tensor.reshape (conv1dWithBias vqIn m.vqDownWeight m.vqDownBias 2 0 1) #[1, 1280, qFrames]
-          (by have : (c2Frames + 2 * 0 - (1 * (2 - 1) + 1)) / 2 + 1 = qFrames := by
-                simp only [qFrames, c2Frames, vqFrames, conv2Frames] at hq ⊢; omega
+          (by have : Shape.convLength c2Frames 2 2 0 1 = qFrames := by
+                simp only [Shape.convLength, qFrames, c2Frames, vqFrames, conv2Frames] at hq ⊢; omega
               rw [this])
       let vqSeq : Tensor { shape := #[qFrames, 1280], dtype := dtype.val, device := device } :=
         Tensor.reshape (Tensor.transpose (Tensor.reshape vqDown #[1, 1280, qFrames]) 1 2) #[qFrames, 1280]

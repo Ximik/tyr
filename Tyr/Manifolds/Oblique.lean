@@ -18,7 +18,7 @@ private def normalizeColumns {m n : Nat} (A : Tensor ⟨#[m, n], d, dev⟩) : Te
   let AtA := Tensor.mm (Tensor.transpose2d A) A
   let colNorms := Tensor.sqrt (Tensor.diag AtA)
   let safeNorms := Tensor.addScalar colNorms 1e-12
-  let rowNorms : Tensor ⟨#[1, n], d, dev⟩ := Tensor.reshape safeNorms #[1, n] (by simp [TensorSpec.numelOfShape])
+  let rowNorms : Tensor ⟨#[1, n], d, dev⟩ := Tensor.reshape safeNorms #[1, n] (by simp [Shape.numel])
   let expanded : Tensor ⟨#[m, n], d, dev⟩ := Tensor.broadcastTo rowNorms #[m, n]
   by simpa using Tensor.div A expanded
 

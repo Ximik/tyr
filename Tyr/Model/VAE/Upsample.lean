@@ -42,8 +42,8 @@ def forward {batch channels height width : Nat}
   -- 3×3 conv with padding=1 to maintain size
   let out := Tensor.conv2dBias x_up up.conv.weight up.conv.bias (1, 1) (1, 1)
   Tensor.reshape out #[batch, channels, height * 2, width * 2]
-    (by simp [Tensor.convExtent_same (by omega : 0 < height * 2) (by decide : 2 * 1 + 1 = 3),
-      Tensor.convExtent_same (by omega : 0 < width * 2) (by decide : 2 * 1 + 1 = 3)])
+    (by simp [Shape.convLength_same (by omega : 0 < height * 2) (by decide : 2 * 1 + 1 = 3),
+      Shape.convLength_same (by omega : 0 < width * 2) (by decide : 2 * 1 + 1 = 3)])
 
 end Upsample
 
@@ -62,11 +62,11 @@ def forward {batch channels height width : Nat}
     (down : Downsample (device := device) (dtype := dtype) channels)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
     (hh : 0 < height) (hw : 0 < width)
-    : Tensor { dtype := dtype, device := device, shape := #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1] } :=
+    : Tensor { dtype := dtype, device := device, shape := #[batch, channels, Shape.convLength height 3 2 1 1, Shape.convLength width 3 2 1 1] } :=
   -- Pad input for proper strided conv
   -- Note: In VAE encoder, asymmetric padding may be needed
   let out := Tensor.conv2dBias x down.conv.weight (Tensor.castLike down.conv.weight (Tensor.zeros #[channels] false down.conv.weight.device)) (2, 2) (1, 1)
-  Tensor.reshape out #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1] (by simp)
+  Tensor.reshape out #[batch, channels, Shape.convLength height 3 2 1 1, Shape.convLength width 3 2 1 1] (by simp)
 
 end Downsample
 

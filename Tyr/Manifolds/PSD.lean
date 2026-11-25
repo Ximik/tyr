@@ -66,7 +66,7 @@ namespace Elliptope
 private def normalizeRows {n k : Nat} (Y : Tensor ⟨#[n, k], d, dev⟩) : Tensor ⟨#[n, k], d, dev⟩ :=
   let norms := Tensor.rowNorms Y
   let safeNorms := Tensor.addScalar norms 1e-12
-  let normsCol : Tensor ⟨#[n, 1], d.realResult, dev⟩ := Tensor.reshape safeNorms #[n, 1] (by simp [TensorSpec.numelOfShape])
+  let normsCol : Tensor ⟨#[n, 1], d.realResult, dev⟩ := Tensor.reshape safeNorms #[n, 1] (by simp [Shape.numel])
   let expanded : Tensor ⟨#[n, k], d, dev⟩ := by simpa using Tensor.broadcastTo normsCol #[n, k]
   by simpa using Tensor.div Y expanded
 

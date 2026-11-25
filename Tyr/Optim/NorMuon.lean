@@ -125,7 +125,7 @@ def stepSingle {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor �
   -- Zero gradients should stay zero; this avoids entering Newton-Schulz on
   -- exact zeros while preserving reference Muon semantics.
   let nesterovAbsMax :=
-    if h : 0 < TensorSpec.numelOfShape σ.shape then Tensor.item (Tensor.maxAll (Tensor.abs nesterovGrad) h) else 0.0
+    if h : 0 < Shape.numel σ.shape then Tensor.item (Tensor.maxAll (Tensor.abs nesterovGrad) h) else 0.0
   let aspectScale := aspectRatioScale σ.shape
   let effectiveLr := cfg.lr * lrMul * aspectScale
   let wd := cfg.weightDecay * wdMul

@@ -71,8 +71,10 @@ private instance (kernel stride dilation : Nat) : Decidable (CausalConvParams ke
 /-- Causal padding makes a convolution emit exactly `Nat.ceilDiv inLen stride` frames. -/
 private theorem causalConvLen {inLen kernel stride dilation : Nat}
     (hx : 0 < inLen) (hp : CausalConvParams kernel stride dilation) :
-    (inLen + paddingTotal kernel stride dilation + extraPaddingForCausalConv inLen kernel stride dilation
-        + 2 * 0 - (dilation * (kernel - 1) + 1)) / stride + 1 = Nat.ceilDiv inLen stride := by
+    Shape.convLength (inLen + paddingTotal kernel stride dilation
+        + extraPaddingForCausalConv inLen kernel stride dilation) kernel stride 0 dilation
+      = Nat.ceilDiv inLen stride := by
+  unfold Shape.convLength
   obtain ⟨_, hs, _, hk⟩ := hp
   have hq1 := Nat.ceilDiv_pos hx hs
   have hceil : Nat.ceilDiv inLen stride = (inLen + stride - 1) / stride := by
@@ -548,7 +550,7 @@ private def rvqEncode {batch frames : Nat}
     : Tensor { shape := #[(rvq.codebooks.toList.take numLayers).length, batch, frames], dtype := .Int64, device := device } :=
   let residual : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.conv1d embeddings rvq.inputProj 1 0 1) #[batch, 256, frames]
-      (by simp [Nat.sub_add_cancel hf])
+      (by simp [Shape.convLength, Nat.sub_add_cancel hf])
   rvqStack residual (rvq.codebooks.toList.take numLayers)
 
 /-- Encode waveform `[batch,1,samples]` to codec IDs `[batch,16,encodedFrames(samples)]`.
