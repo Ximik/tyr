@@ -1,4 +1,4 @@
-import Tyr.Basic
+import Tyr.FFI.Basic
 
 /-!
 # PyTorch dtype algebra

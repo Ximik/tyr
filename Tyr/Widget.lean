@@ -4,7 +4,7 @@ import Lean.Widget.Commands
 import Lean.Elab.Command
 import Lean.Elab.Tactic
 import Lean.Elab.Deriving
-import Tyr.Basic
+import Tyr.FFI.Basic
 import Tyr.TensorStruct
 import Tyr.Torch
 

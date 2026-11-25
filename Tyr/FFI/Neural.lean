@@ -1,4 +1,4 @@
-import Tyr.RawTensor
+import Tyr.FFI.RawTensor
 
 /-! Native neural-network operations. Only typed adapters consume these handles. -/
 namespace torch.RawTensor
@@ -20,6 +20,10 @@ namespace torch.RawTensor
     (q k v mask : @& RawTensor) (causal gqa : Bool) : RawTensor
 @[extern "lean_torch_sdpa_gqa_mask_io"] opaque attentionGQAMaskIO
     (q k v mask : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
+@[extern "lean_torch_sdpa_gqa_mask_qkv"] opaque attentionGQAMaskQKV!
+    (query key value mask : @& RawTensor) (gqa : Bool) : RawTensor
+@[extern "lean_torch_sdpa_gqa_mask_qkv_io"] opaque attentionGQAMaskQKVIO
+    (query key value mask : @& RawTensor) (dropout : Float) (gqa : Bool) : IO RawTensor
 
 @[extern "lean_torch_gather"] opaque gather
     (input : @& RawTensor) (dim : @& Nat) (indices : @& RawTensor) : RawTensor
@@ -91,6 +95,27 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_find_bos_positions"] opaque findTokenPositions
     (tokens : @& RawTensor) (token : Int64) : IO RawTensor
+
+@[extern "lean_torch_tensor_softplus"] opaque softplus (input : @& RawTensor) : RawTensor
+@[extern "lean_torch_leaky_relu"] opaque leakyRelu (input : @& RawTensor) (slope : Float) : RawTensor
+@[extern "lean_torch_softcap"] opaque softcap (input : @& RawTensor) (cap : Float) : RawTensor
+@[extern "lean_torch_tensor_floor"] opaque floor (input : @& RawTensor) : RawTensor
+@[extern "lean_torch_atan2"] opaque atan2 (y x : @& RawTensor) : RawTensor
+@[extern "lean_torch_cumsum"] opaque cumsum (input : @& RawTensor) (dim : @& Nat) : RawTensor
+@[extern "lean_torch_scatter_add"] opaque scatterAdd
+    (input : @& RawTensor) (dim : @& Nat) (indices src : @& RawTensor) : RawTensor
+@[extern "lean_torch_group_norm"] opaque groupNorm (input : @& RawTensor) (groups : @& Nat)
+    (weight bias : Option RawTensor) (eps : Float) : RawTensor
+@[extern "lean_torch_avg_pool2d"] opaque avgPool2d
+    (input : @& RawTensor) (kernel stride padding : Array Nat) : RawTensor
+@[extern "lean_torch_interpolate"] opaque interpolate (input : @& RawTensor)
+    (size : Array Nat) (mode : String) (alignCorners : Bool) : RawTensor
+@[extern "lean_torch_istft_1d"] opaque istft (input : @& RawTensor)
+    (nFft hopLength winLength : @& Nat) (window : @& RawTensor)
+    (center normalized : Bool) (length : @& Nat) : RawTensor
+@[extern "lean_torch_timestep_embedding"] opaque timestepEmbedding (t : @& RawTensor) (dim : @& Nat)
+    (maxPeriod timeFactor : Float) : RawTensor
+@[extern "lean_torch_save_ppm"] opaque savePPM (image : @& RawTensor) (path : @& String) : IO Unit
 
 end torch.RawTensor
 

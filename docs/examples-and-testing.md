@@ -207,7 +207,7 @@ model configs and pretrained-weight loading (Qwen3/3.5/3.6, Qwen2.5-Omni,
 KittenTTS, Qwen3TTS, Qwen3ASR, SileroVAD), the SafeTensors type
 provider, checkpoints, manifolds/optimizers, and NanoChat tokenizer/tasks.
 
-No test file imports these modules directly (verified by grep): `Tyr.Audio`,
+No test file imports these modules directly (verified by grep): `Tyr.FFI.AppleAudioInput`, `Tyr.FFI.AppleAudioOutput`,
 `Tyr.Hub`, `Tyr.RL`, `Tyr.Widget`, `Tyr.Log`, `Tyr.Text`,
 `Tyr.Inference`. Coverage is thin (one or two files) for `Tyr.Distributed`,
 `Tyr.Sharding`, and `Tyr.Data`. Multi-process collective behavior is only

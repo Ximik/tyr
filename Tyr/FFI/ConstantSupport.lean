@@ -1,4 +1,4 @@
-import Tyr.ConstantSupport.Types
+import Tyr.FFI.ConstantSupport.Types
 
 namespace torch.DType
 

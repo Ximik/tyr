@@ -23,7 +23,7 @@
 
   This module is the canonical home for the cache abstraction. -/
 import Tyr.Torch
-import Tyr.ConstantSupport
+import Tyr.FFI.ConstantSupport
 import Tyr.Typed.Neural
 import Tyr.Inference.OwnedKV
 import Tyr.TensorStruct

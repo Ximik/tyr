@@ -4,7 +4,7 @@
   Configuration for the standalone Qwen3.5 text causal-LM implementation.
   Includes dense and MoE variants plus hybrid layer scheduling.
 -/
-import Tyr.Basic
+import Tyr.FFI.Basic
 import Tyr.TensorStruct
 import Tyr.Tokenizer.Types
 

@@ -1,16 +1,16 @@
-import Tyr.Basic.Types
-import Tyr.Basic.PosNat
-import Tyr.ConstantSupport.Types
+import Tyr.FFI.Basic.Types
+import Tyr.FFI.Basic.PosNat
+import Tyr.FFI.ConstantSupport.Types
 
 /-!
-# Tyr.Basic
+# Tyr.FFI.Basic
 
-`Tyr.Basic` defines Tyr's foundational tensor-level types and pure shape logic.
+`Tyr.FFI.Basic` defines Tyr's foundational tensor-level types and pure shape logic.
 It is the lowest-level shared layer used across runtime bindings, model code, and utilities.
 
 ## Major Components
 
-- Core types (in `Tyr.Basic.Types`): `Shape`, `DType`, `Device`, the native
+- Core types (in `Tyr.FFI.Basic.Types`): `Shape`, `DType`, `Device`, the native
   `RawTensor` carrier and `StaticSpec`,
   with DType parsing and pure shape-transform utilities — no native functions,
   so the GPU code generator can use them without linking `libTyrC`.
@@ -24,7 +24,7 @@ It is the lowest-level shared layer used across runtime bindings, model code, an
 
 This module is intentionally kernel-agnostic.
 Typed numerical operations live in `Tyr.Typed.Ops`; native adapters live in
-`Tyr.RawTensor`. Public numerical APIs use indexed `Tensor` values.
+`Tyr.FFI.RawTensor`. Public numerical APIs use indexed `Tensor` values.
 -/
 
 namespace torch

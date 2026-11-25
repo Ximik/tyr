@@ -1,4 +1,4 @@
-import Tyr.RawTensor
+import Tyr.FFI.RawTensor
 import Tyr.Typed.Device
 
 /-!

@@ -117,7 +117,7 @@ examples currently shard data ad hoc instead.
 
 `Tyr/Distributed.lean` also hosts the Polar Express / Muon FFI kernels
 (`polarExpress`, `muonOrthogonalize`, `newtonSchulzStep`, `cautiousUpdate`,
-native declarations in `Tyr/RawTensor/Distributed.lean`) — orthogonalization math, not communication;
+native declarations in `Tyr/FFI/Distributed.lean`) — orthogonalization math, not communication;
 see [Optimization](optimization.md).
 
 ### Sharding: `torch.Sharding` (`Tyr/Sharding.lean`)

@@ -1,4 +1,4 @@
-import Tyr.Basic.Types
+import Tyr.FFI.Basic.Types
 
 /-! Evidence that the constant factory paths can represent both zero and one
 at an exact dtype and acquired placement. This is deliberately separate from

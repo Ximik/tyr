@@ -1,10 +1,10 @@
 /-!
-# Tyr.Basic.Types
+# Tyr.FFI.Basic.Types
 
-The pure part of `Tyr.Basic`: `Shape`, `DType`, `Device`, the native tensor
+The pure part of `Tyr.FFI.Basic`: `Shape`, `DType`, `Device`, the native tensor
 carrier `RawTensor`, the tensor index `StaticSpec`, and shape-transform
 utilities. It declares no native functions, so the GPU code generator can use it
-without linking `libTyrC`. `Tyr.Basic` adds the tensor metadata functions
+without linking `libTyrC`. `Tyr.FFI.Basic` adds the tensor metadata functions
 implemented in `libTyrC`, along with the indexed `Tensor` and its checked
 construction boundary.
 -/

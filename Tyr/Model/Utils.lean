@@ -10,7 +10,7 @@
 -/
 import Tyr.Typed
 import Tyr.Typed.Neural
-import Tyr.ConstantSupport
+import Tyr.FFI.ConstantSupport
 
 namespace torch.Model
 

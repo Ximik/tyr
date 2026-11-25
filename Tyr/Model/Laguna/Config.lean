@@ -5,7 +5,7 @@
   (Laguna-S-2.1: 118B-A8B MoE, interleaved full/sliding-window attention,
   per-head softplus attention output gating, sigmoid token-choice router).
 -/
-import Tyr.Basic
+import Tyr.FFI.Basic
 import Tyr.Tokenizer.Types
 import Tyr.TensorStruct
 

@@ -76,14 +76,14 @@ struct Inputs {
   }
 };
 
-enum class Family { Basic, GQA, Padding, Window, Gemma };
+enum class Family { Basic, GQA, Padding, Window, MaskQKV };
 const char* name(Family family) {
   switch (family) {
     case Family::Basic: return "attention";
     case Family::GQA: return "attentionGQA";
     case Family::Padding: return "attentionGQAMask";
     case Family::Window: return "attentionWindow";
-    case Family::Gemma: return "gemma4MaskedAttention";
+    case Family::MaskQKV: return "attentionGQAMaskQKV";
   }
   throw std::runtime_error("Unknown attention family");
 }
@@ -95,7 +95,7 @@ Object pureCall(Family family, const Inputs& x) {
     case Family::GQA: result = lean_torch_sdpa_gqa(q, q, v, 0, 0); break;
     case Family::Padding: result = lean_torch_sdpa_gqa_mask(q, q, v, x.padding.get(), 0, 0); break;
     case Family::Window: result = lean_torch_sdpa_gqa_window(q, q, v, 1, 0, Nat(8)); break;
-    case Family::Gemma: result = lean_torch_sdpa_gqa_mask_qkv(q, q, v, x.edges.get(), 0); break;
+    case Family::MaskQKV: result = lean_torch_sdpa_gqa_mask_qkv(q, q, v, x.edges.get(), 0); break;
   }
   return Object(result, lean_dec);
 }
@@ -107,7 +107,7 @@ Object ioCall(Family family, const Inputs& x, double p) {
     case Family::GQA: result = lean_torch_sdpa_gqa_io(q, q, v, p, 0, 0); break;
     case Family::Padding: result = lean_torch_sdpa_gqa_mask_io(q, q, v, x.padding.get(), p, 0, 0); break;
     case Family::Window: result = lean_torch_sdpa_gqa_window_io(q, q, v, p, 1, 0, Nat(8)); break;
-    case Family::Gemma: result = lean_torch_sdpa_gqa_mask_qkv_io(q, q, v, x.edges.get(), p, 0); break;
+    case Family::MaskQKV: result = lean_torch_sdpa_gqa_mask_qkv_io(q, q, v, x.edges.get(), p, 0); break;
   }
   return Object(result, lean_dec);
 }
@@ -155,7 +155,7 @@ int main() {
   lean_initialize();
   int failures = 0;
   for (auto family : {Family::Basic, Family::GQA, Family::Padding,
-                     Family::Window, Family::Gemma}) {
+                     Family::Window, Family::MaskQKV}) {
     try { check(family); std::cout << "PASS " << name(family) << " effects\n"; }
     catch (const std::exception& error) {
       ++failures;

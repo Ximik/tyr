@@ -1,7 +1,7 @@
 import Lean.Data.Json
 
 /-!
-# Tyr.Basic.PosNat
+# Tyr.FFI.Basic.PosNat
 
 `PosNat`, a positive count. Literals, JSON decoding and string parsing all
 reject zero, so a `PosNat` never needs a clamp where it is used. `Option PosNat`

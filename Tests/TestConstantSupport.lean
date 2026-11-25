@@ -1,5 +1,5 @@
 import Tests.Assertions
-import Tyr.ConstantSupport
+import Tyr.FFI.ConstantSupport
 import Tyr.Typed
 import Tyr.Torch
 

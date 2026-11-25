@@ -3,7 +3,7 @@
 
   Configuration for Whisper encoder-decoder ASR in Tyr.
 -/
-import Tyr.Basic
+import Tyr.FFI.Basic
 import Tyr.Tokenizer.Types
 
 namespace torch.whisper

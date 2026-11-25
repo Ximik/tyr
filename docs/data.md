@@ -141,7 +141,7 @@ retain both the input and target dimensions and their Int64 dtype.
 
 ### Parquet
 
-`torch.Data.Parquet` (`Tyr/RawTensor/Parquet.lean`) binds Apache Arrow
+`torch.Data.Parquet` (`Tyr/FFI/Parquet.lean`) binds Apache Arrow
 through `@[extern]` declarations implemented in `cc/src/tyr_parquet.cpp`: `listParquetFiles`, `getParquetMetadata`,
 `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson`.
 
@@ -252,7 +252,7 @@ one-token shift — the nanochat midtraining data flow.
 
 | API | Signature | Location |
 | --- | --- | --- |
-| `listParquetFiles`, `getParquetMetadata`, `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson` | `@[extern]` opaque IO functions | `Tyr/RawTensor/Parquet.lean` |
+| `listParquetFiles`, `getParquetMetadata`, `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson` | `@[extern]` opaque IO functions | `Tyr/FFI/Parquet.lean` |
 | `downloadWithRetry` | `(url dest : String) (maxRetries := 5) (initialBackoffMs := 1000) (log := {}) : IO Bool` | `Tyr/Data/Download.lean` |
 | `ensureHFParquet` | `(repoId subset split : String) (cacheDir ..) : IO String` | `Download.lean` |
 | `loadARC` / `loadGSM8K` / `loadMMLU` / `loadSmolTalk` | `... : IO (Array Lean.Json)` | `Tyr/Data/HuggingFace.lean` |

@@ -154,10 +154,8 @@ lean_lib Tyr where
     `libTyrC`'s FFI header from them. The declared functions are in `libTyrC`,
     so linking needs it. -/
 lean_lib TyrFFI where
-  roots := #[`Tyr.Basic, `Tyr.ConstantSupport, `Tyr.RawTensor, `Tyr.Audio.AppleInput,
-    `Tyr.Audio.AppleOutput]
-  globs := #[.one `Tyr.Basic, .one `Tyr.Basic.Types, .andSubmodules `Tyr.ConstantSupport, .andSubmodules `Tyr.RawTensor,
-    .one `Tyr.Audio.AppleInput, .one `Tyr.Audio.AppleOutput]
+  roots := #[`Tyr.FFI]
+  globs := #[.submodules `Tyr.FFI]
   precompileModules := false
   moreLinkLibs := #[`@/libtyr]
 

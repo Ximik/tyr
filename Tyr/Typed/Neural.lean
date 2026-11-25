@@ -1,5 +1,5 @@
 import Tyr.Typed.Ops
-import Tyr.RawTensor.Neural
+import Tyr.FFI.Neural
 import Tyr.SafeTensors.File
 
 namespace torch.Tensor

@@ -4,7 +4,7 @@
   Configuration for Flux diffusion model.
   Default values are for Klein 4B.
 -/
-import Tyr.Basic
+import Tyr.FFI.Basic
 
 namespace torch.flux
 

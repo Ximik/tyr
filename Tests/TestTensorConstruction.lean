@@ -1,6 +1,6 @@
 import LeanTest
 import Tests.Devices
-import Tyr.Basic
+import Tyr.FFI.Basic
 
 -- Variables used only inside a deliberately failing tactic count as unused.
 set_option linter.unusedVariables false
@@ -46,9 +46,9 @@ def unsafeCastBypass {σ : StaticSpec} (raw : RawTensor) : Tensor σ := unsafeCa
 -- Deliberately bypass name privacy: safety must come from the unsafe marker,
 -- not from whether ordinary source notation can name a private declaration.
 elab "tensorPrivateImplementation% " name:ident : term =>
-  return Lean.mkConst (Lean.Name.num `_private.Tyr.Basic 0 ++ name.getId)
+  return Lean.mkConst (Lean.Name.num `_private.Tyr.FFI.Basic 0 ++ name.getId)
 
-/-- error: (kernel) invalid declaration, it uses unsafe declaration '_private.Tyr.Basic.0.torch.Tensor.zerosForImpl' -/
+/-- error: (kernel) invalid declaration, it uses unsafe declaration '_private.Tyr.FFI.Basic.0.torch.Tensor.zerosForImpl' -/
 #guard_msgs in
 def privateImplementationBypass (σ : StaticSpec)
     [DType.ConstantSupported σ.dtype σ.device] : Tensor σ :=

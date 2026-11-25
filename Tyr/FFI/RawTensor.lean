@@ -1,4 +1,4 @@
-import Tyr.Basic
+import Tyr.FFI.Basic
 
 /-! Native libtorch ABI. These handles carry no static guarantees.
 Model code should use `torch.Tensor`; only typed adapters call this module. -/

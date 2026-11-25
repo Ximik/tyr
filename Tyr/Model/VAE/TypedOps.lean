@@ -1,6 +1,5 @@
 import Tyr.Typed.Neural
-import Tyr.RawTensor.VAE
-import Tyr.RawTensor.KittenTTS
+import Tyr.FFI.Neural
 import Tyr.TensorStruct.DeriveCast
 
 namespace torch.vae

@@ -1,4 +1,4 @@
-import Tyr.RawTensor
+import Tyr.FFI.RawTensor
 
 /-! Native SafeTensors byte transfer. Headers are parsed and written in Lean
 (`Tyr.SafeTensors.File`); native code only moves tensor data. -/

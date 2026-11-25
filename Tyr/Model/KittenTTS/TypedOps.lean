@@ -1,5 +1,5 @@
 import Tyr.Typed.Neural
-import Tyr.RawTensor.KittenTTS
+import Tyr.FFI.Neural
 import Tyr.TensorStruct
 
 namespace torch.kittentts
