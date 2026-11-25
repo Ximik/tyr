@@ -5,7 +5,7 @@ open torch
 -- Natural result rules remain visible for non-floating inputs.
 example (x y : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   Tensor.div x y
-example (x : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨reduceShape #[2] 0 false, .Int64, .CPU⟩ :=
+example (x : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨Shape.reduce #[2] 0 false, .Int64, .CPU⟩ :=
   Tensor.sumDim x 0
 example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   Tensor.abs x
@@ -29,11 +29,11 @@ example {σ : StaticSpec} [DType.RealFloating σ.dtype] (x : Tensor σ) : Tensor
   simpa using Tensor.abs x
 example {s : Shape} {dtype : DType} {device : Device} [DType.RealFloating dtype]
     (x : Tensor ⟨s, dtype, device⟩) (dim : Nat) (axis : dim < s.size) :
-    Tensor ⟨reduceShape s dim false, dtype, device⟩ := by
+    Tensor ⟨Shape.reduce s dim false, dtype, device⟩ := by
   simpa using Tensor.sumDim x dim false axis
 example {s : Shape} {dtype : DType} {device : Device} [DType.RealFloating dtype]
     (x : Tensor ⟨s, dtype, device⟩) (dim : Nat) (axis : dim < s.size) :
-    Tensor ⟨reduceShape s dim false, dtype, device⟩ := Tensor.meanDim x dim false axis
+    Tensor ⟨Shape.reduce s dim false, dtype, device⟩ := Tensor.meanDim x dim false axis
 
 example (_x : Tensor ⟨#[2], .Int32, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.sqrt _x

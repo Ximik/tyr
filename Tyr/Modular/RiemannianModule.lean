@@ -44,11 +44,11 @@ namespace RiemannianModule
 
 private def vectorToColumn {n : Nat} {d : DType} {dev : Device}
     (v : Tensor ⟨#[n], d, dev⟩) : Tensor ⟨#[n, 1], d, dev⟩ :=
-  Tensor.reshape v #[n, 1] (by simp [TensorSpec.numelOfShape])
+  Tensor.reshape v #[n, 1] (by simp [Shape.numel])
 
 private def columnToVector {n : Nat} {d : DType} {dev : Device}
     (v : Tensor ⟨#[n, 1], d, dev⟩) : Tensor ⟨#[n], d, dev⟩ :=
-  Tensor.reshape v #[n] (by simp [TensorSpec.numelOfShape])
+  Tensor.reshape v #[n] (by simp [Shape.numel])
 
 private def splitLinearUpdate {inDim outDim : Nat} {d : DType} {dev : Device}
     (update : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩) :
@@ -133,7 +133,7 @@ private def linearApplyParamAdjoint {inDim outDim : Nat} {d : DType} {dev : Devi
     (useBias : Bool)
     (y : Tensor ⟨#[outDim], d, dev⟩) : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩ :=
   let outer : Tensor ⟨#[outDim, inDim], d, dev⟩ :=
-    Tensor.mm (vectorToColumn y) (Tensor.reshape x #[1, inDim] (by simp [TensorSpec.numelOfShape]))
+    Tensor.mm (vectorToColumn y) (Tensor.reshape x #[1, inDim] (by simp [Shape.numel]))
   let weightPart : Tensor ⟨#[outDim * inDim], d, dev⟩ := Tensor.reshape outer #[outDim * inDim]
   let biasPart : Tensor ⟨#[outDim], d, dev⟩ := if useBias then y else Tensor.zerosLike y
   let joined := Tensor.cat weightPart biasPart 0
@@ -179,12 +179,12 @@ instance linearRiemannianModule (inDim outDim : Nat) :
   Tape := AmbientVector (device := device) inDim
   forwardWithTape lin x :=
     let x2 : AmbientMatrix (device := device) 1 inDim :=
-      Tensor.reshape x #[1, inDim] (by simp [TensorSpec.numelOfShape])
+      Tensor.reshape x #[1, inDim] (by simp [Shape.numel])
     let y2 : AmbientMatrix (device := device) 1 outDim :=
       match lin.bias with
       | some b => Add.add (Tensor.linear x2 lin.weight) (Tensor.broadcastTo b #[1, outDim])
       | none => Tensor.linear x2 lin.weight
-    (Tensor.reshape y2 #[outDim] (by simp [TensorSpec.numelOfShape]), x)
+    (Tensor.reshape y2 #[outDim] (by simp [Shape.numel]), x)
   localLinearization lin x := {
     applyA := linearApplyInput lin.weight
     applyAT := linearApplyInputAdjoint lin.weight
@@ -213,12 +213,12 @@ instance manifoldLinearRiemannianModule
   forwardWithTape lin x :=
     let weight := MatrixManifoldCarrier.toMatrix (device := device) lin.weight
     let x2 : AmbientMatrix (device := device) 1 inDim :=
-      Tensor.reshape x #[1, inDim] (by simp [TensorSpec.numelOfShape])
+      Tensor.reshape x #[1, inDim] (by simp [Shape.numel])
     let y2 : AmbientMatrix (device := device) 1 outDim :=
       match lin.bias with
       | some b => Add.add (Tensor.linear x2 weight) (Tensor.broadcastTo b #[1, outDim])
       | none => Tensor.linear x2 weight
-    (Tensor.reshape y2 #[outDim] (by simp [TensorSpec.numelOfShape]), x)
+    (Tensor.reshape y2 #[outDim] (by simp [Shape.numel]), x)
   localLinearization lin x := {
     applyA := linearApplyInput (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
     applyAT := linearApplyInputAdjoint (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)

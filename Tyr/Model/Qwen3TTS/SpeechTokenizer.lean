@@ -427,7 +427,7 @@ private def decodeRVQSlice {batch groups frames count : Nat}
       quantized := Tensor.add quantized q
     let out : Tensor { shape := #[batch, 512, frames], dtype := dtypes.compute.val, device := device } :=
       Tensor.reshape (Tensor.conv1d quantized rvq.outputProj 1 0 1) #[batch, 512, frames]
-        (by simp [Nat.sub_add_cancel hf])
+        (by simp [Shape.convLength, Nat.sub_add_cancel hf])
     out
 
 private def decodeSplitRVQ {batch frames : Nat}
@@ -453,7 +453,7 @@ private def causalConv1d {batch inC outC frames kernel : Nat}
   let y0 : Tensor { shape := #[batch, outC, frames], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.conv1d xPad weight 1 0 dilation
         ⟨by decide, hConv.2, hConv.1, by simp only [leftPad]; omega⟩) #[batch, outC, frames]
-      (by simp only [leftPad]; congr 2; simp; omega)
+      (by simp only [leftPad, Shape.convLength]; congr 2; simp; omega)
   addBias3d y0 bias
 
 private def causalDepthwiseConv1d {batch channels frames : Nat}
@@ -469,7 +469,7 @@ private def causalDepthwiseConv1d {batch channels frames : Nat}
   let y : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.conv1dGroups xPad weight bias 1 0 1 channels (by conv_valid)
         ⟨hc, (Nat.one_mul _).symm, Nat.dvd_refl _⟩) #[batch, channels, frames]
-      (by simp [Tensor.convExtent, Nat.sub_add_cancel hf])
+      (by simp [Shape.convLength, Nat.sub_add_cancel hf])
   y
 
 private def causalTransConv1d {batch inC outC frames kernel stride rightPad : Nat}
@@ -482,7 +482,7 @@ private def causalTransConv1d {batch inC outC frames kernel stride rightPad : Na
   let y0 : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.convTranspose1d x weight bias stride 0 0 1
         ⟨hValid.2.1, by decide, hValid.1, hValid.2.2, Or.inl hValid.2.1, by omega⟩) #[batch, outC, outLen]
-      (by simp only [outLen]; simp [Nat.add_assoc, Nat.sub_add_cancel hValid.1])
+      (by simp only [outLen]; simp [Shape.convTransposeLength, Nat.add_assoc, Nat.sub_add_cancel hValid.1])
   Tensor.slice y0 2 0 (outLen - rightPad)
 
 private def snakeBeta {batch channels frames : Nat}

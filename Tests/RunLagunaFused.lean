@@ -129,7 +129,7 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
 private def maxErrors {s : Shape} {d e : DType}
     (got : Tensor { shape := s, dtype := d, device := device }) (expected : Tensor { shape := s, dtype := e, device := device })
-    (nonempty : 0 < TensorSpec.numelOfShape s := by numel_pos) : IO (Float × Float) := do
+    (nonempty : 0 < Shape.numel s := by numel_pos) : IO (Float × Float) := do
   let ad := Tensor.abs (got.toFloat32 - expected.toFloat32)
   let maxAbs := (Tensor.maxAll ad nonempty).item
   let denom := Tensor.addScalar (Tensor.abs expected.toFloat32) 1e-3
@@ -141,9 +141,9 @@ private def maxErrors {s : Shape} {d e : DType}
     Used to synthesize benchmark-sized banks from the fixture bank bytes;
     the values don't need to be meaningful, only the shapes/dtypes do. -/
 private def tileToShape {s : Shape} {source : Device} (src : SomeDTypeTensor s source) (shape : Shape) (device : Device) : IO (SomeDTypeTensor shape device) := do
-  let numel := TensorSpec.numelOfShape shape
+  let numel := Shape.numel shape
   let srcD := src.2.to device
-  let n0 := TensorSpec.numelOfShape s
+  let n0 := Shape.numel s
   let ⟨hn0⟩ ← if h : 0 < n0 then pure (PLift.up h) else throw <| IO.userError "tileToShape: empty source tensor"
   let reps := numel / n0 + 1
   let flat : Tensor { shape := #[1, n0], dtype := src.1, device := device } := srcD.reshape #[1, n0] (by simp [n0])

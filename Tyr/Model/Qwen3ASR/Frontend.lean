@@ -518,7 +518,7 @@ def waveformToWhisperFeatures
     Tensor.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
   let normalized : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)
   let inputFeatures : Tensor { device := .CPU, shape := #[1, melBins, expectedFrames], dtype := .Float32 } :=
-    Tensor.reshape normalized #[1, melBins, expectedFrames] (by simp [TensorSpec.numelOfShape])
+    Tensor.reshape normalized #[1, melBins, expectedFrames] (by simp [Shape.numel])
 
   let maskVals := buildFeatureAttentionMask validLenNat targetSamples hop cfg.returnAttentionMask
   let featureAttentionMask : Tensor { device := .CPU, shape := #[1, expectedFrames], dtype := .Int64 } ←
@@ -627,7 +627,7 @@ def waveformToWhisperFeaturesDynamic
       Tensor.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
     let normalized : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)
     let inputFeatures : Tensor { device := runDevice, shape := #[1, melBins, frames], dtype := .Float32 } :=
-      Tensor.reshape normalized #[1, melBins, frames] (by simp [TensorSpec.numelOfShape])
+      Tensor.reshape normalized #[1, melBins, frames] (by simp [Shape.numel])
 
     let maskVals0 := buildFeatureAttentionMask validLenNat targetSamples hop cfg.returnAttentionMask
     let maskVals := (maskVals0.take frames).rightpad frames 0

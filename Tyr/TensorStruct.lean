@@ -103,7 +103,7 @@ open torch
 
 -- Total number of scalar elements across all tensor leaves.
 def numScalars [TensorStruct α] (x : α) : Nat :=
-  TensorStruct.fold (fun {σ} _ acc => acc + TensorSpec.numelOfShape σ.shape) 0 x
+  TensorStruct.fold (fun {σ} _ acc => acc + Shape.numel σ.shape) 0 x
 ```
 
 ### 4) Combine structures elementwise

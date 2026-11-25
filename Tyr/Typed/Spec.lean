@@ -1,4 +1,5 @@
 import Tyr.Typed.Promotion
+import Tyr.Shape.Basic
 
 /-!
 # Typed tensor specs
@@ -32,25 +33,11 @@ the shapes agree on every other axis. The slice bound is not part of this. -/
 @[simp] def isPermutation (permutation : Array Nat) (rank : Nat) : Bool :=
   permutation.size == rank && (List.range rank).all permutation.toList.contains
 
-/-- Reorder dimensions for a permutation. Like `catShape`, it takes no proof;
-`Tensor.permute` requires `isPermutation`. -/
-@[simp] def permuteShape (s : Shape) (permutation : Array Nat) : Shape :=
-  permutation.map fun p => s.getD p 0
-
 /-- Shapes concatenate along `dim` when it is an axis of both, and they agree on
 every other axis. libtorch's legacy skipping of an empty 1-D operand is excluded. -/
 @[simp] def catCompatible (s1 s2 : Shape) (dim : Nat) : Bool :=
   dim < s1.size && s1.size == s2.size &&
     (s1.toList.zip s2.toList).zipIdx.all fun ((a, b), i) => i == dim || a == b
-
-/-- Shape after concatenation along `dim`. It takes no compatibility proof:
-`Tensor.cat` requires one, and a proof term in the result type makes failing
-`decide` attempts on later shape goals several times more expensive. -/
-@[simp] def catShape (s1 s2 : Shape) (dim : Nat) : Shape :=
-  s1.set! dim (s1.getD dim 0 + s2.getD dim 0)
-
-@[simp] def numelOfShape (shape : Shape) : Nat :=
-  shape.foldl (fun acc dim => acc * dim) 1
 
 @[simp] def dimFromRight (shape : Shape) (offset : Nat) : Nat :=
   if offset < shape.size then

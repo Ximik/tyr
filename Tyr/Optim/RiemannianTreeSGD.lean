@@ -25,7 +25,7 @@ structure StepResult (Params : Type) (s : Shape) where
   loss : Float := 0.0
 
 private abbrev shapeNumel (s : Shape) : Nat :=
-  TensorSpec.numelOfShape s
+  Shape.numel s
 
 private def treeDot [TensorStruct α] [FloatingTensorStruct α] (x y : α) : Float :=
   let prod := FloatingTensorStruct.zipWith Tensor.mul x y

@@ -95,9 +95,9 @@ def forward {batch frames inChannels outChannels kernelSize dilation : Nat}
     unfold samePadding
     rw [hm]
     omega
-  have hlen : (frames + 2 * samePadding kernelSize dilation + 2 * 0 - (dilation * (kernelSize - 1) + 1)) / 1 + 1
+  have hlen : Shape.convLength (frames + 2 * samePadding kernelSize dilation) kernelSize 1 0 dilation
       = frames := by
-    omega
+    unfold Shape.convLength; omega
   let y : Tensor { shape := #[batch, outChannels, frames], dtype := dtype.val, device := device } :=
     Tensor.reshape (Tensor.conv1d (reflectPadFrames x (samePadding kernelSize dilation)) m.weight 1 0 dilation
         ⟨by decide, hSame.2.1, hSame.1, by omega⟩)
@@ -128,10 +128,10 @@ def forward {batch frames channels seChannels : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
   let mean : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.meanDim x 2 true) #[batch, channels, 1]
   let h1 : Tensor { shape := #[batch, seChannels, 1], dtype := dtype.val, device := device } :=
-    Tensor.reshape (Tensor.conv1d mean m.conv1Weight 1 0 1) #[batch, seChannels, 1]
+    Tensor.reshape (Tensor.conv1d mean m.conv1Weight 1 0 1) #[batch, seChannels, 1] (by simp [Shape.convLength])
   let h1 := Tensor.relu (addBias3d h1 m.conv1Bias)
   let h2 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } :=
-    Tensor.reshape (Tensor.conv1d h1 m.conv2Weight 1 0 1) #[batch, channels, 1]
+    Tensor.reshape (Tensor.conv1d h1 m.conv2Weight 1 0 1) #[batch, channels, 1] (by simp [Shape.convLength])
   let gate1 := Tensor.sigmoid (addBias3d h2 m.conv2Bias)
   let gate : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.broadcastTo gate1 #[batch, channels, frames]
   Tensor.mul x gate
@@ -259,7 +259,7 @@ def forward {batch frames channels attentionChannels : Nat}
   let att1 := Tensor.tanh att0
   let att2 : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
     Tensor.reshape (Tensor.conv1d att1 m.convWeight 1 0 1) #[batch, channels, frames]
-      (by have : (frames + 2 * 0 - (1 * (1 - 1) + 1)) / 1 + 1 = frames := by omega
+      (by have : Shape.convLength frames 1 1 0 1 = frames := by unfold Shape.convLength; omega
           rw [this])
   let att3 := addBias3d att2 m.convBias
   let attention : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.softmax att3 2
@@ -328,7 +328,7 @@ def forward {batch frames : Nat}
   let pooled := AttentiveStatisticsPooling.forward m.asp hf mfaOut
 
   let y0 : Tensor { shape := #[batch, cfg.encDim, 1], dtype := dtype.val, device := device } :=
-    Tensor.reshape (Tensor.conv1d pooled m.fcWeight 1 0 1) #[batch, cfg.encDim, 1]
+    Tensor.reshape (Tensor.conv1d pooled m.fcWeight 1 0 1) #[batch, cfg.encDim, 1] (by simp [Shape.convLength])
   let y1 := addBias3d y0 m.fcBias
   Tensor.reshape y1 #[batch, cfg.encDim]
 

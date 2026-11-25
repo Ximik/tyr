@@ -267,7 +267,7 @@ def spectralNorm! {m n : Nat} {d : DType} {dev : Device}
 /-- Largest singular value of a nonempty floating or complex matrix. -/
 def spectralNorm {m n : Nat} {d : DType} {dev : Device}
     [DType.FloatingOrComplex d] (t : Tensor ⟨#[m, n], d, dev⟩)
-    (_nonempty : 0 < TensorSpec.numelOfShape #[m, n] := by numel_pos) : Float :=
+    (_nonempty : 0 < Shape.numel #[m, n] := by numel_pos) : Float :=
   spectralNorm! t
 
 def nuclearNorm! {m n : Nat} {d : DType} {dev : Device}
@@ -543,7 +543,7 @@ private def checkMatrixOperands {σ τ : StaticSpec} (a : Tensor σ) (b : Tensor
 
 def matmul! {s1 s2 : Shape} {d : DType} {dev : Device}
     (a : Tensor ⟨s1, d, dev⟩) (b : Tensor ⟨s2, d, dev⟩) :
-    Tensor ⟨matmulShape s1 s2, d, dev⟩ :=
+    Tensor ⟨Shape.matmul s1 s2, d, dev⟩ :=
   Tensor.ofRaw! (RawTensor.matmul! a.raw b.raw)
 
 /-- Discharges `matmulShape?` compatibility for shapes with symbolic dimensions, including
@@ -556,7 +556,7 @@ macro "matmul_shape" : tactic => `(tactic| first
 def matmul {s1 s2 : Shape} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (a : Tensor ⟨s1, d, dev⟩) (b : Tensor ⟨s2, d, dev⟩)
     (_h : (TensorSpec.matmulShape? s1 s2).isSome = true := by matmul_shape) :
-    Tensor ⟨matmulShape s1 s2, d, dev⟩ :=
+    Tensor ⟨Shape.matmul s1 s2, d, dev⟩ :=
   matmul! a b
 
 def mm! {m k n : Nat} {d : DType} {dev : Device}
@@ -721,18 +721,18 @@ def maxAll! {σ : StaticSpec} (t : Tensor σ) : Tensor (σ.withShape #[]) :=
 
 /-- Maximum over a nonempty ordered tensor. Runtime shapes/dtypes use `maxAll!`. -/
 def maxAll {σ : StaticSpec} [DType.Ordered σ.dtype] (t : Tensor σ)
-    (_nonempty : 0 < TensorSpec.numelOfShape σ.shape := by numel_pos) :
+    (_nonempty : 0 < Shape.numel σ.shape := by numel_pos) :
     Tensor (σ.withShape #[]) :=
   maxAll! t
 
 def sumDim! {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false) :
-    Tensor (σ.sumSpec.withShape (reduceShape σ.shape dim keepdim)) :=
+    Tensor (σ.sumSpec.withShape (Shape.reduce σ.shape dim keepdim)) :=
   Tensor.ofRaw! (RawTensor.sum! t.raw (some #[dim]) keepdim)
 
 /-- Reduce one axis using libtorch's accumulation dtype. -/
 def sumDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
     (_axis : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) :
-    Tensor (σ.sumSpec.withShape (reduceShape σ.shape dim keepdim)) :=
+    Tensor (σ.sumSpec.withShape (Shape.reduce σ.shape dim keepdim)) :=
   sumDim! t dim keepdim
 
 def meanAll! {σ : StaticSpec} (t : Tensor σ) : Tensor (σ.withShape #[]) :=
@@ -750,7 +750,7 @@ def reshape! {σ : StaticSpec} (t : Tensor σ) (shape' : Shape) : Tensor (σ.wit
 /-- Reshape without changing the element count; an empty target creates a scalar.
 Native code rejects extents not representable as signed 64-bit integers. -/
 def reshape {σ : StaticSpec} (t : Tensor σ) (shape' : Shape)
-    (_h : TensorSpec.numelOfShape σ.shape = TensorSpec.numelOfShape shape' := by
+    (_h : Shape.numel σ.shape = Shape.numel shape' := by
       first
       | exact of_decide_eq_true rfl
       | (simp +zetaDelta [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] <;> omega)) :
@@ -772,17 +772,17 @@ def slice {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
 def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat)
     (_h : TensorSpec.isPermutation permutation σ.shape.size = true := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "not a permutation of the axes")) :
-    Tensor (σ.withShape (TensorSpec.permuteShape σ.shape permutation)) :=
+    Tensor (σ.withShape (Shape.permute σ.shape permutation)) :=
   Tensor.ofRaw! (RawTensor.permute t.raw permutation)
 
 def transpose! {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat) :
-    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1)) :=
+    Tensor (σ.withShape (Shape.transpose σ.shape dim0 dim1)) :=
   Tensor.ofRaw! (RawTensor.transpose! t.raw dim0 dim1)
 
 def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
     (_h0 : dim0 < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
     (_h1 : dim1 < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
-    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1)) :=
+    Tensor (σ.withShape (Shape.transpose σ.shape dim0 dim1)) :=
   transpose! t dim0 dim1
 
 def transpose2d {m n : Nat} {d : DType} {dev : Device}
@@ -791,12 +791,12 @@ def transpose2d {m n : Nat} {d : DType} {dev : Device}
 
 def unsqueeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat)
     (h : dim ≤ σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
-    Tensor (σ.withShape (unsqueezeShape σ.shape dim h)) :=
+    Tensor (σ.withShape (Shape.unsqueeze σ.shape dim h)) :=
   Tensor.ofRaw! (RawTensor.unsqueeze t.raw dim)
 
 def squeeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat)
     (_h : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
-    Tensor (σ.withShape (squeezeShape σ.shape dim)) :=
+    Tensor (σ.withShape (Shape.squeeze σ.shape dim)) :=
   Tensor.ofRaw! (RawTensor.squeeze t.raw dim)
 
 /-- Discharges `catCompatible` for shapes with symbolic dimensions; fails hard on
@@ -807,13 +807,13 @@ macro "cat_shape" : tactic => `(tactic| first
 
 def cat! {s1 s2 : Shape} {d : DType} {dev : Device}
     (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat) :
-    Tensor ⟨TensorSpec.catShape s1 s2 dim, d, dev⟩ :=
+    Tensor ⟨Shape.cat s1 s2 dim, d, dev⟩ :=
   Tensor.ofRaw! (RawTensor.cat! t1.raw t2.raw dim)
 
 def cat {s1 s2 : Shape} {d : DType} {dev : Device}
     (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat)
     (_h : TensorSpec.catCompatible s1 s2 dim = true := by cat_shape) :
-    Tensor ⟨TensorSpec.catShape s1 s2 dim, d, dev⟩ :=
+    Tensor ⟨Shape.cat s1 s2 dim, d, dev⟩ :=
   cat! t1 t2 dim
 
 def stack1d! {cols : Nat} {d : DType} {dev : Device}
@@ -850,28 +850,28 @@ def fromInt64Array (arr : Array Int64) : Tensor ⟨#[arr.size], .Int64, .CPU⟩ 
 
 /-- Float32 tensor of `shape` from a host array whose length is known to match. -/
 def fromFloatArrayShaped (arr : Array Float) (shape : Shape)
-    (h : arr.size = TensorSpec.numelOfShape shape) : Tensor ⟨shape, .Float32, .CPU⟩ :=
+    (h : arr.size = Shape.numel shape) : Tensor ⟨shape, .Float32, .CPU⟩ :=
   (fromFloatArray arr).reshape shape (by rw [← h]; simp)
 
 /-- Int64 tensor of `shape` from a host array whose length is known to match. -/
 def fromInt64ArrayShaped (arr : Array Int64) (shape : Shape)
-    (h : arr.size = TensorSpec.numelOfShape shape) : Tensor ⟨shape, .Int64, .CPU⟩ :=
+    (h : arr.size = Shape.numel shape) : Tensor ⟨shape, .Int64, .CPU⟩ :=
   (fromInt64Array arr).reshape shape (by rw [← h]; simp)
 
 /-- Float32 tensor of `shape` from host data, rejecting a length mismatch where the data enters. -/
 def fromFloatArrayAs? (arr : Array Float) (shape : Shape) : Except String (Tensor ⟨shape, .Float32, .CPU⟩) :=
-  if h : arr.size = TensorSpec.numelOfShape shape then .ok (fromFloatArrayShaped arr shape h)
-  else .error s!"expected {TensorSpec.numelOfShape shape} values for shape {shape}, got {arr.size}"
+  if h : arr.size = Shape.numel shape then .ok (fromFloatArrayShaped arr shape h)
+  else .error s!"expected {Shape.numel shape} values for shape {shape}, got {arr.size}"
 
 /-- Int64 tensor of `shape` from host data, rejecting a length mismatch where the data enters. -/
 def fromInt64ArrayAs? (arr : Array Int64) (shape : Shape) : Except String (Tensor ⟨shape, .Int64, .CPU⟩) :=
-  if h : arr.size = TensorSpec.numelOfShape shape then .ok (fromInt64ArrayShaped arr shape h)
-  else .error s!"expected {TensorSpec.numelOfShape shape} values for shape {shape}, got {arr.size}"
+  if h : arr.size = Shape.numel shape then .ok (fromInt64ArrayShaped arr shape h)
+  else .error s!"expected {Shape.numel shape} values for shape {shape}, got {arr.size}"
 
 /-- Argmax along `dim`, without precondition checks; libtorch rejects an
 unordered dtype, an invalid axis or an empty axis and the process aborts. -/
 def argmax! {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) (dim : Nat) :
-    Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
+    Tensor ⟨Shape.reduce s dim false, .Int64, dev⟩ :=
   Tensor.ofRaw! (RawTensor.argmax! t.raw dim)
 
 /-- Argmax along a valid nonempty axis of an ordered tensor. Runtime dtypes use `argmax!`. -/
@@ -879,7 +879,7 @@ def argmax {s : Shape} {d : DType} {dev : Device} [DType.Ordered d]
     (t : Tensor ⟨s, d, dev⟩) (dim : Nat)
     (axis : dim < s.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range"))
     (_nonempty : 0 < s[dim]'axis := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
-    Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
+    Tensor ⟨Shape.reduce s dim false, .Int64, dev⟩ :=
   argmax! t dim
 
 /-- Top-k filter over logits (entries outside the top k become -inf), spec-preserving. -/
@@ -1124,9 +1124,7 @@ def conv1d! {batch inChannels outChannels length kernel : Nat}
     (input : Tensor ⟨#[batch, inChannels, length], d, dev⟩)
     (weight : Tensor ⟨#[outChannels, inChannels, kernel], d, dev⟩)
     (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) :
-    Tensor ⟨#[batch, outChannels,
-      ((length + 2 * padding - (dilation * (kernel - 1) + 1)) /
-        stride + 1)], d, dev⟩ :=
+    Tensor ⟨#[batch, outChannels, Shape.convLength length kernel stride padding dilation], d, dev⟩ :=
   Tensor.ofRaw! (RawTensor.conv1d! input.raw weight.raw stride padding dilation)
 
 /-- One-dimensional convolution without bias. -/
@@ -1136,9 +1134,7 @@ def conv1d {batch inChannels outChannels length kernel : Nat}
     (weight : Tensor ⟨#[outChannels, inChannels, kernel], d, dev⟩)
     (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1)
     (_valid : ConvValid length kernel stride padding dilation := by conv_valid) :
-    Tensor ⟨#[batch, outChannels,
-      ((length + 2 * padding - (dilation * (kernel - 1) + 1)) /
-        stride + 1)], d, dev⟩ :=
+    Tensor ⟨#[batch, outChannels, Shape.convLength length kernel stride padding dilation], d, dev⟩ :=
   conv1d! input weight stride padding dilation
 
 /-- Copy tensor values to a host Float array through the native conversion. -/

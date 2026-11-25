@@ -36,7 +36,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 omni tied : Bool) : IO
   let mut data := ByteArray.empty
   for (name, shape) in entries do
     let start := data.size
-    for _ in [:TensorSpec.numelOfShape shape] do
+    for _ in [:Shape.numel shape] do
       -- Exactly 1.0 in either storage dtype.
       data := data ++ (if bf16 then ByteArray.mk #[128, 63] else ByteArray.mk #[0, 0, 128, 63])
     let name := namePrefix ++ name

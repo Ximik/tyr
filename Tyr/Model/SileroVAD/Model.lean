@@ -29,7 +29,7 @@ private def preparedInputSamples : Nat := combinedInputSamples + rightReflectPad
 /-- Proves a reshape whose sizes are the fixed SileroVAD chunk constants. -/
 local macro "vad_sizes" : tactic =>
   `(tactic| simp [preparedInputSamples, combinedInputSamples, chunkSizeSamples, contextSizeSamples,
-    rightReflectPad])
+    rightReflectPad, Shape.convLength])
 
 private def addBias2d {n d : Nat}
     (x : Tensor { device := device, shape := #[n, d], dtype := .Float32 }) (b : Tensor { device := device, shape := #[d], dtype := .Float32 })

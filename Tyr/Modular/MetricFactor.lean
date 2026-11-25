@@ -72,17 +72,17 @@ private def scaleColumns {rank dim : Nat} {d : DType} {dev : Device} [DType.Prom
     (matrix : Tensor ⟨#[rank, dim], d, dev⟩)
     (scale : Tensor ⟨#[dim], d, dev⟩) : Tensor ⟨#[rank, dim], d, dev⟩ :=
   let scaleRow : Tensor ⟨#[1, dim], d, dev⟩ :=
-    Tensor.reshape scale #[1, dim] (by simp [TensorSpec.numelOfShape])
+    Tensor.reshape scale #[1, dim] (by simp [Shape.numel])
   let scaleFull : Tensor ⟨#[rank, dim], d, dev⟩ := Tensor.broadcastTo scaleRow #[rank, dim]
   Tensor.mul matrix scaleFull
 
 private def vectorToColumn {n : Nat} {d : DType} {dev : Device}
     (v : Tensor ⟨#[n], d, dev⟩) : Tensor ⟨#[n, 1], d, dev⟩ :=
-  Tensor.reshape v #[n, 1] (by simp [TensorSpec.numelOfShape])
+  Tensor.reshape v #[n, 1] (by simp [Shape.numel])
 
 private def columnToVector {n : Nat} {d : DType} {dev : Device}
     (v : Tensor ⟨#[n, 1], d, dev⟩) : Tensor ⟨#[n], d, dev⟩ :=
-  Tensor.reshape v #[n] (by simp [TensorSpec.numelOfShape])
+  Tensor.reshape v #[n] (by simp [Shape.numel])
 
 /-- Dense Gram form `K^T K`. -/
 def gram {rank dim : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d] (K : MetricFactor rank dim d dev) :

@@ -60,9 +60,9 @@ def forward {batch channels height width : Nat}
 
   -- Reshape to [batch, channels, height*width]
   let spatial := height * width
-  let q := Tensor.reshape q #[batch, channels, spatial] (by simp +zetaDelta [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
-  let k := Tensor.reshape k #[batch, channels, spatial] (by simp +zetaDelta [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
-  let v := Tensor.reshape v #[batch, channels, spatial] (by simp +zetaDelta [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
+  let q := Tensor.reshape q #[batch, channels, spatial] (by simp +zetaDelta [Shape.convLength_same hh (by decide : 2 * 0 + 1 = 1), Shape.convLength_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
+  let k := Tensor.reshape k #[batch, channels, spatial] (by simp +zetaDelta [Shape.convLength_same hh (by decide : 2 * 0 + 1 = 1), Shape.convLength_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
+  let v := Tensor.reshape v #[batch, channels, spatial] (by simp +zetaDelta [Shape.convLength_same hh (by decide : 2 * 0 + 1 = 1), Shape.convLength_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
 
   -- Compute attention: softmax(Qᵀ K / sqrt(channels)) V
   -- Q: [batch, channels, spatial], K: [batch, channels, spatial]
@@ -84,7 +84,7 @@ def forward {batch channels height width : Nat}
 
   -- Output projection + residual
   let out := Tensor.conv2dBias out attn.proj_out.weight attn.proj_out.bias (1, 1) (0, 0)
-  let out := Tensor.reshape out #[batch, channels, height, width] (by simp +zetaDelta [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
+  let out := Tensor.reshape out #[batch, channels, height, width] (by simp +zetaDelta [Shape.convLength_same hh (by decide : 2 * 0 + 1 = 1), Shape.convLength_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
 
   Tensor.add x out
 
