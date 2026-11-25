@@ -1,4 +1,4 @@
-import Tyr.Basic
+import Tyr.FFI.Basic
 
 /-! Native process-group and collective bindings. The typed API is in
 `Tyr.Distributed`; `Native` holds the raw-handle entry points it wraps. -/

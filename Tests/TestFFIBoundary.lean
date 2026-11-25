@@ -1,8 +1,8 @@
 import Tests.Assertions
 import LeanTest
 import Tyr.Typed.Neural
-import Tyr.RawTensor.Qwen35
-import Tyr.RawTensor.Gemma4
+import Tyr.FFI.Qwen35
+import Tyr.FFI.Gemma4
 
 open torch
 

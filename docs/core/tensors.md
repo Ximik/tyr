@@ -36,8 +36,7 @@ inspect native metadata. Runtime-selected devices can appear directly in
 result types, or be packaged as `Sigma fun device => Tensor { shape := shape,
 dtype := dtype, device := device }` when the caller does not select placement.
 
-`RawTensor` is the native handle used by adapters in `Tyr.RawTensor` and its
-submodules. It is not the model-facing tensor type. `Tensor.ofRaw!` checks a
+`RawTensor` is the native handle used by adapters in `Tyr/FFI/`. It is not the model-facing tensor type. `Tensor.ofRaw!` checks a
 native result's shape, dtype, and placement against `σ` and aborts on a mismatch.
 There is no public unchecked raw constructor or implicit raw coercion. Native
 adapters use explicit `.raw` access and validate returned handles. Static

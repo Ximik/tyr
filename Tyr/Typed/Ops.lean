@@ -22,8 +22,8 @@
     the shape pair (auto-param, `rfl` for concrete shapes), so inner-dim
     mismatches fail to compile instead of throwing inside libtorch.
 -/
-import Tyr.RawTensor
-import Tyr.ConstantSupport
+import Tyr.FFI.RawTensor
+import Tyr.FFI.ConstantSupport
 import Tyr.Shape.Allocation
 import Tyr.Typed.Tensor
 import Tyr.Typed.Domain

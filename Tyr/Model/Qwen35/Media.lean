@@ -5,7 +5,7 @@
   - image/video file -> patchified tensor `[nPatches, patchDim]`
 -/
 import Tyr.Typed.Neural
-import Tyr.RawTensor.Qwen35
+import Tyr.FFI.Qwen35
 import Tyr.Model.Qwen35.VLConfig
 
 namespace torch.qwen35.media

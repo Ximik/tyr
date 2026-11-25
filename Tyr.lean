@@ -1,5 +1,5 @@
 -- Core infrastructure
-import Tyr.Basic
+import Tyr.FFI.Basic
 import Tyr.Log
 import Tyr.Torch
 import Tyr.Typed
@@ -66,7 +66,7 @@ Its central goal is to make tensor programs safer by tracking key invariants
 
 This root module re-exports the core, general-purpose surface area:
 
-- `Tyr.Basic`: foundational tensor aliases and shared utilities.
+- `Tyr.FFI.Basic`: foundational tensor aliases and shared utilities.
 - `Tyr.Torch`: low-level tensor operations and libtorch bindings.
 - `Tyr.Typed`: tensor wrappers with static shape/dtype checks and checked raw boundaries.
 - `Tyr.SafeTensors`: typed SafeTensors schema and loading support.

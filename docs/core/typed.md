@@ -12,10 +12,10 @@ data, and persistence operations. `import Tyr` aggregates the library.
 
 | Module | Responsibility |
 | --- | --- |
-| `Tyr.Basic.Types` | Raw carrier, specifications, dtype/device types, pure shape helpers |
-| `Tyr.Basic` | Indexed carrier, checked raw admission, native metadata, native zero factory |
-| `Tyr.ConstantSupport.Types` | Erased constant-construction capability for an exact dtype and device |
-| `Tyr.ConstantSupport` | Runtime acquisition of dtype/device constant support |
+| `Tyr.FFI.Basic.Types` | Raw carrier, specifications, dtype/device types, pure shape helpers |
+| `Tyr.FFI.Basic` | Indexed carrier, checked raw admission, native metadata, native zero factory |
+| `Tyr.FFI.ConstantSupport.Types` | Erased constant-construction capability for an exact dtype and device |
+| `Tyr.FFI.ConstantSupport` | Runtime acquisition of dtype/device constant support |
 | `Tyr.Typed.DType` | Partial dtype promotion and accumulation rules |
 | `Tyr.Typed.Promotion` | Erased proof classes for successful dtype promotion |
 | `Tyr.Typed.Spec` | Shape and result-spec algebra |
@@ -25,7 +25,7 @@ data, and persistence operations. `import Tyr` aggregates the library.
 | `Tyr.Typed.Neural` | Neural, data, storage, and dynamic-shape adapters |
 | `Tyr.TensorStruct.Cast` | Convert a tensor tree to the specifications in a destination type |
 | `Tyr.TensorStruct.DeriveCast` | Derive field-wise casts between explicitly selected record types |
-| `Tyr.RawTensor` and submodules | Native declarations without static guarantees |
+| `Tyr/FFI/` | Native declarations without static guarantees |
 
 ## Concrete placement and dtype claims
 

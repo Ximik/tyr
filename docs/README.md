@@ -30,6 +30,7 @@ Two kinds of documentation exist:
 
 - [Getting started](getting-started.md) — dependencies, build, environment,
   tests, and running examples.
+- [Architecture](architecture.md) — rules for where code lives.
 - [Tensors and the torch FFI](core/tensors.md) — `Shape`, the shape-indexed
   tensor type `Tensor σ`, pure specification arithmetic, and checked native
   adapter boundaries.

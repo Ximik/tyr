@@ -2714,7 +2714,7 @@ lean_object* lean_torch_sdpa_gqa_mask_qkv_io(
     b_lean_obj_arg mask,
     double dropout_p,
     uint8_t enable_gqa) {
-  return tyr::ioCall("gemma4MaskedAttentionIO", [&] {
+  return tyr::ioCall("attentionGQAMaskQKVIO", [&] {
     return lean_io_result_mk_ok(giveTensor(groupedAttentionFromLean(query, key, value, mask, dropout_p, false, enable_gqa != 0, tyr_ops::AttentionMaskKind::Edges)));
   });
 }

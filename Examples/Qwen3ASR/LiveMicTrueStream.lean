@@ -1,5 +1,5 @@
 import Tyr.Model.Qwen3ASR.StreamModel
-import Tyr.Audio.AppleInput
+import Tyr.FFI.AppleAudioInput
 
 namespace Examples.Qwen3ASR
 

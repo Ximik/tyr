@@ -5,7 +5,7 @@
   Covers the public Gemma 4 family checkpoints routed through the text
   submodel of the official multimodal repos.
 -/
-import Tyr.Basic
+import Tyr.FFI.Basic
 import Tyr.TensorStruct
 import Tyr.Tokenizer.Types
 

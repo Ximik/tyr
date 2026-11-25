@@ -1,4 +1,4 @@
-import Tyr.Basic
+import Tyr.FFI.Basic
 
 /-! Native KV-cache update bindings wrapped by `Tyr.Inference.OwnedKV`. -/
 

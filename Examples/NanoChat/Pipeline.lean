@@ -15,7 +15,7 @@
 import Tyr.Pipeline
 import Tyr.Distributed
 import Tyr.DataLoader
-import Tyr.RawTensor.Parquet
+import Tyr.FFI.Parquet
 import Tyr.Data.Task
 import Tyr.Data.TaskClass
 import Tyr.Train.ChatSFT

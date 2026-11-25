@@ -1,5 +1,5 @@
 import LeanTest
-import Tyr.Basic.Types
+import Tyr.FFI.Basic.Types
 
 namespace Tests.DTypeMetadata
 

@@ -1,10 +1,10 @@
-import Tyr.RawTensor.SafeTensors
+import Tyr.FFI.SafeTensors
 import Lean.Data.Json
 
 /-!
 SafeTensors files: an 8-byte little-endian header size, a JSON header giving
 each tensor's dtype, shape and byte range, then the tensor data. Lean parses
-and writes the header; `Tyr.RawTensor.SafeTensors` only moves tensor bytes.
+and writes the header; `Tyr.FFI.SafeTensors` only moves tensor bytes.
 Dtype names and element widths come from `DType.safeTensorFormat?`.
 -/
 

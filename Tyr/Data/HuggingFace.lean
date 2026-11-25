@@ -7,7 +7,7 @@
   avoiding the need for Python dependencies.
 -/
 import Tyr.Data.Download
-import Tyr.RawTensor.Parquet
+import Tyr.FFI.Parquet
 import Tyr.Log
 import Lean.Data.Json
 

@@ -7,7 +7,7 @@
   - talker code predictor
   - top-level TTS model
 -/
-import Tyr.Basic
+import Tyr.FFI.Basic
 import Tyr.Tokenizer.Types
 
 namespace torch.qwen3tts

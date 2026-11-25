@@ -1,4 +1,4 @@
-import Tyr.Basic.Types
+import Tyr.FFI.Basic.Types
 
 namespace torch.Shape
 

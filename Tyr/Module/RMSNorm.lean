@@ -5,7 +5,7 @@
   Used in LLaMA, Qwen, and other modern transformer architectures.
 -/
 import Tyr.Typed.Neural
-import Tyr.ConstantSupport
+import Tyr.FFI.ConstantSupport
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive

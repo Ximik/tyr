@@ -1,4 +1,4 @@
-import Tyr.Basic
+import Tyr.FFI.Basic
 
 /-! Native runtime services: device acquisition, CUDA streams and events,
 file helpers, and the global RNG seed. Re-exported by `Tyr.Torch`. -/
@@ -17,18 +17,6 @@ opaque cuda (index : Nat := 0) : IO Device :=
 @[extern "lean_torch_device_mps"]
 opaque mps : IO Device :=
   throw (IO.userError "Device.mps requires the native runtime")
-
-/-- Acquire the placement `kind` describes; throws if its backend is unavailable. -/
-def acquire : DeviceKind → IO Device
-  | .CPU => pure .CPU
-  | .CUDA index => cuda index
-  | .MPS => mps
-
-/-- Acquire the placement a `DeviceKind.ofString?` spelling names. -/
-def acquireNamed (name : String) : IO Device :=
-  match DeviceKind.ofString? name with
-  | some kind => acquire kind
-  | none => throw (IO.userError s!"unknown device '{name}' (expected cpu, mps, cuda or cuda:<ordinal>)")
 
 end Device
 
@@ -75,12 +63,6 @@ opaque binFileTokenCount (path : @& String) : IO Nat
 native failures return IO errors. Equal-rate and empty inputs retain the input array. -/
 @[extern "lean_torch_resample_soxr_hq"]
 opaque resampleSoxrHQ (samples : @& Array Float) (origSr targetSr : @& Nat) : IO (Array Float)
-
-@[extern "lean_torch_wav_begin"]
-opaque wavBegin (path : @& String) (sampleRate : Nat := 24000) : IO Unit
-
-@[extern "lean_torch_wav_finalize"]
-opaque wavFinalize (path : @& String) : IO Unit
 
 end data
 

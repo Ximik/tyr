@@ -1,5 +1,5 @@
 import Tyr.Typed.Tensor
-import Tyr.RawTensor.OwnedKV
+import Tyr.FFI.OwnedKV
 
 /- Tyr/Inference/OwnedKV.lean
 

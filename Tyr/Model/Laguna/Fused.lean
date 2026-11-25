@@ -39,7 +39,7 @@
   - `1 ≤ tokens * k ≤ 65535`
 -/
 import Tyr.Typed.Neural
-import Tyr.RawTensor.Laguna
+import Tyr.FFI.Laguna
 
 namespace torch.laguna
 

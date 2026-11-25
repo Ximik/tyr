@@ -3,7 +3,7 @@
 
   Configuration types for the Lean4 Qwen3-ASR port.
 -/
-import Tyr.Basic
+import Tyr.FFI.Basic
 import Tyr.Model.Qwen.Config
 import Tyr.Tokenizer.Types
 

@@ -6,7 +6,7 @@
 
 extern "C" {
 void lean_initialize();
-lean_object* initialize_FunctionalGradCallback(uint8_t);
+lean_object* initialize_tyr_Tests_Native_FunctionalGradCallback(uint8_t);
 lean_object* tyr_test_callback_sum(lean_object*, lean_object*);
 lean_object* tyr_test_callback_identity(lean_object*, lean_object*);
 lean_object* tyr_test_callback_throw(lean_object*, lean_object*);
@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
     require(mode == "success" || mode == "setup-error" || mode == "result-error" ||
             mode == "callback-error", "Unknown mode");
     lean_initialize();
-    Object initialized(initialize_FunctionalGradCallback(1), lean_dec);
+    Object initialized(initialize_tyr_Tests_Native_FunctionalGradCallback(1), lean_dec);
     require(lean_io_result_is_ok(initialized.get()), "Callback initialization failed");
     const auto baseline = liveTensors();
     run(mode);

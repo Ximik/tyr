@@ -1,5 +1,5 @@
 import Tyr.Model.Qwen35.TypedOps
-import Tyr.RawTensor.Flux
+import Tyr.FFI.Neural
 import Tyr.Module.LayerNorm
 import Tyr.TensorStruct.DeriveCast
 

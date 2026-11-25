@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Require complete exception guards on audited recoverable native exports.
 
-Inventory is derived from IO/Except result types in Tyr/RawTensor.lean, its
-submodules except OwnedKV, Tyr/Basic.lean, and Tyr/ConstantSupport.lean.
+Inventory is derived from IO/Except result types in Tyr/FFI/ except OwnedKV
+and the Apple audio bindings.
 Other native subsystems are outside this explicitly reviewed scope.
 Every source definition, including inactive
 platform branches, must contain only a tryCall (Except) or ioCall (IO) return
@@ -34,7 +34,8 @@ PURE_RESULT_HEADS = {"RawTensor", "DType", "Bool", "Float", "String", "Shape", "
 
 # This one polymorphic extern never returns a value. Audit its complete native
 # body instead of permitting arbitrary type variables to hide IO/Except aliases.
-POLYMORPHIC_ABORT = ("Tyr/Basic.lean", "lean_torch_native_invariant_failure", "α")
+POLYMORPHIC_ABORT = ("Tyr/FFI/Basic.lean", "lean_torch_native_invariant_failure", "α")
+OUT_OF_SCOPE = {"OwnedKV.lean", "AppleAudioInput.lean", "AppleAudioOutput.lean"}
 FIXED_ABORT_BODY = [
     "std", "::", "fprintf", "(", "stderr", ",", "<string>", ",",
     "lean_string_cstr", "(", "message", ")", ")", ";",
@@ -268,10 +269,8 @@ def guarded_body(body: tuple[Token, ...], carrier: str) -> bool:
 def audit(root: Path) -> tuple[list[str], Counter]:
     errors = []
     exports = {}
-    lean_paths = [root / "Tyr/Basic.lean", root / "Tyr/RawTensor.lean",
-                  root / "Tyr/ConstantSupport.lean",
-                  *sorted(path for path in (root / "Tyr/RawTensor").rglob("*.lean")
-                          if path.name != "OwnedKV.lean")]
+    lean_paths = sorted(path for path in (root / "Tyr/FFI").rglob("*.lean")
+                        if path.name not in OUT_OF_SCOPE)
     for path in lean_paths:
         label = path.relative_to(root).as_posix()
         try:

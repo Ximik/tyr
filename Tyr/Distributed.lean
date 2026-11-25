@@ -1,7 +1,7 @@
 import Tyr.TensorStruct
 import Tyr.Inference.OwnedKV
-import Tyr.ConstantSupport
-import Tyr.RawTensor.Distributed
+import Tyr.FFI.ConstantSupport
+import Tyr.FFI.Distributed
 
 /-!
 # Tyr.Distributed

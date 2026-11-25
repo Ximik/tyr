@@ -4,7 +4,7 @@
   Configuration for Qwen3 model architecture.
   Qwen3-4B is used as the text encoder for FLUX.2 Klein.
 -/
-import Tyr.Basic
+import Tyr.FFI.Basic
 
 namespace torch.qwen
 

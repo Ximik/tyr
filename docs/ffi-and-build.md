@@ -16,7 +16,7 @@ boundary itself.
 ### The tensor contract
 
 The native carrier is opaque. Public tensors index it with a specification
-(`Tyr.Basic.Types` and `Tyr.Basic`):
+(`Tyr.FFI.Basic.Types` and `Tyr.FFI.Basic`):
 
 ```lean
 abbrev Shape := Array UInt64
@@ -114,9 +114,8 @@ versus borrowed arguments: `lean_obj_arg` and `b_lean_obj_arg` are both
 
 ### Generated FFI header
 
-Every `@[extern]` of `Tyr` lives in the `TyrFFI` library (`Tyr.Basic`,
-`Tyr.Basic.Types`, `Tyr.ConstantSupport`, `Tyr.RawTensor` and its submodules, `Tyr.Audio`'s
-Apple I/O). It is not precompiled, so it builds before
+Every `@[extern]` of `Tyr` lives under `Tyr/FFI/`, the `TyrFFI` library,
+together with the types they use. It is not precompiled, so it builds before
 `libTyrC`. The `libtyr` target runs `GenerateFfiHeader` over it, writing
 `cc/src/generated/tyr_ffi.h` from Lean's compiled extern declarations, and
 `cc/src` and `cc/tools` include that header. A C++ definition whose signature
@@ -226,9 +225,7 @@ The Lean regressions cover returned-value use, metadata checks, and effect order
 
 Native result carriers must match the Lean declaration on every path.
 `scripts/check_ffi_recovery.py` inventories recoverable declarations in
-`Tyr/RawTensor.lean`, its submodules (runtime services, distributed, and
-Parquet included; OwnedKV excluded), `Tyr/Basic.lean`, and
-`Tyr/ConstantSupport.lean`. It requires every native implementation, including
+`Tyr/FFI/`, except `OwnedKV` and the Apple audio bindings. It requires every native implementation, including
 inactive platform branches, to enter the common exception guard before doing
 C++ work. The CPU tooling job runs this check alongside ABI and runtime
 regressions; reviewed fixed platform-unavailable stubs are checked separately.
@@ -344,12 +341,12 @@ setup/result errors without leaks, and fatal callback errors in separate process
 
 | File | Exports | Bound from |
 |---|---|---|
-| `tyr.cpp` | `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.RawTensor` and its adapter submodules |
-| `tyr_distributed.cpp` | `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/RawTensor/Distributed.lean` |
+| `tyr.cpp` | `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.FFI.RawTensor` and its adapter submodules |
+| `tyr_distributed.cpp` | `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/FFI/Distributed.lean` |
 | `tyr_polar.cpp` | `lean_torch_xxt`, `ba_plus_cAA`, `newton_schulz_step`, `polar_express`, `muon_orthogonalize`, `cautious_update` | manifold/optimizer modules |
-| `tyr_parquet.cpp` | `lean_parquet_*` Arrow/Parquet readers | `Tyr/RawTensor/Parquet.lean` |
+| `tyr_parquet.cpp` | `lean_parquet_*` Arrow/Parquet readers | `Tyr/FFI/Parquet.lean` |
 | `tyr_qwen35.cpp` | `lean_torch_qwen35_{chunk,recurrent}_gated_delta_rule` linear attention | `Tyr/Model/Qwen35/Model.lean` |
-| `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/Audio/Apple*.lean` |
+| `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/FFI/AppleAudio*.lean` |
 | `tyr_media_stub.cpp` | non-Apple error stubs for the media entry points | same |
 
 Only `tyr_qwen35.cpp` includes `cc/include/tyr_tensor.h`; the other units

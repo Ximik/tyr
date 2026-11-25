@@ -1,5 +1,5 @@
 import LeanTest
-import Tyr.RawTensor.Parquet
+import Tyr.FFI.Parquet
 
 open torch.Data.Parquet
 

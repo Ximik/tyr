@@ -23,7 +23,7 @@ Everything below lives in three namespaces: `torch.safetensors`, `torch.Hub`, an
 ### Loading: `Source`
 
 `Tyr.SafeTensors.File` parses and validates SafeTensors headers in Lean; native
-code (`Tyr.RawTensor.SafeTensors`) only reads a tensor's byte range and writes
+code (`Tyr.FFI.SafeTensors`) only reads a tensor's byte range and writes
 tensor bytes. Headers are parsed once per file and per directory.
 
 `Tyr.SafeTensors.Source` is the loading API. `Source.open path` accepts:

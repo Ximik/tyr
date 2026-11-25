@@ -11,11 +11,22 @@ source "$repo_root/scripts/native_tensor_test_common.sh"
 trap native_test_cleanup EXIT
 native_test_exception_smoke
 
-cp "$repo_root/cc/tools/FunctionalGradCallback.lean" "$test_dir/FunctionalGradCallback.lean"
-"$lean_dir/bin/lean" --root="$test_dir" -c "$test_dir/callback.c" "$test_dir/FunctionalGradCallback.lean"
-"${CC:-cc}" -std=c11 -I"$lean_dir/include" -c "$test_dir/callback.c" -o "$test_dir/callback.o"
+# Link the callback module with the project modules it imports.
+modules=()
+pending=(Tests.Native.FunctionalGradCallback)
+while ((${#pending[@]})); do
+  module=${pending[0]}; pending=("${pending[@]:1}")
+  [[ " ${modules[*]} " == *" $module "* ]] && continue
+  modules+=("$module")
+  while read -r _ import; do
+    [[ $import == Tyr.* ]] && pending+=("$import")
+  done < <(grep '^import ' "$repo_root/${module//.//}.lean")
+done
+(cd "$repo_root" && lake build "${modules[@]/%/:o.export}")
+objects=()
+for module in "${modules[@]}"; do objects+=("$repo_root/.lake/build/ir/${module//.//}.c.o.export"); done
 "${CXX:-c++}" "${native_cxx_flags[@]}" -I"$repo_root/cc/src" -I"$lean_dir/include" \
-  "$repo_root/cc/tools/test_functional_grad_callback.cpp" "$test_dir/callback.o" \
+  "$repo_root/cc/tools/test_functional_grad_callback.cpp" "${objects[@]}" \
   "${native_link_flags[@]}" \
   -o "$test_dir/callback-test"
 

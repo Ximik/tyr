@@ -12,8 +12,8 @@
   - Prints transcribed text to stdout
 -/
 import Tyr.Model.Whisper
-import Tyr.Audio.AppleInput
-import Tyr.Audio.AppleOutput
+import Tyr.FFI.AppleAudioInput
+import Tyr.FFI.AppleAudioOutput
 
 open torch.whisper
 

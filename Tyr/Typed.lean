@@ -11,5 +11,5 @@ LeanMLX-inspired typed facade for Tyr.
 
 The public tensor type is `Tensor σ`, backed by a native `RawTensor` handle.
 Shape, dtype, and device specifications survive typechecking. Native operations
-are isolated in `Tyr.RawTensor`; checked constructors validate external handles.
+are isolated in `Tyr.FFI.RawTensor`; checked constructors validate external handles.
 -/
