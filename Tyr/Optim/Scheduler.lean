@@ -10,12 +10,11 @@
   - Combined with schedule combinators (`join`, `scale_schedule`, etc.)
 -/
 import Tyr.Optim
+import Tyr.Util
 
 namespace torch.Optim.Scheduler
 
 open torch.Optim (Schedule)
-
-private def pi : Float := 3.14159265358979323846
 
 /-! ## Primitive Schedule Constructors
 
@@ -36,7 +35,7 @@ def cosine_decay (peak : Float) (totalSteps : Nat) (end_value : Float := 0.0)
     end_value
   else
     let progress := (step - warmupSteps).toFloat / max (totalSteps - warmupSteps).toFloat 1.0
-    let coeff := 0.5 * (1.0 + Float.cos (pi * progress))
+    let coeff := 0.5 * (1.0 + Float.cos (Float.pi * progress))
     end_value + coeff * (peak - end_value)
 
 /-- Linear warmup then linear decay. -/
@@ -70,7 +69,7 @@ def one_cycle (peak : Float) (totalSteps : Nat) (min_value : Float := 0.0)
       min_value + progress * (peak - min_value)
     else
       let progress := (step - warmupSteps).toFloat / max (totalSteps - warmupSteps).toFloat 1.0
-      let coeff := 0.5 * (1.0 + Float.cos (pi * progress))
+      let coeff := 0.5 * (1.0 + Float.cos (Float.pi * progress))
       min_value + coeff * (peak - min_value)
 
 /-- Warmup → Plateau → Cosine decay. -/
@@ -85,7 +84,7 @@ def warmup_plateau_cosine (peak : Float) (totalSteps : Nat)
     end_value
   else
     let progress := (step - decayStart).toFloat / max (totalSteps - decayStart).toFloat 1.0
-    let coeff := 0.5 * (1.0 + Float.cos (pi * progress))
+    let coeff := 0.5 * (1.0 + Float.cos (Float.pi * progress))
     end_value + coeff * (peak - end_value)
 
 /-- Exponential decay: value = initial * gamma^step -/
@@ -158,6 +157,6 @@ def cosine_weight_decay (baseWd : Float) (totalSteps : Nat) : Schedule := fun st
     0.0
   else
     let progress := step.toFloat / totalSteps.toFloat
-    baseWd * 0.5 * (1.0 + Float.cos (pi * progress))
+    baseWd * 0.5 * (1.0 + Float.cos (Float.pi * progress))
 
 end torch.Optim.Scheduler

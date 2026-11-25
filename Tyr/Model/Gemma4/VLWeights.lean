@@ -8,13 +8,14 @@ import Tyr.SafeTensors.Source
 import Tyr.Model.Utils
 import Tyr.Model.Gemma4.Weights
 import Tyr.Model.Gemma4.Multimodal
+import Tyr.Util
 
 namespace torch.gemma4
 
 variable {device : Device} {dtype : DType}
 
 open torch.Log
-open torch.safetensors (pushUnique Source)
+open torch.safetensors (Source)
 
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
     SomeDTypeTensor shape device := ⟨tensor.1, tensor.2.detach⟩
@@ -28,11 +29,11 @@ private def requireLinear {outDim inDim : Nat} (dtype : DType)
 private def visionTensorNameCandidates (name : String) : Array String :=
   Id.run do
     let mut out : Array String := #[]
-    out := pushUnique out name
+    out := out.pushUnique name
     if name.startsWith "model." then
-      out := pushUnique out (name.drop 6).toString
+      out := out.pushUnique (name.drop 6).toString
     else
-      out := pushUnique out s!"model.{name}"
+      out := out.pushUnique s!"model.{name}"
     out
 
 private def visionParameterNameCandidates (name : String) : Array String :=
@@ -41,7 +42,7 @@ private def visionParameterNameCandidates (name : String) : Array String :=
     if !name.endsWith ".weight" then
       for suffix in [".weight", ".linear.weight"] do
         for cand in visionTensorNameCandidates s!"{name}{suffix}" do
-          out := pushUnique out cand
+          out := out.pushUnique cand
     out
 
 private def loadVisionParameter {s : Shape}

@@ -11,13 +11,14 @@ import Tyr.Log
 import Tyr.SafeTensors.Source
 import Tyr.Model.Utils
 import Tyr.Model.Gemma4.Model
+import Tyr.Util
 
 namespace torch.gemma4
 
 variable {device : Device} {dtype : DType}
 
 open torch.Log
-open torch.safetensors (pushUnique Source)
+open torch.safetensors (Source)
 
 private def tensorNameCandidates (name : String) : Array String :=
   Id.run do
@@ -25,26 +26,26 @@ private def tensorNameCandidates (name : String) : Array String :=
     let llmPrefix := "language_model."
     let modelLlmPrefix := "model.language_model."
     let mut out : Array String := #[]
-    out := pushUnique out name
+    out := out.pushUnique name
     if name.startsWith modelLlmPrefix then
       let suffix := (name.drop modelLlmPrefix.length).toString
-      out := pushUnique out suffix
-      out := pushUnique out s!"{modelPrefix}{suffix}"
-      out := pushUnique out s!"{llmPrefix}{suffix}"
+      out := out.pushUnique suffix
+      out := out.pushUnique s!"{modelPrefix}{suffix}"
+      out := out.pushUnique s!"{llmPrefix}{suffix}"
     else if name.startsWith llmPrefix then
       let suffix := (name.drop llmPrefix.length).toString
-      out := pushUnique out suffix
-      out := pushUnique out s!"{modelPrefix}{suffix}"
-      out := pushUnique out s!"{modelLlmPrefix}{suffix}"
+      out := out.pushUnique suffix
+      out := out.pushUnique s!"{modelPrefix}{suffix}"
+      out := out.pushUnique s!"{modelLlmPrefix}{suffix}"
     else if name.startsWith modelPrefix then
       let suffix := (name.drop modelPrefix.length).toString
-      out := pushUnique out suffix
-      out := pushUnique out s!"{llmPrefix}{suffix}"
-      out := pushUnique out s!"{modelLlmPrefix}{suffix}"
+      out := out.pushUnique suffix
+      out := out.pushUnique s!"{llmPrefix}{suffix}"
+      out := out.pushUnique s!"{modelLlmPrefix}{suffix}"
     else
-      out := pushUnique out s!"{modelPrefix}{name}"
-      out := pushUnique out s!"{llmPrefix}{name}"
-      out := pushUnique out s!"{modelLlmPrefix}{name}"
+      out := out.pushUnique s!"{modelPrefix}{name}"
+      out := out.pushUnique s!"{llmPrefix}{name}"
+      out := out.pushUnique s!"{modelLlmPrefix}{name}"
     out
 
 private def parameterNameCandidates (name : String) : Array String :=
@@ -52,7 +53,7 @@ private def parameterNameCandidates (name : String) : Array String :=
     let mut out := tensorNameCandidates name
     if !name.endsWith ".weight" then
       for cand in tensorNameCandidates s!"{name}.weight" do
-        out := pushUnique out cand
+        out := out.pushUnique cand
     out
 
 private def loadParameter (src : Source) (name : String) (s : Shape) : IO (SomeDTypeTensor (s) device) := do

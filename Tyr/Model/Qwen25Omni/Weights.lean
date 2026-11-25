@@ -11,26 +11,27 @@ import Tyr.Model.Utils
 import Tyr.Model.Qwen25Omni.Config
 import Tyr.Model.Qwen3.Model
 import Tyr.Model.Qwen.Model
+import Tyr.Util
 
 namespace torch.qwen25omni
 
 variable {device : Device}
 open torch.Log
 open torch.Model (dequantizeFP8 checkFP8Blocks)
-open torch.safetensors (pushUnique Source)
+open torch.safetensors (Source)
 
 private def nameCandidates (name : String) : Array String :=
   let out : Array String := #[]
-  let out := pushUnique out name
-  let out := pushUnique out s!"thinker.{name}"
-  let out := pushUnique out s!"language_model.{name}"
-  let out := pushUnique out s!"model.language_model.{name}"
+  let out := out.pushUnique name
+  let out := out.pushUnique s!"thinker.{name}"
+  let out := out.pushUnique s!"language_model.{name}"
+  let out := out.pushUnique s!"model.language_model.{name}"
   if name.startsWith "model." then
     let suffix := (name.drop 6).toString
-    let out := pushUnique out suffix
-    let out := pushUnique out s!"thinker.{suffix}"
-    let out := pushUnique out s!"language_model.{suffix}"
-    pushUnique out s!"model.language_model.{suffix}"
+    let out := out.pushUnique suffix
+    let out := out.pushUnique s!"thinker.{suffix}"
+    let out := out.pushUnique s!"language_model.{suffix}"
+    out.pushUnique s!"model.language_model.{suffix}"
   else
     out
 

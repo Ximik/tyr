@@ -14,6 +14,7 @@ import Tyr.Model.Whisper.Weights
 import Tyr.Model.Qwen3ASR.Frontend
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
 import Tyr.Tokenizer.Qwen3
+import Tyr.Util
 
 namespace torch.whisper
 
@@ -134,9 +135,6 @@ private def tokenIdByText? (tok : tokenizer.qwen3.QwenTokenizer) (text : String)
 private def isTimestampSpecialToken (text : String) : Bool :=
   text.startsWith "<|" && text.endsWith "|>" && text.contains '.'
 
-private def pushUniqueId (xs : Array UInt32) (id : UInt32) : Array UInt32 :=
-  if xs.contains id then xs else xs.push id
-
 private def buildDecodeTokenRules
     (tok : tokenizer.qwen3.QwenTokenizer)
     (cfg : WhisperConfig)
@@ -150,12 +148,12 @@ private def buildDecodeTokenRules
       let allowSpecial :=
         isEos || (!noTimestamps && isTimestamp)
       if !allowSpecial then
-        forbidden := pushUniqueId forbidden id
+        forbidden := forbidden.pushUnique id
     for id in cfg.suppressTokens do
-      forbidden := pushUniqueId forbidden id
+      forbidden := forbidden.pushUnique id
     let mut beginSuppress : Array UInt32 := #[]
     for id in cfg.beginSuppressTokens do
-      beginSuppress := pushUniqueId beginSuppress id
+      beginSuppress := beginSuppress.pushUnique id
     let timestampBeginId :=
       if noTimestamps then none else tokenIdByText? tok "<|0.00|>"
     let maxInitialTimestampTokens :=
@@ -497,7 +495,7 @@ private def applyInitialTimestampCap
           Id.run do
             let mut forb := rules.forbidden
             for i in [start:cfg.vocabSize] do
-              forb := pushUniqueId forb i.toUInt32
+              forb := forb.pushUnique i.toUInt32
             { rules with forbidden := forb }
 
 private def applyTimestampPairMask
@@ -526,13 +524,13 @@ private def applyTimestampPairMask
             if penultimateWasTimestamp then
               -- Two consecutive timestamps are not allowed; force next token to text (or EOT).
               for i in [tsBegin.toNat:cfg.vocabSize] do
-                forb := pushUniqueId forb i.toUInt32
+                forb := forb.pushUnique i.toUInt32
             else
               -- After text->timestamp, next must be timestamp (or EOT).
               for i in [:tsBegin.toNat] do
                 let tok := i.toUInt32
                 if tok != eosTokenId then
-                  forb := pushUniqueId forb tok
+                  forb := forb.pushUnique tok
             { rules with forbidden := forb }
 
 private def logProbsFromLogitsArray (logits : Array Float) : Array Float :=
