@@ -770,7 +770,7 @@ def slice {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
   slice! t dim start len
 
 def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat)
-    (_h : TensorSpec.isPermutation permutation σ.shape.size = true := by
+    (_h : Shape.IsPermutation permutation σ.shape.size := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "not a permutation of the axes")) :
     Tensor (σ.withShape (Shape.permute σ.shape permutation)) :=
   Tensor.ofRaw! (RawTensor.permute t.raw permutation)
@@ -799,7 +799,7 @@ def squeeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat)
     Tensor (σ.withShape (Shape.squeeze σ.shape dim)) :=
   Tensor.ofRaw! (RawTensor.squeeze t.raw dim)
 
-/-- Discharges `catCompatible` for shapes with symbolic dimensions; fails hard on
+/-- Discharges `Shape.CatCompatible` for shapes with symbolic dimensions; fails hard on
     a rank mismatch, an out-of-range axis or disagreeing extents. -/
 macro "cat_shape" : tactic => `(tactic| first
   | exact of_decide_eq_true rfl
@@ -812,7 +812,7 @@ def cat! {s1 s2 : Shape} {d : DType} {dev : Device}
 
 def cat {s1 s2 : Shape} {d : DType} {dev : Device}
     (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat)
-    (_h : TensorSpec.catCompatible s1 s2 dim = true := by cat_shape) :
+    (_h : Shape.CatCompatible s1 s2 dim := by cat_shape) :
     Tensor ⟨Shape.cat s1 s2 dim, d, dev⟩ :=
   cat! t1 t2 dim
 

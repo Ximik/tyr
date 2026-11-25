@@ -151,7 +151,7 @@ private def sdpaGQAMask {batch n_head n_kv_head seq head_dim : Nat} {d dm : DTyp
 private def sliceScatterAlong {s srcShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim : Nat) (start : Nat)
     (src : Tensor ⟨srcShape, d, dev⟩)
-    (h : TensorSpec.sliceScatterCompatible s srcShape dim = true := by
+    (h : Shape.SliceScatterCompatible s srcShape dim := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice scatter shapes"))
     (bound : start + srcShape.getD dim 0 ≤ s.getD dim 0 := by
       first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :

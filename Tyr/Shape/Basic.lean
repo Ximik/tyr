@@ -52,6 +52,40 @@ private def broadcastBatch (s1 s2 : Shape) : Shape :=
       let batchOut := broadcastBatch (s1.extract 0 (n1 - 2)) (s2.extract 0 (n2 - 2))
       batchOut ++ #[s1.getD (n1 - 2) 0, s2.getD (n2 - 1) 0]
 
+/-- libtorch's `gather` shape rule: `dim` is an axis, the index has the input's
+rank, and it is no larger than the input on every other axis. -/
+@[simp] def GatherCompatible (input indices : Shape) (dim : Nat) : Prop :=
+  dim < input.size ∧ input.size = indices.size ∧
+    ∀ p ∈ (input.toList.zip indices.toList).zipIdx, p.2 = dim ∨ p.1.2 ≤ p.1.1
+
+instance (input indices : Shape) (dim : Nat) : Decidable (GatherCompatible input indices dim) := by
+  unfold GatherCompatible; infer_instance
+
+/-- `source` can replace a slice of `input` along `dim`: `dim` is an axis and
+the shapes agree on every other axis. The slice bound is not part of this. -/
+@[simp] def SliceScatterCompatible (input source : Shape) (dim : Nat) : Prop :=
+  dim < input.size ∧ input.size = source.size ∧
+    ∀ p ∈ (input.toList.zip source.toList).zipIdx, p.2 = dim ∨ p.1.1 = p.1.2
+
+instance (input source : Shape) (dim : Nat) : Decidable (SliceScatterCompatible input source dim) := by
+  unfold SliceScatterCompatible; infer_instance
+
+/-- `permutation` lists every axis below `rank` exactly once. -/
+@[simp] def IsPermutation (permutation : Array Nat) (rank : Nat) : Prop :=
+  permutation.size = rank ∧ ∀ i ∈ List.range rank, i ∈ permutation.toList
+
+instance (permutation : Array Nat) (rank : Nat) : Decidable (IsPermutation permutation rank) := by
+  unfold IsPermutation; infer_instance
+
+/-- Shapes concatenate along `dim` when it is an axis of both, and they agree on
+every other axis. libtorch's legacy skipping of an empty 1-D operand is excluded. -/
+@[simp] def CatCompatible (s1 s2 : Shape) (dim : Nat) : Prop :=
+  dim < s1.size ∧ s1.size = s2.size ∧
+    ∀ p ∈ (s1.toList.zip s2.toList).zipIdx, p.2 = dim ∨ p.1.1 = p.1.2
+
+instance (s1 s2 : Shape) (dim : Nat) : Decidable (CatCompatible s1 s2 dim) := by
+  unfold CatCompatible; infer_instance
+
 /-- Concatenation along `dim`. It takes no compatibility proof: a proof term in
 the result type makes failing `decide` attempts on later shape goals several
 times more expensive. -/

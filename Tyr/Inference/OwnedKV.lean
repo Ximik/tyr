@@ -16,7 +16,7 @@ open torch.data.Native
 keep their original values. The native operation disables autograd for the copy. -/
 def copySliceIO {σ σsrc : StaticSpec} (dst : Tensor σ) (dim start : Nat)
     (src : @& Tensor σsrc)
-    (_h : TensorSpec.sliceScatterCompatible σ.shape σsrc.shape dim = true := by
+    (_h : Shape.SliceScatterCompatible σ.shape σsrc.shape dim := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice copy shapes"))
     (_bound : start + σsrc.shape.getD dim 0 ≤ σ.shape.getD dim 0 := by
       first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) : IO (Tensor σ) := do
