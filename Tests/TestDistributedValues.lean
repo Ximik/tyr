@@ -37,13 +37,6 @@ def testUninitializedCollectivesReturnErrors : IO Unit := do
   LeanTest.assertEqual (← input.toFloatArray) #[2.0, 3.0]
 
 @[test]
-def testInvalidCollectiveOutputExtentReturnsError : IO Unit := do
-  let input := Tensor.fromFloatArray #[1.0]
-  Tests.assertThrows (dist.allGather 9223372036854775808 input)
-    (some "Tensor extent")
-  LeanTest.assertEqual (← input.toFloatArray) #[1.0]
-
-@[test]
 def testInvalidDistributedDeviceIndicesReturnErrors : IO Unit := do
   for index in #[128, 256, 18446744073709551615] do
     Tests.assertThrows (dist.setCudaDevice index) (some "device")

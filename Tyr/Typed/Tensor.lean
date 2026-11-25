@@ -29,7 +29,7 @@ namespace StaticSpec
 witnessed; shape compatibility remains a separate precondition. -/
 @[reducible] def pointwise (l r : StaticSpec) {result : DType}
     [TensorSpec.Promotes l.toTensorSpec r.toTensorSpec result] : StaticSpec :=
-  { shape := TensorSpec.broadcastShape l.shape r.shape
+  { shape := Shape.broadcast l.shape r.shape
     dtype := result
     device := l.device }
 

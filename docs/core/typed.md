@@ -163,7 +163,8 @@ return `Projection (device := device) ...` directly instead.
 
 ## Shape and dtype rules
 
-`TensorSpec.broadcastShapes?` and `matmulShape?` return `Option Shape`.
+`Shape.broadcast` and `Shape.matmul` give result shapes; `Shape.BroadcastCompatible`
+and `Shape.MatmulCompatible` are their decidable admissions.
 Broadcasting and generic matrix multiplication require compatibility evidence;
 concrete valid dimensions are usually discharged automatically. Specialized
 operations such as `linear`, `linear3d`, and `bmm4d` encode their dimension

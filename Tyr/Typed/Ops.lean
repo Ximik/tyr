@@ -18,13 +18,12 @@
   - Float-only math requires an `isFloating` proof, discharged by `decide`
     for literal dtypes; integer tensors must be cast explicitly first.
   - Matmul-family ops require both operands to share dtype AND device — PyTorch throws on mixed operands; here it cannot compile.
-    Generic `matmul` also requires `TensorSpec.matmulShape?` to accept
-    the shape pair (auto-param, `rfl` for concrete shapes), so inner-dim
+    Generic `matmul` also requires `Shape.MatmulCompatible` for
+    the shape pair (auto-param, `decide` for concrete shapes), so inner-dim
     mismatches fail to compile instead of throwing inside libtorch.
 -/
 import Tyr.FFI.RawTensor
 import Tyr.FFI.ConstantSupport
-import Tyr.Shape.Allocation
 import Tyr.Typed.Tensor
 import Tyr.Typed.Domain
 
@@ -546,16 +545,16 @@ def matmul! {s1 s2 : Shape} {d : DType} {dev : Device}
     Tensor ⟨Shape.matmul s1 s2, d, dev⟩ :=
   Tensor.ofRaw! (RawTensor.matmul! a.raw b.raw)
 
-/-- Discharges `matmulShape?` compatibility for shapes with symbolic dimensions, including
+/-- Discharges `Shape.MatmulCompatible` for shapes with symbolic dimensions, including
     broadcast batch axes; fails hard on incompatible shapes. -/
 macro "matmul_shape" : tactic => `(tactic| first
-  | rfl
-  | (simp [TensorSpec.broadcastShapes?, TensorSpec.broadcastShapes?.go, List.range_succ] <;>
-      (repeat' split) <;> (repeat' split at *) <;> simp_all <;> fail "incompatible matmul shapes"))
+  | exact of_decide_eq_true rfl
+  | (simp [List.range_succ] <;> (repeat' split) <;> (repeat' split at *) <;> simp_all <;>
+      fail "incompatible matmul shapes"))
 
 def matmul {s1 s2 : Shape} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (a : Tensor ⟨s1, d, dev⟩) (b : Tensor ⟨s2, d, dev⟩)
-    (_h : (TensorSpec.matmulShape? s1 s2).isSome = true := by matmul_shape) :
+    (_h : Shape.MatmulCompatible s1 s2 := by matmul_shape) :
     Tensor ⟨Shape.matmul s1 s2, d, dev⟩ :=
   matmul! a b
 
@@ -631,6 +630,11 @@ broadcasts, so incompatible shape pairs fail to compile.
 At runtime libtorch broadcasts the native handles directly; no shape erasure
 or reshaping is required at the raw boundary. -/
 
+/-- Discharges `Shape.BroadcastCompatible` for shapes with symbolic dimensions. -/
+macro "broadcast_compatible" : tactic => `(tactic| first
+  | exact of_decide_eq_true rfl
+  | (simp [List.range_succ] <;> fail "shapes do not broadcast"))
+
 def addB! {σ₁ σ₂ : StaticSpec} {result : DType}
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result]
     (a : Tensor σ₁) (b : Tensor σ₂) : Tensor (σ₁.pointwise σ₂) :=
@@ -641,7 +645,7 @@ def addB {σ₁ σ₂ : StaticSpec} {result : DType}
     [Device.SameDeviceCompatible σ₁.device σ₂.device]
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result]
     (a : Tensor σ₁) (b : Tensor σ₂)
-    (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
+    (_h : Shape.BroadcastCompatible σ₁.shape σ₂.shape := by broadcast_compatible) :
     Tensor (σ₁.pointwise σ₂) :=
   addB! a b
 
@@ -655,7 +659,7 @@ def subB {σ₁ σ₂ : StaticSpec} {result : DType}
     [Device.SameDeviceCompatible σ₁.device σ₂.device]
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result] [DType.NonBool σ₁.dtype] [DType.NonBool σ₂.dtype]
     (a : Tensor σ₁) (b : Tensor σ₂)
-    (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
+    (_h : Shape.BroadcastCompatible σ₁.shape σ₂.shape := by broadcast_compatible) :
     Tensor (σ₁.pointwise σ₂) :=
   subB! a b
 
@@ -669,7 +673,7 @@ def mulB {σ₁ σ₂ : StaticSpec} {result : DType}
     [Device.SameDeviceCompatible σ₁.device σ₂.device]
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result]
     (a : Tensor σ₁) (b : Tensor σ₂)
-    (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
+    (_h : Shape.BroadcastCompatible σ₁.shape σ₂.shape := by broadcast_compatible) :
     Tensor (σ₁.pointwise σ₂) :=
   mulB! a b
 
@@ -683,26 +687,24 @@ def divB {σ₁ σ₂ : StaticSpec} {result : DType}
     [Device.SameDeviceCompatible σ₁.device σ₂.device]
     [TensorSpec.Promotes σ₁.toTensorSpec σ₂.toTensorSpec result]
     (a : Tensor σ₁) (b : Tensor σ₂)
-    (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
+    (_h : Shape.BroadcastCompatible σ₁.shape σ₂.shape := by broadcast_compatible) :
     Tensor (σ₁.division σ₂) :=
   divB! a b
 
-/-- Discharges `broadcastsTo` for shapes with symbolic dimensions. -/
+/-- Discharges `Shape.BroadcastToCompatible` for shapes with symbolic dimensions. -/
 macro "broadcast_shape" : tactic => `(tactic| first
-  | (unfold TensorSpec.broadcastsTo; exact of_decide_eq_true rfl)
-  | (simp [TensorSpec.broadcastsTo, TensorSpec.broadcastShapes?, TensorSpec.broadcastShapes?.go,
-      List.range_succ] <;> (repeat' split) <;> simp_all <;> fail "shapes do not broadcast")
-  | rfl)
+  | exact of_decide_eq_true rfl
+  | (simp [List.range_succ] <;> (repeat' split) <;> simp_all <;> fail "shapes do not broadcast"))
 
 def broadcastTo! {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
     Tensor (σ.withShape target) :=
   Tensor.ofRaw! (RawTensor.expand! t.raw target)
 
 /-- Asymmetric broadcast: stretch `t` to `target` (a libtorch `expand` view,
-    no copy). The fixed-side proof `broadcastsTo s target` rules out targets
+    no copy). The fixed-side proof `Shape.BroadcastToCompatible s target` rules out targets
     that would themselves be stretched. -/
 def broadcastTo {σ : StaticSpec} (t : Tensor σ) (target : Shape)
-    (_h : TensorSpec.broadcastsTo σ.shape target := by broadcast_shape) :
+    (_h : Shape.BroadcastToCompatible σ.shape target := by broadcast_shape) :
     Tensor (σ.withShape target) :=
   broadcastTo! t target
 
@@ -1067,7 +1069,7 @@ def rmsNormWeighted {σ : StaticSpec} {w : Shape} {result : DType}
     [TensorSpec.Promotes ⟨σ.shape, .Float32⟩ ⟨w, σ.dtype⟩ result]
     (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6)
     (_float : σ.dtype.isFloating = true := by first | rfl | decide)
-    (_weight : TensorSpec.broadcastsTo w σ.shape := by broadcast_shape) :
+    (_weight : Shape.BroadcastToCompatible w σ.shape := by broadcast_shape) :
     Tensor (σ.withDType (TensorSpec.pointwiseDType ⟨σ.shape, .Float32⟩ ⟨w, σ.dtype⟩)) :=
   rmsNormWeighted! x weight eps
 

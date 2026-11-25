@@ -24,22 +24,44 @@ namespace torch.Shape
 @[simp] def unbind (s : Shape) (dim : Nat) (h : dim < s.size) : Shape :=
   s.eraseIdx dim h
 
-/-- Broadcast two batch shapes (everything except the last 2 axes) following PyTorch rules. -/
-private def broadcastBatch (s1 s2 : Shape) : Shape :=
-  let n1 := s1.size
-  let n2 := s2.size
-  let maxLen := max n1 n2
-  Array.ofFn fun (i : Fin maxLen) =>
-    let idx1 := if i.val < maxLen - n1 then none else some (i.val - (maxLen - n1))
-    let idx2 := if i.val < maxLen - n2 then none else some (i.val - (maxLen - n2))
-    match idx1, idx2 with
-    | none, none => 1
-    | some j, none => s1.getD j 1
-    | none, some j => s2.getD j 1
-    | some j1, some j2 =>
-      let d1 := s1.getD j1 1
-      let d2 := s2.getD j2 1
-      if d1 = 1 then d2 else if d2 = 1 then d1 else max d1 d2
+/-- Extent of the axis `offset` places from the right; 1 beyond the leading axis. -/
+@[simp] def dimFromRight (shape : Shape) (offset : Nat) : Nat :=
+  if offset < shape.size then shape.getD (shape.size - 1 - offset) 1 else 1
+
+/-- Aligned from the right, every axis agrees or is 1 on one side. -/
+@[simp] def BroadcastCompatible (lhs rhs : Shape) : Prop :=
+  ∀ offset ∈ List.range (max lhs.size rhs.size),
+    dimFromRight lhs offset = dimFromRight rhs offset ∨
+      dimFromRight lhs offset = 1 ∨ dimFromRight rhs offset = 1
+
+instance (lhs rhs : Shape) : Decidable (BroadcastCompatible lhs rhs) := by
+  unfold BroadcastCompatible; infer_instance
+
+/-- Mutual broadcast. A scalar operand yields the other shape unchanged, so later
+operations can infer its dimensions. -/
+@[reducible] def broadcast (lhs rhs : Shape) : Shape :=
+  match lhs.toList, rhs.toList with
+  | [], _ => rhs
+  | _, [] => lhs
+  | _, _ => ((List.range (max lhs.size rhs.size)).reverse.map fun offset =>
+      if dimFromRight lhs offset = 1 then dimFromRight rhs offset else dimFromRight lhs offset).toArray
+
+/-- `src` stretches to `target` without stretching `target`. -/
+@[simp] def BroadcastToCompatible (src target : Shape) : Prop :=
+  src.size ≤ target.size ∧ ∀ offset ∈ List.range src.size,
+    dimFromRight src offset = dimFromRight target offset ∨ dimFromRight src offset = 1
+
+instance (src target : Shape) : Decidable (BroadcastToCompatible src target) := by
+  unfold BroadcastToCompatible; infer_instance
+
+/-- Both operands have rank at least 2, the inner extents agree, and the batch
+axes broadcast. -/
+@[simp] def MatmulCompatible (s1 s2 : Shape) : Prop :=
+  2 ≤ s1.size ∧ 2 ≤ s2.size ∧ s1.getD (s1.size - 1) 0 = s2.getD (s2.size - 2) 0 ∧
+    BroadcastCompatible (s1.extract 0 (s1.size - 2)) (s2.extract 0 (s2.size - 2))
+
+instance (s1 s2 : Shape) : Decidable (MatmulCompatible s1 s2) := by
+  unfold MatmulCompatible; infer_instance
 
 /-- Matrix multiplication of two operands of rank at least 2:
     `[..., m, k] @ [..., k, n] -> [broadcast(...), m, n]`. Other ranks give `#[]`. -/
@@ -49,7 +71,7 @@ private def broadcastBatch (s1 s2 : Shape) : Shape :=
   | n1, n2 =>
     if n1 < 2 || n2 < 2 then #[]
     else
-      let batchOut := broadcastBatch (s1.extract 0 (n1 - 2)) (s2.extract 0 (n2 - 2))
+      let batchOut := broadcast (s1.extract 0 (n1 - 2)) (s2.extract 0 (n2 - 2))
       batchOut ++ #[s1.getD (n1 - 2) 0, s2.getD (n2 - 1) 0]
 
 /-- libtorch's `gather` shape rule: `dim` is an axis, the index has the input's

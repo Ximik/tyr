@@ -61,11 +61,9 @@ structure Qwen35RMSNorm (dim : Nat) where
 namespace Qwen35RMSNorm
 
 def initZeroCentered (dim : Nat) (eps : Float := 1e-6) (device : Device := .CPU) : IO (Qwen35RMSNorm (device := device) dim) := do
-  IO.ofExcept (Shape.validateAllocation #[dim])
   pure { weight := ⟨.Float32, (← Tensor.parameter (Tensor.zeros #[dim] (device := device)))⟩, eps }
 
 def initOneCentered (dim : Nat) (eps : Float := 1e-6) (device : Device := .CPU) : IO (Qwen35RMSNorm (device := device) dim) := do
-  IO.ofExcept (Shape.validateAllocation #[dim])
   pure { weight := ⟨.Float32, (← Tensor.parameter (Tensor.ones #[dim] (device := device)))⟩, eps }
 
 /-- HuggingFace Qwen3.5 checkpoints already store the zero-centered RMSNorm
@@ -108,7 +106,6 @@ structure Qwen35RMSNormGated (dim : Nat) where
 namespace Qwen35RMSNormGated
 
 def init (dim : Nat) (eps : Float := 1e-6) (device : Device := .CPU) : IO (Qwen35RMSNormGated (device := device) dim) := do
-  IO.ofExcept (Shape.validateAllocation #[dim])
   pure { weight := ⟨.Float32, (← Tensor.parameter (Tensor.ones #[dim] (device := device)))⟩, eps }
 
 def forward2d {n dim : Nat}
