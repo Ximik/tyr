@@ -246,7 +246,7 @@ def attentionGQAMaskIO {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev :
 def gather {s indicesShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim : Nat)
     (indices : Tensor ⟨indicesShape, .Int64, dev⟩)
-    (_h : TensorSpec.gatherCompatible s indicesShape dim = true := by
+    (_h : Shape.GatherCompatible s indicesShape dim := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible gather shapes")) :
     Tensor ⟨indicesShape, d, dev⟩ :=
   (Tensor.ofRaw! (RawTensor.gather input.raw dim indices.raw))
@@ -293,7 +293,7 @@ def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {de
 def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim start : Nat)
     (source : Tensor ⟨sourceShape, d, dev⟩)
-    (_h : TensorSpec.sliceScatterCompatible s sourceShape dim = true := by
+    (_h : Shape.SliceScatterCompatible s sourceShape dim := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice scatter shapes"))
     (_bound : start + sourceShape.getD dim 0 ≤ s.getD dim 0 := by
       first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :

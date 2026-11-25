@@ -17,28 +17,6 @@ deriving Repr, BEq, DecidableEq
 
 namespace TensorSpec
 
-/-- libtorch's `gather` shape rule: `dim` is an axis, the index has the input's
-rank, and it is no larger than the input on every other axis. -/
-@[simp] def gatherCompatible (input indices : Shape) (dim : Nat) : Bool :=
-  dim < input.size && input.size == indices.size &&
-    (input.toList.zip indices.toList).zipIdx.all fun ((a, b), i) => i == dim || decide (b ≤ a)
-
-/-- `source` can replace a slice of `input` along `dim`: `dim` is an axis and
-the shapes agree on every other axis. The slice bound is not part of this. -/
-@[simp] def sliceScatterCompatible (input source : Shape) (dim : Nat) : Bool :=
-  dim < input.size && input.size == source.size &&
-    (input.toList.zip source.toList).zipIdx.all fun ((a, b), i) => i == dim || a == b
-
-/-- `permutation` lists every axis below `rank` exactly once. -/
-@[simp] def isPermutation (permutation : Array Nat) (rank : Nat) : Bool :=
-  permutation.size == rank && (List.range rank).all permutation.toList.contains
-
-/-- Shapes concatenate along `dim` when it is an axis of both, and they agree on
-every other axis. libtorch's legacy skipping of an empty 1-D operand is excluded. -/
-@[simp] def catCompatible (s1 s2 : Shape) (dim : Nat) : Bool :=
-  dim < s1.size && s1.size == s2.size &&
-    (s1.toList.zip s2.toList).zipIdx.all fun ((a, b), i) => i == dim || a == b
-
 @[simp] def dimFromRight (shape : Shape) (offset : Nat) : Nat :=
   if offset < shape.size then
     shape.getD (shape.size - 1 - offset) 1
