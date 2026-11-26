@@ -80,57 +80,31 @@ the central entry point. It accepts:
 - a model directory, opened exactly like `Source.open` (`openModelDir`): the shards
   its `model.safetensors.index.json` lists, or else its `model.safetensors`. Index
   shard paths must be relative `.safetensors` files inside the directory, and every
-  index entry is checked against the shard header;
-- a `.schema.json` snapshot — a previously saved `Schema`, loaded via
-  `loadSnapshot` without touching any weight files.
+  index entry is checked against the shard header.
 
-Results are sorted by name and duplicate tensor names are rejected.
-`saveSnapshot`/`loadSnapshot` persist a `Schema` as JSON; this is how
-`Tyr/Model/KittenTTS/kokoro_v1.schema.json` lets the type provider run at build
-time without a multi-GB checkpoint on disk.
+Results are sorted by name.
 
-### The `safetensors_type_provider` command
+### Generated records
 
-`Tyr/SafeTensors/TypeProvider.lean` defines a command that introspects a
-checkpoint **at elaboration time** and generates typed loaders from it:
-
-```lean
-safetensors_type_provider "path/to/model.safetensors" as MyWeights
-safetensors_type_provider "path/to/sharded_dir" as MyWeights
-safetensors_type_provider "path/to/model.schema.json" as MyWeights  -- snapshot
-```
-
-For each tensor, inside `namespace MyWeights`, it emits (tensor `linear.weight`
-shown; the declaration base name is sanitized and lowercased to `linear_weight`):
-
-- `abbrev linear_weightShape : Shape` — the static shape;
-- `def linear_weightSpec : TensorSchema` and `def linear_weightTensorSpec : TensorSpec`;
-- `def load_linear_weight (source : String := defaultSource) (device : Device := .CPU) : IO (Tensor { shape := linear_weightShape, dtype := linear_weightTensorSpec.dtype, device := device })`;
-- explicitly named checked variants `load_linear_weightTyped` (CPU) and
-  `...TypedOnDevice` (the requested device);
-- for single-file sources additionally `load_linear_weightFromHandle` and
-  `load_linear_weightTypedFromHandle[OnDevice]` taking a `SafeTensorsHandle`.
+`lake exe GenerateSafeTensorsRecord <source> <Namespace>` prints a Lean module
+with a typed record for the tensors of `<source>` (a file or a model directory); the output is redirected into a source file and kept in
+Git. `Tyr.SafeTensors.Record` builds the record as data (`Record.ofSchema`), and
+the tool in `Tools/` renders it.
 
 Tensor names split on `.` form a hierarchy. Named segments become fields of
-generated `structure Weights<Segment>` records; a uniform run of numeric segments
+`structure Weights<Segment>` records; a uniform run of numeric segments
 (`layers.0.*`, `layers.1.*`, ...) becomes an `Array` field; a non-uniform run
-falls back to `i0`, `i1`, ... fields; non-contiguous numeric indices are a
-compile-time error (`validateIndexedContiguous`, `Tyr/SafeTensors/TypeProvider.lean`).
-The top level of the generated namespace contains:
+becomes `i0`, `i1`, ... fields; non-contiguous numeric indices are an error.
+Each field's type carries the stored shape and dtype, and each record type has
 
-- `abbrev Weights (device : Device := .CPU)` — the full hierarchical record;
-- `def loadAll (source : String := defaultSource) (device : Device := .CPU) : IO (Weights device)`;
-- `def loadAllFromHandle (handle : SafeTensorsHandle) (device : Device := .CPU) : IO (Weights device)` (single-file sources);
-- subtree namespaces with their own `load` / `loadFromHandle` — e.g.
-  `MyWeights.model.layers.load`, with the same requested-device parameter;
-- metadata: `defaultSource`, `sourceIsDirectory`, `tensorCount`, `schema`,
-  `hasTensor`, `find?`, `fieldToTensorName`.
+```lean
+def T.load (src : Source) (name : String) (device : Device := .CPU) : IO (T device)
+```
 
-Generated code is rendered as strings and re-elaborated via
-`Parser.runParserCategory` (`Tyr/SafeTensors/TypeProvider.lean`), with all
-references `_root_.`-qualified. KittenTTS is the in-tree consumer: the provider
-runs against a checked-in schema snapshot (`Tyr/Model/KittenTTS/Checkpoint.lean`)
-and `Tyr/Model/KittenTTS/Weights.lean` loads subtrees from one open handle.
+which loads the subtree under the dotted prefix `name` (`""` for the root).
+KittenTTS uses one (`Tyr/Model/KittenTTS/Checkpoint.lean`); its checkpoint is
+published only as a PyTorch file, so `scripts/kittentts_record.sh` downloads the
+pinned revision, converts it and regenerates the record.
 
 ### HuggingFace Hub resolution
 
@@ -250,9 +224,8 @@ SafeTensors export.
 
 | API | Signature | Notes |
 | --- | --- | --- |
-| `introspect` | `String → IO Schema` | file, model dir, or `.schema.json` snapshot |
+| `introspect` | `String → IO Schema` | file or model dir |
 | `Schema.find?` | `Schema → String → Option TensorSchema` | exact-name lookup |
-| `saveSnapshot` / `loadSnapshot` | `String → Schema → IO Unit` / `String → IO Schema` | persist/restore a schema |
 | `TensorSchema.toSpec` | `TensorSchema → TensorSpec` | shape + dtype |
 
 ### Hub (`torch.Hub`, `Tyr/Hub.lean`)
@@ -283,33 +256,18 @@ SafeTensors export.
 
 ## Usage examples
 
-Reconstructed example (from `Tests/TestSafeTensorsTypeProvider.lean`):
+Reconstructed example (from `Tests/TestSafeTensorsRecord.lean`):
 
 ```lean
-import Tyr.SafeTensors
+import Tests.SafeTensorsRecords.Single
 
 open torch
 
--- Elaboration-time introspection; the source must exist at build time.
-safetensors_type_provider "Tests/fixtures/safetensors/single.safetensors" as SingleSafe
-safetensors_type_provider "Tests/fixtures/safetensors/sharded" as ShardedSafe
-
 def demo : IO Unit := do
-  -- Per-tensor loaders; shape is checked against the generated Shape abbrev.
-  let w ← SingleSafe.load_linear_weight            -- Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }
-  IO.println s!"weight shape: {w.runtimeShape}"
-  -- Explicitly named dtype-indexed checked loader.
-  let wTyped ← SingleSafe.load_linear_weightTyped  -- Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }
-  IO.println s!"weight dtype: {wTyped.actualSpec.dtype}"
-  -- Full hierarchical record: fields follow tensor names split on '.'.
-  let weights ← ShardedSafe.loadAll
-  IO.println s!"{weights.embed.weight.runtimeShape}"   -- #[2, 2]
-  -- Subtree namespace loader.
-  let embed ← ShardedSafe.embed.load
-  IO.println s!"embedding shape: {embed.weight.runtimeShape}"
-  -- Metadata.
-  IO.println s!"{ShardedSafe.tensorCount} tensors"     -- 2
-  IO.println s!"{ShardedSafe.proj_biasSpec.sourceFile}" -- "part2.safetensors"
+  let src ← safetensors.Source.open "Tests/fixtures/safetensors/single.safetensors"
+  let weights ← SingleSafe.Weights.load src ""
+  -- weights.linear.weight : Tensor ⟨#[2, 3], .Float32, .CPU⟩
+  IO.println s!"weight shape: {weights.linear.weight.runtimeShape}"
 ```
 
 Reconstructed example (from `Tyr/Model/Qwen35/Pretrained.lean`):
@@ -359,11 +317,7 @@ invalid state; legacy flat directories retain their compatibility loader.
 
 ## Caveats
 
-- The type provider introspects at elaboration time: the checkpoint (or a
-  `.schema.json` snapshot) must exist on the build machine, and introspection
-  failures surface as a generic `safetensors_type_provider failed while
-  introspecting source ...` error (`Tyr/SafeTensors/TypeProvider.lean`).
-  `introspect` reads only the eight-byte length prefix and JSON header of each
+- `introspect` reads only the eight-byte length prefix and JSON header of each
   shard. Headers are limited to 100 MiB and checked against the file size before
   allocation; tensor payloads are not read during schema discovery.
 - Generated `defaultSource` is the elaboration-time path string. Every generated

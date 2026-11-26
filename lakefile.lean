@@ -159,6 +159,12 @@ lean_lib TyrFFI where
   precompileModules := false
   moreLinkLibs := #[`@/libtyr]
 
+/-- Command-line tools: `main`s over library functions. -/
+lean_lib Tools where
+  roots := #[`Tools]
+  globs := #[.submodules `Tools]
+  precompileModules := false
+
 /-- Test library containing all tests -/
 lean_lib Tests where
   roots := #[`Tests]
@@ -181,6 +187,10 @@ lean_exe test_runner where
 lean_exe RunDistributedValues where
   root := `Tests.RunDistributedValues
   supportInterpreter := true
+
+/-- Print the Lean record for the tensors of a SafeTensors source. -/
+lean_exe GenerateSafeTensorsRecord where
+  root := `Tools.GenerateSafeTensorsRecord
 
 /-- Write the C prototypes of `TyrFFI`'s extern declarations. Imports only
     `Lean`, so it does not link `libTyrC`. -/

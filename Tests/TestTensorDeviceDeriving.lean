@@ -1,23 +1,17 @@
 import LeanTest
 import Tyr.Module.Derive
 import Tyr.TensorStruct.DeriveCast
-import Tyr.SafeTensors.TypeProvider
+import Tests.SafeTensorsRecords.Single
 
 namespace Tests.TensorDeviceDeriving
 
 open torch
 
-safetensors_type_provider "Tests/fixtures/safetensors/single.safetensors" as DeviceCheckpoint
+-- A runtime-selected device is shared by a generated record and its loader.
+example (src : safetensors.Source) (device : Device) : IO (SingleSafe.Weights device) :=
+  SingleSafe.Weights.load src "" device
 
--- A runtime-selected device is shared by generated records and every loader.
-example (device : Device) : IO (DeviceCheckpoint.Weights device) :=
-  DeviceCheckpoint.loadAll (device := device)
-
-example (device : Device) :
-    IO (Tensor { shape := #[2, 3], dtype := .Float32, device }) :=
-  DeviceCheckpoint.load_linear_weightTypedOnDevice (device := device)
-
-example (device : Device) (weights : DeviceCheckpoint.Weights device) :
+example (device : Device) (weights : SingleSafe.Weights device) :
     Tensor { shape := #[2, 3], dtype := .Float32, device } :=
   weights.linear.weight
 
@@ -113,7 +107,8 @@ private def cpuModel (value : Float) : DeviceModel (device := .CPU) 3 .Float32 :
   LeanTest.assertEqual originalBlock.weight.raw.dtype .Float32
 
 @[test] def testGeneratedCheckpointDevice : IO Unit := do
-  let weights ← DeviceCheckpoint.loadAll (device := .CPU)
+  let src ← safetensors.Source.open "Tests/fixtures/safetensors/single.safetensors"
+  let weights ← SingleSafe.Weights.load src "" .CPU
   LeanTest.assertTrue (weights.linear.weight.device == .CPU)
   LeanTest.assertEqual (← weights.linear.weight.toFloatArray) #[1, 2, 3, 4, 5, 6]
 

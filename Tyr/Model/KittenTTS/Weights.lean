@@ -30,7 +30,7 @@ private def onDevice {s : Shape} {sourceDevice : Device}
     IO (Tensor { shape := s, dtype := .Float32, device := device }) := do
   pure (Tensor.ofRaw! (← RawTensor.convertIO s tensor.raw device none))
 
-/-- The configuration of the Kokoro v1 checkpoint (`kokoro_v1.schema.json`). The
+/-- The configuration of the Kokoro v1 checkpoint (`Checkpoint.lean`). The
     decoder blocks are 1024 channels wide, independent of `max_conv_dim`. -/
 def KittenTTSConfig.kokoroV1 : KittenTTSConfig :=
   { maxConvDim := 1024, decoderOutDim := 512, plbert := { intermediateSize := 2048 } }
@@ -479,17 +479,17 @@ private def loadDecoderFromCheckpoint
   }
 
 private def loadCheckpointWeights (path : String) (log : Handlers := {}) : IO LoadedCheckpointWeights := do
-  let handle ← safetensors.openHandle path
+  let src := safetensors.Source.ofHandle (← safetensors.openHandle path)
   log.onInfo "Loading ALBERT backbone..."
-  let bert ← KokoroCheckpoint.bert.loadFromHandle handle
+  let bert ← KokoroCheckpoint.WeightsBert.load src "bert"
   log.onInfo "Loading ALBERT projection..."
-  let bertEncoder ← KokoroCheckpoint.bert_encoder.loadFromHandle handle
+  let bertEncoder ← KokoroCheckpoint.WeightsBertencoder.load src "bert_encoder"
   log.onInfo "Loading prosody predictor..."
-  let predictor ← KokoroCheckpoint.predictor.loadFromHandle handle
+  let predictor ← KokoroCheckpoint.WeightsPredictor.load src "predictor"
   log.onInfo "Loading text encoder..."
-  let textEncoder ← KokoroCheckpoint.text_encoder.loadFromHandle handle
+  let textEncoder ← KokoroCheckpoint.WeightsTextencoder.load src "text_encoder"
   log.onInfo "Loading decoder/vocoder..."
-  let decoder ← KokoroCheckpoint.decoder.loadFromHandle handle
+  let decoder ← KokoroCheckpoint.WeightsDecoder.load src "decoder"
   pure { bert, bertEncoder, predictor, textEncoder, decoder }
 
 /-- Check a `config.json` configuration once against `KittenTTSConfig.kokoroV1`.

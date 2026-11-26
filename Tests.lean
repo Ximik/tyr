@@ -80,8 +80,7 @@ import Tests.TestQwen35Pretrained
 import Tests.TestQwen36Model
 import Tests.TestQwen36Pretrained
 import Tests.TestQwen25OmniPretrained
-import Tests.TestSafeTensorsTypeProvider
-import Tests.TestSafeTensorsTypeProviderErrors
+import Tests.TestSafeTensorsRecord
 
 
 import Tests.TestTypedNeural
