@@ -70,7 +70,7 @@ Separate structures load HF tokenizers without round-tripping through
 `BPETokenizer`; they reuse only `MergeRule` and duplicate the merge
 loop internally:
 
-- `tokenizer.qwen3.QwenTokenizer` (`Tyr/Model/Qwen/Tokenizer.lean`) — byte-level
+- `tokenizer.ByteLevelBPETokenizer` (`Tyr/Model/Qwen/Tokenizer.lean`) — byte-level
   BPE loaded from `tokenizer.json` or `vocab.json` + `merges.txt`
   (`loadTokenizer`, `Qwen3.lean`), plus chat templates and TTS text
   wrappers.
@@ -220,10 +220,10 @@ one-token shift — the nanochat midtraining data flow.
 
 | API | Signature | Location |
 | --- | --- | --- |
-| `qwen3.loadTokenizer` | `(dir : String) : IO QwenTokenizer` | `Tyr/Model/Qwen/Tokenizer.lean` |
-| `qwen3.encodeText` / `decodeText` | `(tok) (text : String) : Array UInt32` / `(tok) (ids) : String` | `Qwen3.lean` |
-| `qwen3.chatTemplate` | `(prompt : String) : String` | `Qwen3.lean` |
-| `qwen3.encodePrompt` | `(tok) (prompt) (maxLen : Nat := 512) : Array UInt32 × Array UInt32` (tokens + attention mask) | `Qwen3.lean` |
+| `tokenizer.ByteLevelBPETokenizer.load` | `(dir : String) : IO ByteLevelBPETokenizer` | `Tyr/Lib/Tokenizer/ByteLevelBPE.lean` |
+| `tokenizer.ByteLevelBPETokenizer.encodeText` / `decodeText` | `(tok) (text : String) : Array UInt32` / `(tok) (ids) : String` | `Tyr/Lib/Tokenizer/ByteLevelBPE.lean` |
+| `qwen3.chatTemplate` | `(prompt : String) : String` | `Tyr/Model/Qwen/Tokenizer.lean` |
+| `qwen3.encodePrompt` | `(tok) (prompt) (maxLen : Nat := 512) : Array UInt32 × Array UInt32` (tokens + attention mask) | `Tyr/Model/Qwen/Tokenizer.lean` |
 | `qwen3.ttsAssistantText` | `String → String` | `Qwen3.lean` |
 | `qwen35.chatTemplateThinking`, `userPrefix`, `assistantGenerationSuffix` | `String → String` / `String` | `Tyr/Model/Qwen35/Tokenizer.lean` |
 | `gemma4.loadTokenizer` | `(dir : String) : IO GemmaTokenizer` | `Tyr/Model/Gemma4/Tokenizer.lean` |

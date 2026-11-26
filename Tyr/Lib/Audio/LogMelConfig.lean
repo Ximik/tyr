@@ -1,18 +1,17 @@
 /-
-  Tyr/Model/Qwen3ASR/PreprocessorConfig.lean
+  Tyr/Lib/Audio/LogMelConfig.lean
 
-  JSON loader for HuggingFace `preprocessor_config.json` used by
-  `WhisperFeatureExtractor` in Qwen3-ASR.
+  Log-mel feature parameters, loaded from a HuggingFace `preprocessor_config.json`
+  whose `feature_extractor_type` is `WhisperFeatureExtractor`.
 -/
 import Tyr.Core.FFI.Basic
 import Tyr.IO.ConfigJson
 
-namespace torch.qwen3asr
+namespace torch.audio
 
 open Lean ConfigJson
 
-/-- Whisper feature-extractor config used by Qwen3-ASR processor. -/
-structure PreprocessorConfig where
+structure LogMelConfig where
   featureSize : Nat := 128
   samplingRate : Nat := 16000
   hopLength : Nat := 160
@@ -31,24 +30,24 @@ structure PreprocessorConfig where
   nFftPos : 0 < nFft := by decide
   deriving Repr
 
-namespace PreprocessorConfig
+namespace LogMelConfig
 
-def expectedSampleCount (cfg : PreprocessorConfig) : Nat :=
+def expectedSampleCount (cfg : LogMelConfig) : Nat :=
   if cfg.nSamples > 0 then
     cfg.nSamples
   else
     cfg.chunkLength * cfg.samplingRate
 
-def expectedFrames (cfg : PreprocessorConfig) : Nat :=
+def expectedFrames (cfg : LogMelConfig) : Nat :=
   if cfg.nbMaxFrames > 0 then
     cfg.nbMaxFrames
   else
     expectedSampleCount cfg / cfg.hopLength
 
-/-- Load Whisper/Qwen-ASR preprocessor config from a `preprocessor_config.json` node.
+/-- Load from a `preprocessor_config.json` node.
 Callers that resample input to a fixed rate pass it as `requiredSamplingRate`. -/
-def loadFromJson (root : Json) (defaults : PreprocessorConfig := {})
-    (requiredSamplingRate : Option Nat := none) : Except String PreprocessorConfig := do
+def loadFromJson (root : Json) (defaults : LogMelConfig := {})
+    (requiredSamplingRate : Option Nat := none) : Except String LogMelConfig := do
   requireOneOf root "feature_extractor_type" ["WhisperFeatureExtractor"]
   requireOneOf root "padding_side" ["right"]
   let samplingRate ← fieldD? root "sampling_rate" defaults.samplingRate
@@ -89,16 +88,16 @@ def loadFromJson (root : Json) (defaults : PreprocessorConfig := {})
     nFftPos := hFft
   }
 
-/-- Load Whisper/Qwen-ASR preprocessor config from file. -/
-def loadFromFile (path : String) (defaults : PreprocessorConfig := {})
-    (requiredSamplingRate : Option Nat := none) : IO PreprocessorConfig := do
+/-- Load from a `preprocessor_config.json` file. -/
+def loadFromFile (path : String) (defaults : LogMelConfig := {})
+    (requiredSamplingRate : Option Nat := none) : IO LogMelConfig := do
   IO.ofExcept (loadFromJson (← parseFile path) defaults requiredSamplingRate)
 
 /-- Load from a model directory containing `preprocessor_config.json`. -/
-def loadFromPretrainedDir (modelDir : String) (defaults : PreprocessorConfig := {})
-    (requiredSamplingRate : Option Nat := none) : IO PreprocessorConfig :=
+def loadFromPretrainedDir (modelDir : String) (defaults : LogMelConfig := {})
+    (requiredSamplingRate : Option Nat := none) : IO LogMelConfig :=
   loadFromFile s!"{modelDir}/preprocessor_config.json" defaults requiredSamplingRate
 
-end PreprocessorConfig
+end LogMelConfig
 
-end torch.qwen3asr
+end torch.audio

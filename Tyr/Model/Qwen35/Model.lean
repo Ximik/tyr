@@ -9,12 +9,13 @@
   - Linear GatedDeltaNet with depthwise causal conv and recurrent state cache
   - Cached and uncached generation
 -/
-import Tyr.Model.Qwen35.TypedOps
+import Tyr.Core.Typed.Neural
+import Tyr.Core.Typed.GatedDelta
 import Tyr.Core.TensorStruct
 import Tyr.Core.TensorStruct.Indexed
 import Tyr.Lib.Module.Core
 import Tyr.Core.TensorStruct.Derive
-import Tyr.Model.Qwen.Attention
+import Tyr.Lib.Attention
 import Tyr.Model.Qwen35.Config
 import Tyr.Lib.Module.Init
 import Tyr.Lib.Inference.Generation
@@ -327,7 +328,7 @@ structure Qwen35Attention (cfg : Config) (dtype : DType := .Float32) where
 namespace Qwen35Attention
 
 abbrev KVCache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) :=
-  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap len dtype
+  GroupedQueryAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap len dtype
 
 def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35Attention (dtype := dtype) (device := device) cfg) := do
   let q ← Model.initWeight (dtype := dtype) (device := device) #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size] cfg.hidden_size
@@ -598,7 +599,7 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
 
   let dtBias ← Tensor.parameter (Tensor.ones #[cfg.linear_num_value_heads] (device := device))
 
-  let aRand ← randDynamic (device := device) #[cfg.linear_num_value_heads]
+  let aRand ← Tensor.rand (device := device) #[cfg.linear_num_value_heads]
   let aScaled : Tensor { device := device, shape := #[cfg.linear_num_value_heads], dtype := .Float32 } := Tensor.addScalar (Tensor.mulScalar aRand 16.0) 1e-6
   let aLog ← Tensor.parameter (Tensor.log aScaled)
 
@@ -662,7 +663,7 @@ def forward {batch seq : Nat}
   let device := hidden.device
 
   let mixedQKV : Tensor { device := device, shape := #[batch, seq, Config.linearConvDim cfg], dtype := dtype } := Tensor.linear3d hidden m.in_proj_qkv
-  let mixedQKVc : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } := transposeSeq mixedQKV
+  let mixedQKVc : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } := mixedQKV.transpose 1 2
 
   let zFlat : Tensor { device := device, shape := #[batch, seq, Config.linearValueDim cfg], dtype := dtype } := Tensor.linear3d hidden m.in_proj_z
   let z : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim], dtype := dtype } :=
@@ -714,7 +715,7 @@ def forward {batch seq : Nat}
     else
       fullConv ()
 
-  let mixed : Tensor { device := device, shape := #[batch, seq, Config.linearConvDim cfg], dtype := dtype } := transposeSeq convOut
+  let mixed : Tensor { device := device, shape := #[batch, seq, Config.linearConvDim cfg], dtype := dtype } := convOut.transpose 1 2
 
   let keyDim : Nat := Config.linearKeyDim cfg
   let valDim : Nat := Config.linearValueDim cfg
@@ -736,7 +737,7 @@ def forward {batch seq : Nat}
     Tensor.broadcastTo (Tensor.reshape m.dt_bias #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
   let aExp : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } :=
     Tensor.broadcastTo (Tensor.reshape (Tensor.exp m.a_log) #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
-  let gPos : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } := softplusDynamic (Tensor.add (Tensor.toFloat32 a) dt)
+  let gPos : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } := Tensor.softplus (Tensor.add (Tensor.toFloat32 a) dt)
   let g : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } := Tensor.mulScalar (Tensor.mul gPos aExp) (-1.0)
 
   let rep := Config.linearKVRepeat cfg
@@ -751,11 +752,11 @@ def forward {batch seq : Nat}
     if usePrecomputedState then
       match cacheRec with
       | some rec =>
-        recurrentGatedDeltaRule q k v g beta rec
+        Tensor.recurrentGatedDeltaRule q k v g beta rec
       | none =>
-        chunkGatedDeltaRule q k v g beta
+        Tensor.chunkGatedDeltaRule q k v g beta
     else
-      chunkGatedDeltaRule q k v g beta
+      Tensor.chunkGatedDeltaRule q k v g beta
 
   let core2d : Tensor { device := device, shape := #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim], dtype := dtype } :=
     Tensor.reshape core #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim]
@@ -986,7 +987,7 @@ def initCache {batch : Nat}
       let lt := layerTypes.getD i .linearAttention
       match lt with
       | .fullAttention =>
-        let kv := qwen.QwenAttention.initKVCache
+        let kv := GroupedQueryAttention.initKVCache
           maxLen
           (batch := batch)
           (num_kv_heads := cfg.num_key_value_heads)
@@ -1322,7 +1323,7 @@ private def generateFromEmbedsCore {batch seq : Nat}
   let (logits, caches) ← prefillCachesFromEmbeds cfg m cosAll sinAll inputsEmbeds cache (Nat.le_add_right _ _) hSeq
 
   -- 2) Start incremental decode loop
-  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := falseMaskTyped (n := batch) inputIds.device
+  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.falseMask (n := batch) inputIds.device
   let finalIds ← decodeLoopCached
     (maxLen := maxLen)
     cfg m cosAll sinAll strategy eosTokenIds finished0 maxNewTokens
@@ -1393,7 +1394,7 @@ def generateUncached {batch seq : Nat}
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt32 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
-  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := falseMaskTyped (n := batch) inputIds.device
+  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.falseMask (n := batch) inputIds.device
   decodeLoopUncached cfg m strategy eosTokenIds finished0 maxNewTokens inputIds
 
 private partial def forcedLoopCached {batch maxLen steps : Nat}

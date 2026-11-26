@@ -1,4 +1,4 @@
-import Tyr.Model.Qwen35.TypedOps
+import Tyr.Core.Typed.Neural
 import Tyr.Core.FFI.Laguna
 
 namespace torch.laguna

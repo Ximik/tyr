@@ -136,7 +136,7 @@ private def loadRMSNormSharded (modelDir : String) (name : String) (dim : Nat) (
 
 private def loadQwenAttentionSharded (modelDir : String) (namePrefix : String)
     (hiddenSize numHeads numKVHeads headDim : Nat)
-    (dtype : DType) (cast : Bool) (device : Device := .CPU) : IO (qwen.QwenAttention (device := device) hiddenSize numHeads numKVHeads headDim dtype) := do
+    (dtype : DType) (cast : Bool) (device : Device := .CPU) : IO (GroupedQueryAttention (device := device) hiddenSize numHeads numKVHeads headDim dtype) := do
   let qProj ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir s!"{namePrefix}.q_proj.weight" #[numHeads * headDim, hiddenSize]
   let kProj ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir s!"{namePrefix}.k_proj.weight" #[numKVHeads * headDim, hiddenSize]
   let vProj ← loadWeight (dtype := dtype) (cast := cast) (device := device) modelDir s!"{namePrefix}.v_proj.weight" #[numKVHeads * headDim, hiddenSize]

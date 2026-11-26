@@ -63,18 +63,18 @@ private def printHelp : IO Unit := do
   IO.println "  lake exe Qwen25OmniRunHF --device cuda --source Qwen/Qwen2.5-Omni-7B --prompt-file prompts.txt --batch-size 2"
 
 private def encodePromptToIds
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (prompt : String)
     : Array UInt64 :=
   let text := tokenizer.qwen3.chatTemplate prompt
-  (tokenizer.qwen3.encodeText tok text).map (fun t => t.toUInt64)
+  (tokenizer.ByteLevelBPETokenizer.encodeText tok text).map (fun t => t.toUInt64)
 
 private def defaultConfigForSource (source : String) : Config :=
   if source.contains "-7B" then Config.qwen25omni_7B
   else Config.qwen25omni_3B
 
 private def runBatches
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (model : Qwen25OmniForCausalLM (device := device) cfg)
     (args : Args)
     (prompts : Array String)
@@ -85,7 +85,7 @@ private def runBatches
       buildBatchInput tok.padToken.toUInt64 chunk (encodePromptToIds tok)
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
   let decodeBatch (promptLens : Array Nat) {b os : Nat} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
-    decodeGeneratedBatch promptLens ids (fun xs => tokenizer.qwen3.decodeText tok xs)
+    decodeGeneratedBatch promptLens ids (fun xs => tokenizer.ByteLevelBPETokenizer.decodeText tok xs)
   let runGen (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     model.generateGreedy ids args.maxNewTokens eos
   runGreedyBatches prompts args.batchSize args.maxNewTokens (prompts.size == 1)
@@ -107,7 +107,7 @@ def runMain (argv : List String) : IO UInt32 := do
   IO.println s!"Resolved model dir: {modelDir}"
   IO.println s!"Using device: {deviceToString device}"
 
-  let tok ← tokenizer.qwen3.loadTokenizer modelDir
+  let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
   let prompts ← loadPrompts args.promptFile args.prompt
 
   let cfgDefaults := defaultConfigForSource args.source

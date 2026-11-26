@@ -587,6 +587,11 @@ def findTokenPositions {n : Nat} {dev : Device}
   let result := Tensor.ofRaw! (σ := ⟨#[count], .Int64, dev⟩) raw
   pure ⟨count, result⟩
 
+/-- `log (1 + exp x)` elementwise. -/
+def softplus {σ : StaticSpec} (t : Tensor σ)
+    (_domain : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide) : Tensor σ :=
+  Tensor.ofRaw! (RawTensor.softplus t.raw)
+
 end torch.Tensor
 
 namespace torch.SomeDTypeTensor

@@ -12,6 +12,7 @@
 -/
 import Examples.Parity.Common
 import Tyr.Model.Qwen35.Qwen36.Tokenizer
+import Tyr.Model.Qwen.Tokenizer
 import Tyr.Model.Gemma4.Tokenizer
 import Tyr.Model.Laguna.Tokenizer
 
@@ -35,8 +36,8 @@ structure Codec where
 def codec (family dir : String) : IO Codec := do
   match family with
   | "qwen3" =>
-    let tok ← qwen3.loadTokenizer dir
-    pure { encode := qwen3.encodeText tok, decode := qwen3.decodeText tok, chat := fun p => #[qwen3.chatTemplate p] }
+    let tok ← tokenizer.ByteLevelBPETokenizer.load dir
+    pure { encode := tokenizer.ByteLevelBPETokenizer.encodeText tok, decode := tokenizer.ByteLevelBPETokenizer.decodeText tok, chat := fun p => #[qwen3.chatTemplate p] }
   | "qwen35" =>
     let tok ← qwen35.loadTokenizer dir
     pure { encode := qwen35.encodeText tok, decode := qwen35.decodeText tok,

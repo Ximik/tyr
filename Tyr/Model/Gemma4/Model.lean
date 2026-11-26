@@ -12,7 +12,7 @@ import Tyr.Model.Gemma4.TypedOps
 import Tyr.Core.TensorStruct
 import Tyr.Lib.Module.Core
 import Tyr.Core.TensorStruct.Derive
-import Tyr.Model.Qwen.Attention
+import Tyr.Lib.Attention
 import Tyr.Model.Gemma4.Config
 import Tyr.Lib.Inference.Generation
 
@@ -23,7 +23,7 @@ variable [DType.RealFloating dtype]
 variable [DType.ConstantSupported dtype device]
 
 open torch
-open torch.Model torch.qwen35
+open torch.Model
 
 /-- Gemma 4 RMSNorm with standard learned scale. -/
 structure Gemma4RMSNorm (dim : Nat) where
@@ -202,7 +202,7 @@ structure Gemma4Attention (cfg : Config) (dtype : DType := .Float32) where
 namespace Gemma4Attention
 
 abbrev KVCache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) :=
-  qwen.QwenAttention.KVCache (device := device) batch (Config.maxKVHeads cfg) (Config.maxHeadDim cfg) cap len dtype
+  GroupedQueryAttention.KVCache (device := device) batch (Config.maxKVHeads cfg) (Config.maxHeadDim cfg) cap len dtype
 
 private def qProjSliding {batch seq : Nat}
     (cfg : Config)
@@ -1148,7 +1148,7 @@ def initCache {batch : Nat}
     : Gemma4Cache (dtype := dtype) (device := cacheDevice) cfg batch maxLen 0 :=
   let layers : Vector Nat cfg.num_hidden_layers := Vector.range cfg.num_hidden_layers
   { attnCaches := layers.map fun _ =>
-      let kv := qwen.QwenAttention.initKVCache
+      let kv := GroupedQueryAttention.initKVCache
         maxLen
         (batch := batch)
         (num_kv_heads := Config.maxKVHeads cfg)
@@ -1733,7 +1733,7 @@ private def generateCore {batch seq : Nat}
       (maxLen := maxLen)
       cfg m inputIds cache (Nat.le_add_right _ _) hSeq
       slidingCosAll slidingSinAll fullCosAll fullSinAll
-  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := falseMaskTyped (n := batch) inputIds.device
+  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.falseMask (n := batch) inputIds.device
   decodeLoopCached
     (maxLen := maxLen)
     cfg
@@ -1787,7 +1787,7 @@ private def generateFromEmbedsCore {batch seq : Nat}
       slidingSinAll
       fullCosAll
       fullSinAll
-  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := falseMaskTyped (n := batch) inputIds.device
+  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.falseMask (n := batch) inputIds.device
   decodeLoopCached
     (maxLen := maxLen)
     cfg
@@ -1862,7 +1862,7 @@ private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : Nat}
         slidingSinAll
         fullCosAll
         fullSinAll
-  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := falseMaskTyped (n := batch) inputIds.device
+  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.falseMask (n := batch) inputIds.device
   decodeLoopCached
     (maxLen := maxLen)
     cfg

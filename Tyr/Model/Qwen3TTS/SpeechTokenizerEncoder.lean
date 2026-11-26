@@ -20,7 +20,7 @@ import Tyr.Core.Typed.Neural
 import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.SpeechTokenizerDTypes
 import Tyr.Core.TensorStruct
-import Tyr.Model.Qwen.RoPE
+import Tyr.Lib.RoPE
 import Tyr.Model.Qwen3TTS.SpeechTokenizer
 import Tyr.Core.Util
 

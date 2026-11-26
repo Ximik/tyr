@@ -54,7 +54,7 @@ private def loadBias (src : Source) (baseName : String) (dim : Nat)
 
 private def loadAttention (src : Source) (layerIdx : Nat)
     (hidden_size num_heads num_kv_heads head_dim : Nat)
-    (device : Device := .CPU) : IO (qwen.QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
+    (device : Device := .CPU) : IO (GroupedQueryAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
   let p := s!"model.layers.{layerIdx}.self_attn"
   let qProj ← loadLinearWeight (device := device) src s!"{p}.q_proj" (num_heads * head_dim) hidden_size
   let kProj ← loadLinearWeight (device := device) src s!"{p}.k_proj" (num_kv_heads * head_dim) hidden_size

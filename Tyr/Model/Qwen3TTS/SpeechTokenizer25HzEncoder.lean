@@ -18,8 +18,8 @@ import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.DTypes
 import Tyr.Core.TensorStruct
 import Tyr.Core.TensorStruct.Derive
-import Tyr.Model.Qwen3ASR.Frontend
-import Tyr.Model.Qwen3ASR.PreprocessorConfig
+import Tyr.Lib.Audio.LogMel
+import Tyr.Lib.Audio.LogMelConfig
 import Tyr.IO.ConfigJson
 
 namespace torch.qwen3tts
@@ -27,7 +27,6 @@ namespace torch.qwen3tts
 variable {device : Device} {dtype : RealFloatingDType}
 
 open Lean
-open torch.qwen3asr
 
 /-! ## Config parsing -/
 
@@ -339,7 +338,7 @@ def encodeWaveToCodes
   if wave.isEmpty then
     throw <| IO.userError "Audio encode input is empty"
 
-  let preCfg : PreprocessorConfig := {
+  let preCfg : audio.LogMelConfig := {
     featureSize := 128
     samplingRate := m.inputSampleRate.val.val
     samplingRatePos := m.inputSampleRate.val.property
@@ -351,7 +350,7 @@ def encodeWaveToCodes
     dither := 0.0
   }
 
-  let ⟨melFrames, frontendOut⟩ ← waveformToWhisperFeaturesDynamic preCfg wave 0.0 none
+  let ⟨melFrames, frontendOut⟩ ← audio.logMelFeaturesDynamic preCfg wave 0.0 none
   let feats : Tensor { shape := #[1, 128, melFrames], dtype := dtype.val, device := device } := Tensor.castLike m.conv1Weight (frontendOut.inputFeatures.to device)
 
   let chunkMel : Nat := 200

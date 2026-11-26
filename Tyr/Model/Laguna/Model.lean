@@ -55,7 +55,7 @@ import Tyr.Core.TensorStruct
 import Tyr.Core.TensorStruct.DeriveCast
 import Tyr.Core.TensorStruct.Indexed
 import Tyr.Core.TensorStruct.Derive
-import Tyr.Model.Qwen.Attention
+import Tyr.Lib.Attention
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.Rope
 import Tyr.Model.Laguna.MoE
@@ -67,7 +67,7 @@ namespace torch.laguna
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
 open torch
-open torch.Model torch.qwen35
+open torch.Model
 
 /-! ## RMSNorm helpers (plain one-centered LagunaRMSNorm) -/
 
@@ -168,7 +168,7 @@ namespace LagunaAttention
 /-- Per-layer static KV cache (existentially indexed K/V stores of shape
     `[batch, cfg.num_key_value_heads, maxLen, cfg.head_dim]`). -/
 abbrev KVCache (cfg : Config) (batch cap len : Nat) (dtype : DType := .Float32) :=
-  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap len dtype
+  GroupedQueryAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap len dtype
 
 def init (cfg : Config) (numHeads : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaAttention (device := device) (dtype := dtype) cfg numHeads) := do
   let q ← Model.initWeight (device := device) (dtype := dtype) #[numHeads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
@@ -230,7 +230,7 @@ private def gateAndOut {batch seq numHeads : Nat}
     (attn : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } :=
   let gateRaw : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads] } := Tensor.linear3d xn m.g_proj
-  let gate : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads] } := Tensor.castLike xn (softplusDynamic (Tensor.toFloat32 gateRaw))
+  let gate : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads] } := Tensor.castLike xn (Tensor.softplus (Tensor.toFloat32 gateRaw))
   let gate4 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] } :=
     Tensor.broadcastTo (Tensor.unsqueeze gate 3) #[batch, seq, numHeads, cfg.head_dim]
   let gated : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads * cfg.head_dim] } :=
@@ -494,9 +494,9 @@ private def initPackedExperts (cfg : Config) (device : Device := .CPU) : IO (Lag
   let gatePacked ← Tensor.randint 0 256 #[e, mi, h / 2] (device := device)
   let upPacked ← Tensor.randint 0 256 #[e, mi, h / 2] (device := device)
   let downPacked ← Tensor.randint 0 256 #[e, h, mi / 2] (device := device)
-  let gateScale := Tensor.mulScalar (← randDynamic (device := device) #[e, mi, h / 16]) scaleVal
-  let upScale := Tensor.mulScalar (← randDynamic (device := device) #[e, mi, h / 16]) scaleVal
-  let downScale := Tensor.mulScalar (← randDynamic (device := device) #[e, h, mi / 16]) scaleVal
+  let gateScale := Tensor.mulScalar (← Tensor.rand (device := device) #[e, mi, h / 16]) scaleVal
+  let upScale := Tensor.mulScalar (← Tensor.rand (device := device) #[e, mi, h / 16]) scaleVal
+  let downScale := Tensor.mulScalar (← Tensor.rand (device := device) #[e, h, mi / 16]) scaleVal
   pure {
     gatePacked := gatePacked.packDType
     gateScale := gateScale.packDType
@@ -674,7 +674,7 @@ def initCache {batch : Nat}
   Id.run do
     let mut caches : Array (LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch maxLen 0) := Array.mkEmpty cfg.num_hidden_layers
     for _ in [:cfg.num_hidden_layers] do
-      caches := caches.push (qwen.QwenAttention.initKVCache
+      caches := caches.push (GroupedQueryAttention.initKVCache
         maxLen
         (batch := batch)
         (num_kv_heads := cfg.num_key_value_heads)
@@ -744,7 +744,7 @@ def initCacheSession {batch : Nat} (cfg : Config) (_m : LagunaModel (device := d
     -- buffers through IO, even when they have identical shape and contents.
     have hCapacity : 0 < capacity := by
       simp only [capacity]; split <;> omega
-    let template := qwen.QwenAttention.initKVCache capacity
+    let template := GroupedQueryAttention.initKVCache capacity
       (batch := batch) (num_kv_heads := cfg.num_key_value_heads) (head_dim := cfg.head_dim) device dtype hCapacity
     let k ← data.cloneInferenceIO template.kStore
     let v ← data.cloneInferenceIO template.vStore
@@ -941,7 +941,7 @@ private def generateCore {batch seq : Nat}
   let tables ← precomputeRotaryTables cfg maxLen inputsEmbeds.device
   let cache ← LagunaModel.initCacheSession cfg m.model maxLen inputsEmbeds.device
   let (logits, cache) ← prefillSession cfg m tables inputsEmbeds cache
-  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := falseMaskTyped (n := batch) inputIds.device
+  let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.falseMask (n := batch) inputIds.device
   decodeLoopCached cfg m tables strategy eosTokenIds finished0 maxNewTokens
     cache logits onStep 0 inputIds (Nat.le_refl _)
 

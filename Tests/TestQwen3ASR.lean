@@ -2,7 +2,7 @@ import Tests.Assertions
 import Tyr
 import Tyr.Model.Qwen3ASR
 import LeanTest
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 open torch
 open torch.qwen3asr
@@ -90,7 +90,7 @@ private def tinyChunkedCfg : Qwen3ASRConfig :=
   }
 
 private def tinyPreprocessorCfg (melBins frames : Nat)
-    (hMel : 0 < melBins := by first | decide | exact AudioEncoderConfig.numMelBinsPos _) : PreprocessorConfig := {
+    (hMel : 0 < melBins := by first | decide | exact AudioEncoderConfig.numMelBinsPos _) : audio.LogMelConfig := {
   featureSize := melBins
   featureSizePos := hMel
   hopLength := 160
@@ -130,7 +130,7 @@ private def writeDeterministicWavFixture
   Tensor.saveWav wave path sampleRate
   pure path
 
-private def mkAsciiStreamingTokenizer : tokenizer.qwen3.QwenTokenizer := Id.run do
+private def mkAsciiStreamingTokenizer : tokenizer.ByteLevelBPETokenizer := Id.run do
   let mut idToToken : Array String := #[]
   let mut tokenToId : Std.HashMap String UInt32 := {}
   let mut charToId : Std.HashMap Char UInt32 := {}
@@ -197,7 +197,7 @@ def testQwen3TokenizerDecodeTextSpecialToken : IO Unit := do
   let bId := tok.tokenToId.getD "b" 0
   let cId := tok.tokenToId.getD "c" 0
   let asrId := tok.specialTokens.getD "<asr_text>" 0
-  let decoded := tokenizer.qwen3.decodeText tok #[aId, bId, asrId, cId]
+  let decoded := tokenizer.ByteLevelBPETokenizer.decodeText tok #[aId, bId, asrId, cId]
   LeanTest.assertEqual decoded "ab<asr_text>c" "decodeText should preserve special tokens in-place"
 
 @[test]
@@ -487,9 +487,9 @@ def testQwen3ASRStreamingTranscribeAndFinish : IO Unit := do
   LeanTest.assertEqual prompts1.size 2 "streamingTranscribe should call decode once per full chunk"
 
   let expectedPrefix2 :=
-    let ids := tokenizer.qwen3.encodeText tok "abc"
+    let ids := tokenizer.ByteLevelBPETokenizer.encodeText tok "abc"
     let endIdx := ids.size - 1
-    if endIdx > 0 then tokenizer.qwen3.decodeText tok (ids.extract 0 endIdx) else ""
+    if endIdx > 0 then tokenizer.ByteLevelBPETokenizer.decodeText tok (ids.extract 0 endIdx) else ""
   LeanTest.assertEqual (prompts1.getD 0 "") st0.promptRaw "first chunk prompt should be raw base prompt"
   LeanTest.assertEqual (prompts1.getD 1 "") (st0.promptRaw ++ expectedPrefix2)
     "second chunk prompt should append rollback prefix"
@@ -503,10 +503,10 @@ def testQwen3ASRStreamingTranscribeAndFinish : IO Unit := do
   LeanTest.assertEqual prompts2.size 3 "finishStreamingTranscribe should perform one extra decode call"
 
   let expectedPrefix3 :=
-    let ids := tokenizer.qwen3.encodeText tok "abcd"
+    let ids := tokenizer.ByteLevelBPETokenizer.encodeText tok "abcd"
     let endIdxRaw := Nat.max 1 (ids.size - 1)
     let endIdx := Nat.min endIdxRaw ids.size
-    tokenizer.qwen3.decodeText tok (ids.extract 0 endIdx)
+    tokenizer.ByteLevelBPETokenizer.decodeText tok (ids.extract 0 endIdx)
   LeanTest.assertEqual (prompts2.getD 2 "") (st0.promptRaw ++ expectedPrefix3)
     "finish prompt should use max(1, len-k) rollback behavior"
 
@@ -720,7 +720,7 @@ def testQwen3ASRForwardFromOutputWav : IO Unit := do
   let frontendCfg := tinyPreprocessorCfg cfg.thinkerConfig.audioConfig.numMelBins frames
   let outSeq : Nat :=
     AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frontendCfg.expectedFrames + textSeq
-  let frontendOut ← wavToWhisperFeatures frontendCfg wavPath
+  let frontendOut ← audio.wavLogMelFeatures frontendCfg wavPath
   let mel := frontendOut.inputFeatures
   let textIds ← Tensor.randint 0 cfg.thinkerConfig.textConfig.vocabSize.toInt64 #[batch, textSeq]
   let logits := model.forwardFromMel mel frontendOut.framesPos textIds
@@ -751,13 +751,13 @@ def testQwen3ASRPreprocessorConfigLoad : IO Unit := do
     ++ "  \"dither\": 0.0\n"
     ++ "}\n"
   IO.FS.writeFile path json
-  let cfg ← PreprocessorConfig.loadFromFile path
+  let cfg ← audio.LogMelConfig.loadFromFile path
   LeanTest.assertEqual cfg.featureSize 8 "feature_size should be loaded"
   LeanTest.assertEqual cfg.samplingRate 16000 "sampling_rate should be loaded"
   LeanTest.assertEqual cfg.nFft 400 "n_fft should be loaded"
-  LeanTest.assertEqual (PreprocessorConfig.expectedSampleCount cfg) 32000
+  LeanTest.assertEqual (audio.LogMelConfig.expectedSampleCount cfg) 32000
     "n_samples should be derived from chunk_length * sampling_rate when missing"
-  LeanTest.assertEqual (PreprocessorConfig.expectedFrames cfg) 200
+  LeanTest.assertEqual (audio.LogMelConfig.expectedFrames cfg) 200
     "nb_max_frames should be derived from n_samples / hop_length when missing"
 
 @[test]
@@ -786,7 +786,7 @@ def testQwen3ASRFrontendWavWhisperFeatures : IO Unit := do
   let wavPath ← writeDeterministicWavFixture "frontend_whisper_features"
 
   let cfg := tinyPreprocessorCfg 8 64
-  let out ← wavToWhisperFeatures cfg wavPath
+  let out ← audio.wavLogMelFeatures cfg wavPath
   let mel := out.inputFeatures
   let fmask := out.featureAttentionMask
 
@@ -860,7 +860,7 @@ def testQwen3ASRGreedyGenerateFromWav : IO Unit := do
   let inputIds : Tensor { shape := #[batch, promptSeq], dtype := .Int64, device := .CPU } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? idsVals #[batch, promptSeq]))
 
   let frontendCfg := tinyPreprocessorCfg cfg.thinkerConfig.audioConfig.numMelBins frames
-  let frontendOut ← wavToWhisperFeatures frontendCfg wavPath
+  let frontendOut ← audio.wavLogMelFeatures frontendCfg wavPath
   let mel : Tensor { shape := #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames], dtype := .Float32, device := .CPU } := frontendOut.inputFeatures
   let fmask : Tensor { shape := #[batch, frames], dtype := .Int64, device := .CPU } := frontendOut.featureAttentionMask
 

@@ -2,6 +2,7 @@ import Tests.Assertions
 import LeanTest
 import Tyr.Core.Typed.Neural
 import Tyr.Core.FFI.Qwen35
+import Tyr.Core.FFI.GatedDelta
 import Tyr.Core.FFI.Gemma4
 
 open torch

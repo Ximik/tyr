@@ -136,7 +136,7 @@ def main : IO Unit := do
   let refQSlide ← src.load "q_out_sliding" #[1, 16, 4, 128]
   let refQSlide := refQSlide.2
   let dQSlide ← tensorMaxAbsDiff qSlide refQSlide
-  check (dQSlide < 1e-4) s!"applyRotaryEmb (sliding, prefill) vs HF: max|Δ| = {dQSlide}"
+  check (dQSlide < 1e-4) s!"Tensor.applyRotary (sliding, prefill) vs HF: max|Δ| = {dQSlide}"
   -- applyRotaryPartial must agree with the direct apply for rotary_dim == head_dim
   -- (empty pass-through slice).
   let qSlide2 := applyRotaryPartial (half := 64) q slCos16 slSin16

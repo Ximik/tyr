@@ -125,11 +125,11 @@ private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { sha
     let attnMask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? mask #[1, maxSeqLen]))
     pure (tokens, attnMask, tokenCount)
   else
-    let tok ← tokenizer.qwen3.loadTokenizer s!"{cfg.modelDir}/tokenizer"
+    let tok ← tokenizer.ByteLevelBPETokenizer.load s!"{cfg.modelDir}/tokenizer"
     let (tokIds, maskIds) := tokenizer.qwen3.encodePrompt tok prompt maxSeqLen
     let tokenCount := maskIds.foldl (fun acc v => if v != 0 then acc + 1 else acc) (0 : Nat)
-    let tokens := (← IO.ofExcept (Tensor.fromInt64ArrayAs? (tokenizer.qwen3.toInt64Array tokIds) #[1, maxSeqLen]))
-    let attnMask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? (tokenizer.qwen3.toInt64Array maskIds) #[1, maxSeqLen]))
+    let tokens := (← IO.ofExcept (Tensor.fromInt64ArrayAs? (tokenizer.toInt64Array tokIds) #[1, maxSeqLen]))
+    let attnMask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? (tokenizer.toInt64Array maskIds) #[1, maxSeqLen]))
     pure (tokens, attnMask, tokenCount)
 
 -- The derived cast for the nested VAE tree needs a 278-node instance dictionary.

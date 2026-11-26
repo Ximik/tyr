@@ -74,7 +74,7 @@ private def loadTalkerLayerSharded (modelDir : String) (cast : Bool) (layerIdx :
   let input_layernorm ← loadRMSNormSharded modelDir cast s!"{p}.input_layernorm" cfg.hiddenSize cfg.rmsNormEps
   let post_attention_layernorm ← loadRMSNormSharded modelDir cast s!"{p}.post_attention_layernorm" cfg.hiddenSize cfg.rmsNormEps
 
-  let self_attn : qwen.QwenAttention (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim dtype.val := {
+  let self_attn : GroupedQueryAttention (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim dtype.val := {
     q_proj := Tensor.detach q_proj
     k_proj := Tensor.detach k_proj
     v_proj := Tensor.detach v_proj
@@ -118,7 +118,7 @@ private def loadCodePredictorLayerSharded (modelDir : String) (cast : Bool) (lay
   let input_layernorm ← loadRMSNormSharded modelDir cast s!"{p}.input_layernorm" cp.hiddenSize cp.rmsNormEps
   let post_attention_layernorm ← loadRMSNormSharded modelDir cast s!"{p}.post_attention_layernorm" cp.hiddenSize cp.rmsNormEps
 
-  let self_attn : qwen.QwenAttention (device := device) cp.hiddenSize cp.numAttentionHeads cp.numKeyValueHeads cp.headDim dtype.val := {
+  let self_attn : GroupedQueryAttention (device := device) cp.hiddenSize cp.numAttentionHeads cp.numKeyValueHeads cp.headDim dtype.val := {
     q_proj := Tensor.detach q_proj
     k_proj := Tensor.detach k_proj
     v_proj := Tensor.detach v_proj

@@ -42,7 +42,7 @@ private def loadLinearWeight (src : Source) (name : String) (outDim inDim : Nat)
 def loadAttention (src : Source) (layerIdx : Nat)
     (hidden_size num_heads num_kv_heads head_dim : Nat)
     (loadQKNorms : Bool := false)
-    (device : Device := .CPU) : IO (QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
+    (device : Device := .CPU) : IO (GroupedQueryAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
   let layerPrefix := s!"model.layers.{layerIdx}.self_attn"
 
   let q_proj ← loadLinearWeight (device := device) src s!"{layerPrefix}.q_proj" (num_heads * head_dim) hidden_size

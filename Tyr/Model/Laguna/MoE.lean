@@ -52,7 +52,6 @@ namespace torch.laguna
 
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
-open torch.qwen35
 
 /-- Top-k sigmoid router for Laguna MoE (aux-loss-free load balancing). -/
 structure LagunaTopKRouter (cfg : Config) where

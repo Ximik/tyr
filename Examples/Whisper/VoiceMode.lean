@@ -14,7 +14,7 @@
 import Tyr.Model.Whisper
 import Tyr.Core.FFI.AppleAudioInput
 import Tyr.Core.FFI.AppleAudioOutput
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 open torch.whisper
 
@@ -190,8 +190,8 @@ private def runOnce
     {device : torch.Device}
     {cfg : WhisperConfig}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (pre : torch.qwen3asr.PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (pre : torch.audio.LogMelConfig)
     (hMel : pre.featureSize = cfg.numMelBins)
     (args : Args)
     (decodeOpts : WhisperDecodeOptions)

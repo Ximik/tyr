@@ -8,9 +8,9 @@
 -/
 import Tyr.Model.Qwen3ASR.Config
 import Tyr.Model.Qwen3ASR.Model
-import Tyr.Model.Qwen3ASR.Frontend
+import Tyr.Lib.Audio.LogMel
 import Tyr.Model.Qwen3ASR.Processor
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 import Tyr.Core.Util
 
 namespace torch.qwen3asr
@@ -128,7 +128,7 @@ private def detachDecodeCache (cache : StreamingDecodeCache (device := device) (
                       inputFeaturesDevDyn := frontend.inputFeaturesDevDyn.map Tensor.detach } }
 
 private def mkStreamingPromptTokenCache
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (processor : Qwen3ASRProcessor)
     (basePrompt : String)
     : Option StreamingPromptTokenCache := do
@@ -136,8 +136,8 @@ private def mkStreamingPromptTokenCache
   if parts.size != 2 then
     none
   else
-    let beforeAudioIds := tokenizer.qwen3.encodeText tok parts[0]!
-    let afterAudioIds := tokenizer.qwen3.encodeText tok parts[1]!
+    let beforeAudioIds := tokenizer.ByteLevelBPETokenizer.encodeText tok parts[0]!
+    let afterAudioIds := tokenizer.ByteLevelBPETokenizer.encodeText tok parts[1]!
     some {
       basePrompt := basePrompt
       basePromptLen := basePrompt.length
@@ -147,7 +147,7 @@ private def mkStreamingPromptTokenCache
     }
 
 private def encodePromptIdsWithCache
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (processor : Qwen3ASRProcessor)
     (basePrompt : String)
     (prompt : String)
@@ -166,9 +166,9 @@ private def encodePromptIdsWithCache
       let suffixIds :=
         if suffix.startsWith c.lastSuffix then
           let suffixTail := (suffix.drop c.lastSuffix.length).toString
-          c.lastSuffixIds ++ tokenizer.qwen3.encodeText tok suffixTail
+          c.lastSuffixIds ++ tokenizer.ByteLevelBPETokenizer.encodeText tok suffixTail
         else
-          tokenizer.qwen3.encodeText tok suffix
+          tokenizer.ByteLevelBPETokenizer.encodeText tok suffix
       let mut ids := c.beforeAudioIds
       ids := ids ++ Array.replicate audioLen audioTokenId
       ids := ids ++ c.afterAudioIds
@@ -313,24 +313,24 @@ private def findSingleContiguousAudioSpanStart
 
 private def buildStreamingFrontendPackWithCache
     {cfg : Qwen3ASRConfig}
-    (preprocessor : PreprocessorConfig)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio16k : Array Float)
     (decodeMode : StreamingDecodeMode)
     (cache : Option (StreamingFrontendCache (device := device) cfg))
-    : IO ((Sigma (fun frames => WhisperFrontendOutput (device := device) preprocessor.featureSize frames)) ×
+    : IO ((Sigma (fun frames => audio.LogMelFeatures (device := device) preprocessor.featureSize frames)) ×
       Option (StreamingFrontendCache (device := device) cfg) × Option Nat) := do
   let maxSec :=
-    (PreprocessorConfig.expectedSampleCount preprocessor).toFloat / sampleRate16k
-  let maxSamples := PreprocessorConfig.expectedSampleCount preprocessor
+    (audio.LogMelConfig.expectedSampleCount preprocessor).toFloat / sampleRate16k
+  let maxSamples := audio.LogMelConfig.expectedSampleCount preprocessor
   if audio16k.size > maxSamples then
     throw <| IO.userError
       s!"Audio duration exceeds maxSeconds={maxSec}: samples={audio16k.size}, limit={maxSamples}"
 
-  let fullFallback : IO ((Sigma (fun frames => WhisperFrontendOutput (device := device) preprocessor.featureSize frames)) ×
+  let fullFallback : IO ((Sigma (fun frames => audio.LogMelFeatures (device := device) preprocessor.featureSize frames)) ×
       Option (StreamingFrontendCache (device := device) cfg) × Option Nat) := do
     let fullPack ←
-      waveformToWhisperFeaturesDynamic
+      audio.logMelFeaturesDynamic
         preprocessor
         audio16k
         (minSeconds := 0.05)
@@ -385,7 +385,7 @@ private def buildStreamingFrontendPackWithCache
         else
           let suffixAudio := audio16k.extract startSample audio16k.size
           let suffixPack ←
-            waveformToWhisperFeaturesDynamic
+            audio.logMelFeaturesDynamic
               preprocessor
               suffixAudio
               (minSeconds := 0.0)
@@ -416,7 +416,7 @@ private def buildStreamingFrontendPackWithCache
             let mergedFeaturesDyn := Tensor.cat prefixFeatures suffixFeatures 2
             let mergedMaskDyn := Tensor.cat prefixMask suffixMask 1
             if hMerged : ¬ 0 < mergedFrames then fullFallback else
-            let mergedOut : WhisperFrontendOutput (device := device) preprocessor.featureSize mergedFrames := {
+            let mergedOut : audio.LogMelFeatures (device := device) preprocessor.featureSize mergedFrames := {
               inputFeatures := Tensor.reshape mergedFeaturesDyn #[1, preprocessor.featureSize, mergedFrames]
               featureAttentionMask := Tensor.reshape mergedMaskDyn #[1, mergedFrames]
               framesPos := by omega
@@ -656,12 +656,12 @@ def initStreamingState
   }
 
 private def rollbackPrefixForChunk
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (rawDecoded : String)
     (unfixedTokenNum : Nat)
     (promptMaxTokens : Nat)
     : String := Id.run do
-  let curIds := tokenizer.qwen3.encodeText tok rawDecoded
+  let curIds := tokenizer.ByteLevelBPETokenizer.encodeText tok rawDecoded
   let mut k := unfixedTokenNum
   let mut pref := ""
   let mut done := false
@@ -676,7 +676,7 @@ private def rollbackPrefixForChunk
         0
     pref :=
       if endIdx > startIdx then
-        tokenizer.qwen3.decodeText tok (curIds.extract startIdx endIdx)
+        tokenizer.ByteLevelBPETokenizer.decodeText tok (curIds.extract startIdx endIdx)
       else
         ""
     if !pref.contains '\uFFFD' then
@@ -689,12 +689,12 @@ private def rollbackPrefixForChunk
   pref
 
 private def rollbackPrefixForFinish
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (rawDecoded : String)
     (unfixedTokenNum : Nat)
     (promptMaxTokens : Nat)
     : String :=
-  let curIds := tokenizer.qwen3.encodeText tok rawDecoded
+  let curIds := tokenizer.ByteLevelBPETokenizer.encodeText tok rawDecoded
   let endIdxRaw := Nat.max 1 (curIds.size - unfixedTokenNum)
   let endIdx := Nat.min endIdxRaw curIds.size
   let startIdx :=
@@ -704,13 +704,13 @@ private def rollbackPrefixForFinish
       endIdx - promptMaxTokens
     else
       0
-  tokenizer.qwen3.decodeText tok (curIds.extract startIdx endIdx)
+  tokenizer.ByteLevelBPETokenizer.decodeText tok (curIds.extract startIdx endIdx)
 
 /-- Streaming decode step:
     append new PCM samples, consume fixed `step` chunks, and decode over a
     rolling `chunk` audio window. -/
 def streamingTranscribe
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (decodeFn : StreamingDecodeFn)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
@@ -751,7 +751,7 @@ def streamingTranscribe
 
 /-- Flush tail audio shorter than one chunk and decode once more. -/
 def finishStreamingTranscribe
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (decodeFn : StreamingDecodeFn)
     (state : ASRStreamingState)
     : IO ASRStreamingState := do
@@ -788,8 +788,8 @@ def finishStreamingTranscribe
 def decodeStreamingChunkWithModelStateCached
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (basePrompt : String)
     (decodeMode : StreamingDecodeMode)
@@ -1081,15 +1081,15 @@ def decodeStreamingChunkWithModelStateCached
         let flat : Tensor { device := device, shape := #[newSeq], dtype := .Int64 } := Tensor.reshape newOnly #[newSeq]
         let idsU64 ← Tensor.toUInt64Array flat
         let ids := idsU64.map (fun x => x.toUInt32)
-        pure (tokenizer.qwen3.decodeText tok ids, some nextCache)
+        pure (tokenizer.ByteLevelBPETokenizer.decodeText tok ids, some nextCache)
 
 /-- Lean decode helper that runs one model generation from `(prompt, audio)` pair
     and returns updated prompt cache for the next hop. -/
 def decodeStreamingChunkWithModelCached
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (prompt : String)
     (audio16k : Array Float)
@@ -1116,8 +1116,8 @@ def decodeStreamingChunkWithModelCached
 def decodeStreamingChunkWithModel
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (prompt : String)
     (audio16k : Array Float)
@@ -1139,8 +1139,8 @@ def decodeStreamingChunkWithModel
 def streamingTranscribeWithModelStateCached
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
@@ -1175,8 +1175,8 @@ def streamingTranscribeWithModelStateCached
 def streamingTranscribeWithModelCached
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
@@ -1201,8 +1201,8 @@ def streamingTranscribeWithModelCached
 def streamingTranscribeWithModel
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
@@ -1225,8 +1225,8 @@ def streamingTranscribeWithModel
 def finishStreamingTranscribeWithModelStateCached
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
@@ -1260,8 +1260,8 @@ def finishStreamingTranscribeWithModelStateCached
 def finishStreamingTranscribeWithModelCached
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
@@ -1284,8 +1284,8 @@ def finishStreamingTranscribeWithModelCached
 def finishStreamingTranscribeWithModel
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (state : ASRStreamingState)
     (maxNewTokens : Nat := 512)
@@ -1322,8 +1322,8 @@ def initStreamingState
 /-- Method-style streaming step with Lean model backend. -/
 def streamingTranscribeStateCached
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
@@ -1344,8 +1344,8 @@ def streamingTranscribeStateCached
 /-- Method-style streaming step with Lean model backend. -/
 def streamingTranscribeCached
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
@@ -1366,8 +1366,8 @@ def streamingTranscribeCached
 /-- Method-style streaming step with Lean model backend. -/
 def streamingTranscribe
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
@@ -1379,8 +1379,8 @@ def streamingTranscribe
 /-- Method-style streaming flush with Lean model backend. -/
 def finishStreamingTranscribeStateCached
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
@@ -1399,8 +1399,8 @@ def finishStreamingTranscribeStateCached
 /-- Method-style streaming flush with Lean model backend. -/
 def finishStreamingTranscribeCached
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
@@ -1419,8 +1419,8 @@ def finishStreamingTranscribeCached
 /-- Method-style streaming flush with Lean model backend. -/
 def finishStreamingTranscribe
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (state : ASRStreamingState)
     (maxNewTokens : Nat := 512)

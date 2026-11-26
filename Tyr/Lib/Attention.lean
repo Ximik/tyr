@@ -1,38 +1,27 @@
 /-
-  Tyr/Model/Qwen/Attention.lean
+  Tyr/Lib/Attention.lean
 
-  Grouped Query Attention (GQA) for Qwen3.
-  Uses fewer key-value heads than query heads for efficiency.
-
-  Indexed shapes and a shared dtype parameter preserve Float32 and BF16
-  execution. Native attention operations live behind typed adapters.
+  Grouped-query attention with optional per-head query/key RMS norms, optional
+  query/key/value biases and a rotary position embedding, and its incremental
+  key/value cache.
 -/
 import Tyr.Core.Typed.Neural
 import Tyr.Core.TensorStruct
 import Tyr.Lib.Module.Core
 import Tyr.Core.TensorStruct.Derive
-import Tyr.Model.Qwen.Config
-import Tyr.Model.Qwen.RoPE
 
-namespace torch.qwen
+namespace torch
 
 variable {device : Device}
-/-- Qwen attention with Grouped Query Attention (GQA).
-    Query heads: num_attention_heads
-    Key/Value heads: num_key_value_heads (typically 4 for Qwen3-4B)
-    Each KV head is shared across multiple query heads. -/
-structure QwenAttention (hidden_size num_heads num_kv_heads head_dim : Nat) (dtype : DType := .Float32) where
-  /-- Query projection: [hidden_size, hidden_size] -/
+/-- Attention projections with `num_kv_heads` key/value heads, each shared by
+    `num_heads / num_kv_heads` query heads. -/
+structure GroupedQueryAttention (hidden_size num_heads num_kv_heads head_dim : Nat) (dtype : DType := .Float32) where
   q_proj : Tensor { device := device, shape := #[num_heads * head_dim, hidden_size], dtype := dtype }
-  /-- Key projection: [kv_dim, hidden_size] -/
   k_proj : Tensor { device := device, shape := #[num_kv_heads * head_dim, hidden_size], dtype := dtype }
-  /-- Value projection: [kv_dim, hidden_size] -/
   v_proj : Tensor { device := device, shape := #[num_kv_heads * head_dim, hidden_size], dtype := dtype }
-  /-- Output projection: [hidden_size, hidden_size] -/
   o_proj : Tensor { device := device, shape := #[hidden_size, num_heads * head_dim], dtype := dtype }
-  /-- Optional Q norm (per-head normalization for Flux Klein text encoder) -/
+  /-- Optional per-head RMS norm weights of queries and keys. -/
   q_norm : Option (Tensor { device := device, shape := #[head_dim], dtype := dtype }) := none
-  /-- Optional K norm (per-head normalization for Flux Klein text encoder) -/
   k_norm : Option (Tensor { device := device, shape := #[head_dim], dtype := dtype }) := none
   /-- Optional Q/K/V projection biases. -/
   q_bias : Option (Tensor { device := device, shape := #[num_heads * head_dim], dtype := dtype }) := none
@@ -40,13 +29,14 @@ structure QwenAttention (hidden_size num_heads num_kv_heads head_dim : Nat) (dty
   v_bias : Option (Tensor { device := device, shape := #[num_kv_heads * head_dim], dtype := dtype }) := none
   deriving TensorStruct
 
-namespace QwenAttention
+namespace GroupedQueryAttention
 
 variable {dtype : DType}
 variable [DType.RealFloating dtype]
 
-/-- Initialize attention layers with random weights -/
-def init (hidden_size num_heads num_kv_heads head_dim : Nat) (dtype : DType := .Float32) (device : Device := .CPU) : IO (QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype) := do
+/-- Projections drawn from a normal distribution scaled by `sqrt (2 / hidden_size)`,
+    without norms or biases. -/
+def init (hidden_size num_heads num_kv_heads head_dim : Nat) (dtype : DType := .Float32) (device : Device := .CPU) : IO (GroupedQueryAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
@@ -86,13 +76,6 @@ def initKVCache {batch num_kv_heads head_dim : Nat}
     Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
   { kStore := k0, vStore := v0, cap_pos := h, len_le := Nat.zero_le _ }
 
-/-! ## Extern adapters
-
-Typed wrappers over existing attention externs that have no counterpart in
-`Tyr.Core.Typed.Ops` yet. Each re-asserts the output spec the extern is known to
-produce (see `Tyr/Lib/Inference/KVCache.lean` for the same pattern). -/
-
-/-- [batch, seq, n_head, head_dim] → [batch, n_head, seq, head_dim] (contiguous). -/
 private def project {batch seq inDim outDim : Nat}
     (x : Tensor { device := device, shape := #[batch, seq, inDim], dtype := dtype })
     (weight : Tensor { device := device, shape := #[outDim, inDim], dtype := dtype })
@@ -102,6 +85,7 @@ private def project {batch seq inDim outDim : Nat}
   | some b => Tensor.affine3d x weight b
   | none => Tensor.linear3d x weight
 
+/-- [batch, seq, n_head, head_dim] → [batch, n_head, seq, head_dim] (contiguous). -/
 private def transposeForAttention {batch seq n_head head_dim : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩)
     : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
@@ -133,9 +117,7 @@ private def sdpaGQAQKV {batch n_head n_kv_head q_seq kv_seq head_dim : Nat} {d :
     : Tensor ⟨#[batch, n_head, q_seq, head_dim], d, dev⟩ :=
   Tensor.attentionGQAQKV query key value isCausal true (_heads := .ofDvd hkv)
 
-/-- SDPA with GQA and a [batch, seq] padding mask. The mask dtype stays
-    generic: the extern accepts any runtime dtype and the legacy callers
-    were dtype-erased here. -/
+/-- SDPA with GQA and a [batch, seq] padding mask of any dtype. -/
 private def sdpaGQAMask {batch n_head n_kv_head seq head_dim : Nat} {d dm : DType} {dev : Device} [DType.RealFloating d]
     (hkv : n_kv_head ∣ n_head)
     (query : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩)
@@ -168,11 +150,10 @@ private def applyHeadNorm {batch seq n_heads head_dim : Nat}
     : Tensor { device := device, shape := #[batch, seq, n_heads, head_dim], dtype := dtype } :=
   Tensor.rmsNormPreserving x norm eps
 
-/-- Forward pass for attention.
-    Input: [batch, seq, hidden_size]
-    Output: [batch, seq, hidden_size] -/
+/-- Projects `x`, applies the optional head norms and the rotary embedding
+    `cos`/`sin` to queries and keys, attends, and projects back. -/
 def forward {batch seq hidden_size num_heads num_kv_heads half : Nat}
-    (attn : QwenAttention (device := device) hidden_size num_heads num_kv_heads (2 * half) dtype)
+    (attn : GroupedQueryAttention (device := device) hidden_size num_heads num_kv_heads (2 * half) dtype)
     (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
@@ -189,7 +170,6 @@ def forward {batch seq hidden_size num_heads num_kv_heads half : Nat}
   let k := k.reshape #[batch, seq, num_kv_heads, 2 * half]
   let v := v.reshape #[batch, seq, num_kv_heads, 2 * half]
 
-  -- Apply Q/K norms if present (Flux Klein text encoder has these)
   let q := match attn.q_norm with
     | some qn => applyHeadNorm q qn
     | none => q
@@ -198,8 +178,8 @@ def forward {batch seq hidden_size num_heads num_kv_heads half : Nat}
     | none => k
 
   -- Apply RoPE to Q and K
-  let q := applyRotaryEmb q cos sin
-  let k := applyRotaryEmb k cos sin
+  let q := Tensor.applyRotary q cos sin
+  let k := Tensor.applyRotary k cos sin
 
   -- Transpose to [batch, num_heads, seq, head_dim]
   let q := transposeForAttention q
@@ -218,10 +198,10 @@ def forward {batch seq hidden_size num_heads num_kv_heads half : Nat}
   -- Output projection
   Tensor.linear3d attn_out attn.o_proj
 
-/-- Incremental attention step with KV cache.
-    Input query is one token `[batch,1,hidden]`; cache grows by one KV step. -/
+/-- `forward` for one new position: its keys and values are written into `cache`
+    at `len`, and the query attends to the first `len + 1` cached positions. -/
 def forwardStep {batch hidden_size num_heads num_kv_heads half cap len : Nat}
-    (attn : QwenAttention (device := device) hidden_size num_heads num_kv_heads (2 * half) dtype)
+    (attn : GroupedQueryAttention (device := device) hidden_size num_heads num_kv_heads (2 * half) dtype)
     (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, half], dtype := .Float32 })
@@ -247,8 +227,8 @@ def forwardStep {batch hidden_size num_heads num_kv_heads half cap len : Nat}
     | none => k
 
   -- Apply RoPE to the single-step Q/K.
-  let q := applyRotaryEmb q cos sin
-  let k := applyRotaryEmb k cos sin
+  let q := Tensor.applyRotary q cos sin
+  let k := Tensor.applyRotary k cos sin
 
   -- Convert to attention layout and write new KV into preallocated cache.
   let qh := transposeForAttention q
@@ -282,9 +262,10 @@ def forwardStep {batch hidden_size num_heads num_kv_heads half cap len : Nat}
   }
   (out, cache')
 
+/-- `forward` with a [batch, seq] padding mask. -/
 def forwardMasked {batch seq hidden_size num_heads num_kv_heads half : Nat}
     {maskDtype : DType}
-    (attn : QwenAttention (device := device) hidden_size num_heads num_kv_heads (2 * half) dtype)
+    (attn : GroupedQueryAttention (device := device) hidden_size num_heads num_kv_heads (2 * half) dtype)
     (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
@@ -302,7 +283,6 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads half : Nat}
   let k := k.reshape #[batch, seq, num_kv_heads, 2 * half]
   let v := v.reshape #[batch, seq, num_kv_heads, 2 * half]
 
-  -- Apply Q/K norms if present (Flux Klein text encoder has these)
   let q := match attn.q_norm with
     | some qn => applyHeadNorm q qn
     | none => q
@@ -311,8 +291,8 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads half : Nat}
     | none => k
 
   -- Apply RoPE to Q and K
-  let q := applyRotaryEmb q cos sin
-  let k := applyRotaryEmb k cos sin
+  let q := Tensor.applyRotary q cos sin
+  let k := Tensor.applyRotary k cos sin
 
   -- Transpose to [batch, num_heads, seq, head_dim]
   let q := transposeForAttention q
@@ -331,6 +311,6 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads half : Nat}
   -- Output projection
   Tensor.linear3d attn_out attn.o_proj
 
-end QwenAttention
+end GroupedQueryAttention
 
-end torch.qwen
+end torch

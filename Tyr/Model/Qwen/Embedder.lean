@@ -11,7 +11,7 @@ import Tyr.Core.Typed
 import Tyr.Core.Typed.Neural
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.Model
-import Tyr.Model.Qwen.RoPE
+import Tyr.Lib.RoPE
 
 namespace torch.qwen
 

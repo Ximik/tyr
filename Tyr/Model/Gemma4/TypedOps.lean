@@ -1,4 +1,4 @@
-import Tyr.Model.Qwen35.TypedOps
+import Tyr.Core.Typed.Neural
 import Tyr.Core.FFI.Gemma4
 
 namespace torch.gemma4

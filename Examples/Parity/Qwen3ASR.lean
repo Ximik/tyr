@@ -13,7 +13,7 @@
 -/
 import Examples.Parity.LM
 import Tyr.Model.Qwen3ASR
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 namespace Examples.Parity.Qwen3ASR
 
@@ -36,14 +36,14 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir weights
   let language ← IO.ofExcept (normalizeLanguageName request.language)
   IO.ofExcept (validateLanguage cfg.supportLanguages language)
-  let tok ← tokenizer.qwen3.loadTokenizer weights
-  let pre ← PreprocessorConfig.loadFromPretrainedDir weights (requiredSamplingRate := some 16000)
+  let tok ← tokenizer.ByteLevelBPETokenizer.load weights
+  let pre ← audio.LogMelConfig.loadFromPretrainedDir weights (requiredSamplingRate := some 16000)
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
     throw <| IO.userError s!"feature_size {pre.featureSize} is not num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}"
   let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded weights cfg device {} (some dtype)
   have : DType.RealFloating dtype.val := inferInstance
 
-  let ⟨frames, features⟩ ← waveformToWhisperFeaturesDynamic pre (← normalizeAudioTo16kFromWav request.audio)
+  let ⟨frames, features⟩ ← audio.logMelFeaturesDynamic pre (← audio.normalizeAudioTo16kFromWav request.audio)
     (device := device)
   let mel : Tensor { dtype := .Float32, device := device, shape := #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] } :=
     Tensor.reshape features.inputFeatures #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel])

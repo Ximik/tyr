@@ -1,4 +1,4 @@
-import Tyr.Model.Qwen35.TypedOps
+import Tyr.Core.Typed.Neural
 import Tyr.Core.FFI.Neural
 import Tyr.Lib.Module.LayerNorm
 import Tyr.Core.TensorStruct.DeriveCast

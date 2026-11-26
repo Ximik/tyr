@@ -13,7 +13,7 @@ import Tyr.Lib.Module.Core
 import Tyr.Core.TensorStruct.Derive
 import Tyr.Lib.Module.RMSNorm
 import Tyr.Model.Qwen.Config
-import Tyr.Model.Qwen.Attention
+import Tyr.Lib.Attention
 import Tyr.Model.Qwen.MLP
 
 namespace torch.qwen
@@ -25,7 +25,7 @@ structure QwenLayer (hidden_size num_heads num_kv_heads head_dim intermediate_si
   /-- Input layer norm (before attention) -/
   input_layernorm : RMSNorm (device := device) hidden_size dtype
   /-- Self-attention module -/
-  self_attn : QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype
+  self_attn : GroupedQueryAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype
   /-- Post-attention layer norm (before MLP) -/
   post_attention_layernorm : RMSNorm (device := device) hidden_size dtype
   /-- MLP module -/
@@ -42,7 +42,7 @@ def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat)
     (eps : Float := 1e-6) (dtype : DType := .Float32)
     (device : Device := .CPU) : IO (QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype) := do
   let input_layernorm ← RMSNorm.init (device := device) hidden_size eps dtype
-  let self_attn ← QwenAttention.init (device := device) hidden_size num_heads num_kv_heads head_dim dtype
+  let self_attn ← GroupedQueryAttention.init (device := device) hidden_size num_heads num_kv_heads head_dim dtype
   let post_attention_layernorm ← RMSNorm.init (device := device) hidden_size eps dtype
   let mlp ← QwenMLP.init (device := device) hidden_size intermediate_size dtype
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
@@ -80,9 +80,9 @@ def forwardStep {batch hidden_size num_heads num_kv_heads half intermediate_size
     (x : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, half], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, half], dtype := .Float32 })
-    (cache : QwenAttention.KVCache (device := device) batch num_kv_heads (2 * half) cap len dtype)
+    (cache : GroupedQueryAttention.KVCache (device := device) batch num_kv_heads (2 * half) cap len dtype)
     (hlen : len < cap)
-    : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × QwenAttention.KVCache (device := device) batch num_kv_heads (2 * half) cap (len + 1) dtype :=
+    : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × GroupedQueryAttention.KVCache (device := device) batch num_kv_heads (2 * half) cap (len + 1) dtype :=
   -- Pre-norm attention.
   let residual1 := x
   let x1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := layer.input_layernorm.forward3d x

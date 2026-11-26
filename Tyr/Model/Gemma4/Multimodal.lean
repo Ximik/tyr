@@ -24,7 +24,7 @@ variable [DType.RealFloating projectorDType] [DType.RealFloating inputDType]
 variable [DType.ConstantSupported dtype device]
 
 open torch
-open torch.Model torch.qwen35
+open torch.Model
 
 abbrev ImagePatchGrid (cfg : VLConfig) (dtype : DType := .Float32) :=
   Sigma (fun patchRows =>
