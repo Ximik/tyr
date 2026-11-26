@@ -1,9 +1,9 @@
 import Tests.Assertions
 import LeanTest
-import Tyr.Module.RMSNorm
+import Tyr.Lib.Module.RMSNorm
 import Tyr.Model.Flux.TypedOps
 import Tyr.Model.KittenTTS.TypedOps
-import Tyr.Torch
+import Tyr.Core.Torch
 
 open torch
 

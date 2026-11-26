@@ -3,7 +3,7 @@
 
   diffusers `vae/config.json` check for the Flux2 VAE decoder.
 -/
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
 
 namespace torch.vae
 

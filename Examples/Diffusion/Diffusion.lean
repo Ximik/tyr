@@ -10,9 +10,9 @@
   - Rotary positional embeddings
   - No bias in linear layers
 -/
-import Tyr.Torch
-import Tyr.TensorStruct
-import Tyr.Module.Derive
+import Tyr.Core.Torch
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.Derive
 import Examples.Diffusion.Parameters
 
 namespace torch.diffusion

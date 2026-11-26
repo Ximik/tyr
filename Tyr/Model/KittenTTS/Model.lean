@@ -8,11 +8,11 @@
   utterance inference, including harmonic source generation and inverse STFT.
  -/
 import Tyr.Model.KittenTTS.TypedOps
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.KittenTTS.Config
-import Tyr.Model.Utils
+import Tyr.Lib.Module.Init
 
 namespace torch.kittentts
 

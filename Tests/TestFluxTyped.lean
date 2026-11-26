@@ -1,5 +1,5 @@
 import Tyr.Model.Flux
-import Tyr.Checkpoint
+import Tyr.IO.Checkpoint
 import LeanTest
 import Tests.Assertions
 

@@ -1,4 +1,4 @@
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 /-
   Tyr/Model/Flux/Weights.lean
 
@@ -6,7 +6,7 @@ import Tyr.SafeTensors.Source
   Maps HuggingFace flux.safetensors weight names to Tyr structure.
 -/
 import Tyr.Model.Flux.TypedOps
-import Tyr.Log
+import Tyr.IO.Log
 import Tyr.Model.Flux.Config
 import Tyr.Model.Flux.Model
 

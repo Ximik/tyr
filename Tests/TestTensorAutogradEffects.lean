@@ -1,7 +1,7 @@
 import LeanTest
-import Tyr.Module.Derive
-import Tyr.TensorStruct
-import Tyr.Inference.OwnedKV
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Core.Typed.Inplace
 
 namespace Tests.TensorAutogradEffects
 

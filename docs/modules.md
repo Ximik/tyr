@@ -2,22 +2,22 @@
 
 ## Purpose and when to use
 
-`Tyr/Module/` is the layer library: shape-indexed structures (`Linear`, `LayerNorm`, `RMSNorm`) whose parameters live in the `TensorStruct` tree, plus the `deriving TensorStruct` / `deriving Model` handlers that make your own model structures traversable. `Tyr/Modular/` is an optimization-theory layer on top: it implements the modular-norm framework from "Scalable Optimization in the Modular Norm" (NeurIPS 2024, arXiv:2405.14813), manifold-constrained linear layers (Stiefel/Grassmann/Orthogonal/Hyperbolic), low-rank metric factors with Woodbury solves, and a sensitivity-to-learning-rate budget compiler. Reach for `Tyr/Module` whenever you define a model; reach for `Tyr/Modular` when you want width/depth-robust learning rates or manifold-native updates.
+`Tyr/Lib/Module/` is the layer library: shape-indexed structures (`Linear`, `LayerNorm`, `RMSNorm`) whose parameters live in the `TensorStruct` tree, plus the `deriving TensorStruct` / `deriving Model` handlers that make your own model structures traversable. `Tyr/Lib/Optim/Modular/` is an optimization-theory layer on top: it implements the modular-norm framework from "Scalable Optimization in the Modular Norm" (NeurIPS 2024, arXiv:2405.14813), manifold-constrained linear layers (Stiefel/Grassmann/Orthogonal/Hyperbolic), low-rank metric factors with Woodbury solves, and a sensitivity-to-learning-rate budget compiler. Reach for `Tyr/Lib/Module` whenever you define a model; reach for `Tyr/Lib/Optim/Modular` when you want width/depth-robust learning rates or manifold-native updates.
 
 ## Architecture and main abstractions
 
-Everything in `Tyr/Module/` lives in the `torch` namespace; everything in `Tyr/Modular/` lives in `Tyr.Modular`.
+Everything in `Tyr/Lib/Module/` lives in the `torch` namespace; everything in `Tyr/Lib/Optim/Modular/` lives in `Tyr.Lib.Optim.Modular`.
 
-### Tyr/Module: layers and the Module class
+### Tyr/Lib/Module: layers and the Module class
 
-`Tyr/Module/Core.lean` defines an Equinox-style typeclass over the `TensorStruct` parameter-tree substrate:
+`Tyr/Lib/Module/Core.lean` defines an Equinox-style typeclass over the `TensorStruct` parameter-tree substrate:
 
 ```lean
 class Module (M : Type) (In : Type) (Out : Type) extends TensorStruct M where
   forward : M → In → Out
 ```
 
-The concrete layers are plain structures indexed by `UInt64` dimensions, deriving `TensorStruct` and `ToModuleDisplay` (widget rendering, see `Tyr/Widget.lean`):
+The concrete layers are plain structures indexed by `UInt64` dimensions, deriving `TensorStruct`; their `ToModuleDisplay` instances (widget rendering) are in `Tyr/Lib/Widget/Module.lean`:
 
 ```lean
 structure Linear (in_dim out_dim : UInt64) (dtype : DType := .Float32)
@@ -44,14 +44,14 @@ structure RMSNorm (dim : UInt64) (dtype : DType := .Float32)
 
 ### Deriving parameter-tree instances
 
-`Tyr/Module/Derive.lean` registers two deriving handlers (`Derive.lean`):
+`Tyr/Core/TensorStruct/Derive.lean` registers two deriving handlers (`Derive.lean`):
 
-- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector α n`, `Static α`, `Frozen σ` and pairs `α × β`. Parametric structures (shape or type parameters) are supported.
-- `deriving Model` — one-shot derivation of `TensorStruct` + `ToTensorStructSchema` + `TensorStructFlatten` (`Derive.lean`; `Model` is a marker class at `Tyr/TensorStruct.lean`, the two schema handlers come from `Tyr/TensorStruct/Schema.lean`). Use it when the structure should also serialize/flatten, e.g. for checkpointing.
+- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/Core/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector α n`, `Static α`, `Frozen σ` and pairs `α × β`. Parametric structures (shape or type parameters) are supported.
+- `deriving Model` — one-shot derivation of `TensorStruct` + `ToTensorStructSchema` + `TensorStructFlatten` (`Derive.lean`; `Model` is a marker class at `Tyr/Core/TensorStruct.lean`, the two schema handlers come from `Tyr/Core/TensorStruct/Schema.lean`). Use it when the structure should also serialize/flatten, e.g. for checkpointing.
 
-### Tyr/Modular: normed modules and budgets
+### Tyr/Lib/Optim/Modular: normed modules and budgets
 
-The core abstraction is `NormedModule` (`Tyr/Modular/Norm.lean`):
+The core abstraction is `NormedModule` (`Tyr/Lib/Optim/Modular/Norm.lean`):
 
 ```lean
 class NormedModule (M : Type) extends TensorStruct M where
@@ -65,15 +65,15 @@ class NormedModule (M : Type) extends TensorStruct M where
 
 Derived helpers in the same namespace: `isWellNormed`, `lipschitzConstant` (`ν · μ`), `scale`, and `normalizedUpdate lr grad` — the core modular update step `-lr · normalizeDual grad` (`Norm.lean`).
 
-Atomic instances (`Tyr/Modular/Atomic.lean`): `Linear` uses the spectral norm on the weight (dual: nuclear norm), `LayerNorm` uses joint ℓ₂ of `(γ, β)`, and a locally-defined `Embedding vocabSize dim` (`Atomic.lean`) uses the max row norm. Trivial instances exist for `Float` and `Static α` (`Norm.lean`).
+Atomic instances (`Tyr/Lib/Optim/Modular/Atomic.lean`): `Linear` uses the spectral norm on the weight (dual: nuclear norm), `LayerNorm` uses joint ℓ₂ of `(γ, β)`, and a locally-defined `Embedding vocabSize dim` (`Atomic.lean`) uses the max row norm. Trivial instances exist for `Float` and `Static α` (`Norm.lean`).
 
-Composition is recursive (`Tyr/Modular/Compose.lean`):
+Composition is recursive (`Tyr/Lib/Optim/Modular/Compose.lean`):
 
 - `structure Sequential (M₁ M₂ : Type) where first second` (`Compose.lean`) marks M₂-after-M₁ composition. Its norm is `max(ν₂·‖w₁‖, ‖w₂‖)`, sensitivities multiply (`ν = ν₁·ν₂`), and `μ = max(μ₁·ν₂, μ₂)` — the paper's formulas (`Compose.lean`).
 - The plain product `M₁ × M₂` is parallel composition with ℓ₂ norm combination and `max` sensitivity (`Compose.lean`).
 - `Array M` and `Vector M n` aggregate norms by ℓ₂ but multiply `nu` across elements (`Compose.lean`) — sequential sensitivity with parallel norm, which the file header itself flags as a mixture.
 
-The budget compiler (`Tyr/Modular/Budget.lean`) turns sensitivities into per-layer learning-rate multipliers:
+The budget compiler (`Tyr/Lib/Optim/Modular/Budget.lean`) turns sensitivities into per-layer learning-rate multipliers:
 
 ```lean
 structure BudgetConfig where
@@ -95,7 +95,7 @@ def budgetedSequentialLRs [NormedModule M]
 
 ### Manifold-constrained layers
 
-`Tyr/Modular/Manifold.lean` lets a linear layer's weight *live on* a matrix manifold instead of being projected after the fact. The carrier interfaces are:
+`Tyr/Lib/Optim/Modular/Manifold.lean` lets a linear layer's weight *live on* a matrix manifold instead of being projected after the fact. The carrier interfaces are:
 
 ```lean
 class MatrixManifoldCarrier (M : UInt64 → UInt64 → Type)
@@ -138,13 +138,13 @@ structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V dev
 
 ### Metric factors and the Riemannian recursion
 
-`Tyr/Modular/MetricFactor.lean` provides the linear algebra for low-rank pullback metrics:
+`Tyr/Lib/Optim/Modular/MetricFactor.lean` provides the linear algebra for low-rank pullback metrics:
 
 - `MetricFactor rank dim` (default Float32 and CPU placement) wraps `matrix : Tensor { shape := #[rank, dim], dtype := .Float32, device := .CPU }`, a factor `K` of the PSD metric `KᵀK`.
 - `DiagonalMass dim` with the same defaults wraps `diag : Tensor { shape := #[dim], dtype := .Float32, device := .CPU }` (`ones`, `ofScalar`, `toMatrix`, `invDiag`, `apply`, `applyInv`).
 - Operations: `pullback` along a Jacobian, `gram` (`KᵀK`), `denseMetric D K = D + KᵀK`, `apply` / `applyTranspose` / `applyRegularized`, and `solveWoodbury D K g` solving `(D + KᵀK)x = g` via the Woodbury identity with inner matrix `I + K D⁻¹ Kᵀ` (`MetricFactor.lean`).
 
-`Tyr/Modular/RiemannianModule.lean` turns a leaf module into a tape-based, locally-linearizable unit for recursive metric-factor propagation:
+`Tyr/Lib/Optim/Modular/RiemannianModule.lean` turns a leaf module into a tape-based, locally-linearizable unit for recursive metric-factor propagation:
 
 ```lean
 class RiemannianModule (M : Type) (inDim outDim : UInt64)
@@ -157,7 +157,7 @@ class RiemannianModule (M : Type) (inDim outDim : UInt64)
   applyAmbientUpdate : M → Tensor { shape := #[paramDim], dtype := .Float32, device := device } → Float → IO M
 ```
 
-`LocalLinearization` (`RiemannianModule.lean`) bundles operator-form Jacobians (`applyA`, `applyAT`, `applyB`, `applyBT`) with `LocalLinearization.materializeA` / `materializeB` helpers for tests and factor pullbacks via row-wise adjoints. Instances exist for `torch.Linear` (parameter dim `out·in + out`, tape = input vector) and `ManifoldLinear` (ambient update re-projects onto the manifold). `backwardLeafStep` performs one layer's metric solve + update + factor/cotangent propagation and returns `LayerStepDiagnostics` (gradient/update/residual norms, inner condition estimate); `sequentialForwardWithTape` / `sequentialBackwardMetricStep` handle two-layer `Sequential` compositions. These are the building blocks consumed by `Tyr.Optim.RiemannianSGD`.
+`LocalLinearization` (`RiemannianModule.lean`) bundles operator-form Jacobians (`applyA`, `applyAT`, `applyB`, `applyBT`) with `LocalLinearization.materializeA` / `materializeB` helpers for tests and factor pullbacks via row-wise adjoints. Instances exist for `torch.Linear` (parameter dim `out·in + out`, tape = input vector) and `ManifoldLinear` (ambient update re-projects onto the manifold). `backwardLeafStep` performs one layer's metric solve + update + factor/cotangent propagation and returns `LayerStepDiagnostics` (gradient/update/residual norms, inner condition estimate); `sequentialForwardWithTape` / `sequentialBackwardMetricStep` handle two-layer `Sequential` compositions. These are the building blocks consumed by `Tyr.Lib.Optim.RiemannianSGD`.
 
 ## Key APIs
 
@@ -171,13 +171,13 @@ Built-in layers (all in namespace `torch`):
 
 Note: `RMSNorm.forward5d` (`RMSNorm.lean`) is misnamed — it is a 4D forward on the attention layout `[batch, n_head, seq, head_dim]`; `forward4d` uses `[batch, seq, n_head, head_dim]`. Neither 4D variant has a `Module` instance.
 
-`NormedModule` instances and their norms (`Tyr/Modular/`):
+`NormedModule` instances and their norms (`Tyr/Lib/Optim/Modular/`):
 
 | Instance | `norm` | `dualNorm` | `nu` |
 |---|---|---|---|
 | `Linear i o` | spectral ‖W‖σ (max with ‖b‖₂) | nuclear ‖W‖* + ‖b‖₂ | ‖W‖σ |
 | `LayerNorm d` | ℓ₂ of (γ, β) | ℓ₂ (self-dual) | 1 |
-| `Embedding v d` (in `Tyr.Modular`) | max row norm | Σ row norms | max row norm |
+| `Embedding v d` (in `Tyr.Lib.Optim.Modular`) | max row norm | Σ row norms | max row norm |
 | `Sequential M₁ M₂` | `max(ν₂·n₁, n₂)` | `ν₂·d₁ + d₂` | `ν₁ · ν₂` |
 | `M₁ × M₂` | `√(n₁² + n₂²)` | `√(d₁² + d₂²)` | `max(ν₁, ν₂)` |
 | `Array M`, `Vector M n` | ℓ₂ over elements | ℓ₂ over elements | `Π νᵢ` |
@@ -187,13 +187,13 @@ Caveat: `normalizeDual` for `Linear` and `ManifoldLinear` uses Frobenius normali
 Budget and manifold entry points:
 
 ```lean
--- Tyr/Modular/Budget.lean
+-- Tyr/Lib/Optim/Modular/Budget.lean
 def multiplierFromSensitivity (cfg : BudgetConfig) (sensitivity : Float) : Float
 def applyBudget (baseLR multiplier : Float) : Float
 def GroupBudget.ofSensitivities (cfg : BudgetConfig)
     (matrix embedding lmHead scalar : Float) : GroupBudget
 
--- Tyr/Modular/Manifold.lean
+-- Tyr/Lib/Optim/Modular/Manifold.lean
 variable {device : Device}
 
 def ManifoldLinear.init [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
@@ -218,7 +218,7 @@ def applyMatrixBudgetFromModules [NormedModule M]
 Example:
 
 ```lean
-import Tyr.Module
+import Tyr.Lib.Module
 
 open torch
 
@@ -249,9 +249,9 @@ With `deriving TensorStruct`, generic tree operations (`TensorStruct.map` for de
 Reconstructed example (from `Tests/TestModularNorm.lean` and `Tests/TestModularManifold.lean`):
 
 ```lean
-import Tyr.Modular
+import Tyr.Lib.Optim.Modular
 
-open torch Tyr.Modular
+open torch Tyr.Lib.Optim.Modular
 
 -- Sequential composition: norms and sensitivities combine by the paper's formulas
 let l1 ← Linear.init 10 20
@@ -274,17 +274,17 @@ let cfg' := applyMatrixBudgetFromModules baseCfg {} #[net]
 Reconstructed example (from `Tests/TestModularManifold.lean`):
 
 ```lean
-import Tyr.Modular
-import Tyr.Manifolds
+import Tyr.Lib.Optim.Modular
+import Tyr.Lib.Optim.Manifolds
 
-open torch Tyr.Modular
+open torch Tyr.Lib.Optim.Modular
 
 def manifoldStepExample : IO Unit := do
-  let layer ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 8 16 true
+  let layer ← ManifoldLinear.init (M := Tyr.Lib.Optim.Manifolds.Stiefel) 8 16 true
   let gW ← Tensor.randn #[16, 8] false
   let gB ← Tensor.randn #[16] false
   let layer' := ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
-  let w := MatrixManifoldCarrier.toMatrix (M := Tyr.Manifolds.Stiefel) layer'.weight
+  let w := MatrixManifoldCarrier.toMatrix (M := Tyr.Lib.Optim.Manifolds.Stiefel) layer'.weight
   let wtW := Tensor.mm (Tensor.transpose2d w) w
   IO.println s!"Gram shape: {wtW.runtimeShape}" -- #[8, 8], approximately identity
 ```
@@ -292,8 +292,8 @@ def manifoldStepExample : IO Unit := do
 ## Caveats and rough edges
 
 - The `Module` class is thinly adopted: instances exist only for the three built-in layers. Most model code calls `Linear.forward2d`-style functions directly, as in the examples above.
-- The `Tyr/Module.lean` umbrella re-exports `Core`, `Derive`, `Linear`, `LayerNorm` and `RMSNorm`.
-- There is no shared `Embedding` in `Tyr/Module`; the embedding table used for modular norms is `Tyr.Modular.Embedding` and is currently only exercised by tests. Its indexed weights preserve dtype and concrete device, and `Embedding.forward` requires Int64 token tensors. The underlying typed `Tensor.embedding` and `Tensor.embedding1d` operations are also used by GPT. There is no `NormedModule` instance for `RMSNorm`.
+- The `Tyr/Lib/Module.lean` umbrella re-exports `Core`, `Derive`, `Linear`, `LayerNorm` and `RMSNorm`.
+- There is no shared `Embedding` in `Tyr/Lib/Module`; the embedding table used for modular norms is `Tyr.Lib.Optim.Modular.Embedding` and is currently only exercised by tests. Its indexed weights preserve dtype and concrete device, and `Embedding.forward` requires Int64 token tensors. The underlying typed `Tensor.embedding` and `Tensor.embedding1d` operations are also used by GPT. There is no `NormedModule` instance for `RMSNorm`.
 
 ## Related guides
 

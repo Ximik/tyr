@@ -1,7 +1,7 @@
 import Tests.Assertions
-import Tyr.FFI.ConstantSupport
-import Tyr.Typed
-import Tyr.Torch
+import Tyr.Core.FFI.ConstantSupport
+import Tyr.Core.Typed
+import Tyr.Core.Torch
 
 open torch
 

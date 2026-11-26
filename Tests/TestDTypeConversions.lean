@@ -1,8 +1,8 @@
 import LeanTest
-import Tyr.TensorStruct.Cast
-import Tyr.Typed.Neural
-import Tyr.SafeTensors.Schema
-import Tyr.SafeTensors.Source
+import Tyr.Core.TensorStruct.Cast
+import Tyr.Core.Typed.Neural
+import Tyr.IO.SafeTensors.Schema
+import Tyr.IO.SafeTensors.Source
 
 namespace Tests.DTypeConversions
 

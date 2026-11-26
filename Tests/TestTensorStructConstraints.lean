@@ -1,6 +1,6 @@
 import LeanTest
-import Tyr.Module.Derive
-import Tyr.Optim
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Lib.Optim
 
 namespace Tests.TensorStructConstraints
 

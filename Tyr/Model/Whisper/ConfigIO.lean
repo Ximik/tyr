@@ -4,7 +4,8 @@
   HuggingFace `config.json` loader for Whisper.
 -/
 import Tyr.Model.Whisper.Config
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
+import Tyr.Lib.Tokenizer.ConfigJson
 
 namespace torch.whisper
 

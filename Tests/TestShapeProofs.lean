@@ -5,8 +5,8 @@
   out-of-range axes and incompatible shapes must be rejected. Everything here is
   checked when the module is compiled.
 -/
-import Tyr.Typed
-import Tyr.Typed.Neural
+import Tyr.Core.Typed
+import Tyr.Core.Typed.Neural
 
 namespace Tests.ShapeProofs
 

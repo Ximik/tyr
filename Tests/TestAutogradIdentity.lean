@@ -1,7 +1,7 @@
 import LeanTest
-import Tyr.Model.Utils
-import Tyr.TensorStruct
-import Tyr.Optim
+import Tyr.Lib.Module.Init
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Optim
 
 namespace Tests.AutogradIdentity
 

@@ -154,8 +154,8 @@ lean_lib Tyr where
     `libTyrC`'s FFI header from them. The declared functions are in `libTyrC`,
     so linking needs it. -/
 lean_lib TyrFFI where
-  roots := #[`Tyr.FFI]
-  globs := #[.submodules `Tyr.FFI]
+  roots := #[`Tyr.Core.FFI]
+  globs := #[.submodules `Tyr.Core.FFI]
   precompileModules := false
   moreLinkLibs := #[`@/libtyr]
 
@@ -188,6 +188,10 @@ lean_exe RunDistributedValues where
   root := `Tests.RunDistributedValues
   supportInterpreter := true
 
+/-- Fail on an import from a later layer under `Tyr/` (`docs/architecture.md`). -/
+lean_exe CheckLayers where
+  root := `Tools.CheckLayers
+
 /-- Print the Lean record for the tensors of a SafeTensors source. -/
 lean_exe GenerateSafeTensorsRecord where
   root := `Tools.GenerateSafeTensorsRecord
@@ -195,7 +199,7 @@ lean_exe GenerateSafeTensorsRecord where
 /-- Write the C prototypes of `TyrFFI`'s extern declarations. Imports only
     `Lean`, so it does not link `libTyrC`. -/
 lean_exe GenerateFfiHeader where
-  root := `Tyr.GenerateFfiHeader
+  root := `Tools.GenerateFfiHeader
 
 /-- Manual FFI failure-mode probe (intentionally crashes; not in the suite).
     Run it to check that an uncaught libtorch exception terminates with an

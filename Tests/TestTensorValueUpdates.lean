@@ -1,6 +1,6 @@
 import LeanTest
-import Tyr.Typed.Neural
-import Tyr.Inference.OwnedKV
+import Tyr.Core.Typed.Neural
+import Tyr.Core.Typed.Inplace
 
 namespace Tests.TensorValueUpdates
 

@@ -6,9 +6,9 @@
   Woodbury solve over the full parameter tree rather than flattening parameters
   by hand.
 -/
-import Tyr.Checkpoint
+import Tyr.IO.Checkpoint
 import Examples.GPT.Train
-import Tyr.Optim.RiemannianTreeSGD
+import Tyr.Lib.Optim.RiemannianTreeSGD
 
 namespace Examples.GPT.RiemannianNanoGPT
 

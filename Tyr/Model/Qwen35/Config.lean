@@ -4,9 +4,9 @@
   Configuration for the standalone Qwen3.5 text causal-LM implementation.
   Includes dense and MoE variants plus hybrid layer scheduling.
 -/
-import Tyr.FFI.Basic
-import Tyr.TensorStruct
-import Tyr.Tokenizer.Types
+import Tyr.Core.FFI.Basic
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Tokenizer.Types
 
 namespace torch.qwen35
 
@@ -79,7 +79,7 @@ structure Qwen35Config where
   num_experts : Nat := 0
 
   tie_word_embeddings : Bool := false
-  eos_token_id : Option tokenizer.TokenId := none
+  eos_token_id : Option UInt32 := none
   /-- Linear-attention value heads are a whole multiple of key heads; checked when the config is built. -/
   linearKeyHeadsDivide : linear_num_key_heads ∣ linear_num_value_heads := by decide
   /-- Query heads are a whole multiple of K/V heads; checked when the config is built. -/

@@ -13,7 +13,7 @@ import Tyr.Model.Qwen3TTS.Model
 import Tyr.Model.Qwen3TTS.SpeechTokenizerEncoder
 import Tyr.Model.Qwen3TTS.SpeechTokenizer25HzEncoder
 import Tyr.Model.Qwen3ASR.Frontend
-import Tyr.Log
+import Tyr.IO.Log
 
 namespace Examples.Qwen3TTS
 

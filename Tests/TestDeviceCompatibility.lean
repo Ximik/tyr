@@ -1,5 +1,5 @@
 import LeanTest
-import Tyr.Typed.Ops
+import Tyr.Core.Typed.Ops
 
 open torch
 

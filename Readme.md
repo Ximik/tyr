@@ -9,7 +9,7 @@ Native adapters use `RawTensor` handles internally; checked constructors validat
 external metadata before exposing indexed tensors.
 
 ```lean
-import Tyr.Typed
+import Tyr.Core.Typed
 open torch
 
 def forward : Tensor { shape := #[32, 512], dtype := .Float32, device := .CPU } :=
@@ -277,7 +277,7 @@ Monitor tensor leaks via `get_live_tensors` which tracks outstanding C++ tensors
 
 ### Adding New Tensor Operations
 
-1. Add Lean declaration in a module under `Tyr/FFI/` with `@[extern "lean_torch_xxx"]`
+1. Add Lean declaration in a module under `Tyr/Core/FFI/` with `@[extern "lean_torch_xxx"]`
 2. Implement in `cc/src/tyr.cpp` following reference counting conventions
 3. Rebuild: `lake build`
 

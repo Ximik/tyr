@@ -11,7 +11,7 @@
 -/
 import Examples.Parity.Common
 import Tyr.Model.Qwen3TTS
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 
 namespace Examples.Parity.Qwen3TTSTalker
 

@@ -1,6 +1,6 @@
 import LeanTest
-import Tyr.Model.Generation
-import Tyr.Typed.Neural
+import Tyr.Lib.Inference.Generation
+import Tyr.Core.Typed.Neural
 
 namespace Tests.SelectionContracts
 

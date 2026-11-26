@@ -41,9 +41,9 @@
   ascending-expert dispatch order and skips NVFP4 dequantization entirely.
 -/
 import Tyr.Model.Laguna.TypedOps
-import Tyr.TensorStruct
-import Tyr.TensorStruct.DeriveCast
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.DeriveCast
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.NvFp4
 import Tyr.Model.Laguna.Fused

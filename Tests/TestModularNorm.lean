@@ -4,10 +4,10 @@
   Tests for the modular norm implementation.
 -/
 import LeanTest
-import Tyr.Modular
+import Tyr.Lib.Optim.Modular
 
 open LeanTest
-open Tyr.Modular
+open Tyr.Lib.Optim.Modular
 
 /-! ## Basic Norm Property Tests -/
 

@@ -1,7 +1,7 @@
 import LeanTest
 import Tests.Assertions
-import Tyr.Module.Derive
-import Tyr.Distributed
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Lib.Distributed
 
 namespace Tests.DistributedValues
 

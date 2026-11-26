@@ -1,6 +1,6 @@
 import LeanTest
-import Tyr.Module.Derive
-import Tyr.TensorStruct.Cast
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Core.TensorStruct.Cast
 
 namespace Tests.TensorStructDeriveCast
 

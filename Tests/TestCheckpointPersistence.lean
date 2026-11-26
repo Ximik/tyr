@@ -1,8 +1,8 @@
 import Tests.Assertions
-import Tyr.Checkpoint
-import Tyr.Tokenizer.TokenBytes
-import Tyr.Optim
-import Tyr.Module.Derive
+import Tyr.IO.Checkpoint
+import Tyr.Lib.Tokenizer.TokenBytes
+import Tyr.Lib.Optim
+import Tyr.Core.TensorStruct.Derive
 import LeanTest
 
 namespace Tests.CheckpointPersistence

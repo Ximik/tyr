@@ -5,6 +5,7 @@
 -/
 import Tyr.Model.Qwen3ASR.Config
 import Tyr.Model.Qwen.ConfigIO
+import Tyr.Lib.Tokenizer.ConfigJson
 
 namespace torch.qwen3asr
 

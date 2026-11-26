@@ -4,7 +4,7 @@
   HuggingFace `config.json` fields shared by Qwen3 and Qwen2.5 text decoders.
 -/
 import Tyr.Model.Qwen.Config
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
 
 namespace torch.qwen
 

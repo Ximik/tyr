@@ -1,8 +1,8 @@
 import Tests.Assertions
 import LeanTest
-import Tyr.Typed.Neural
-import Tyr.FFI.Qwen35
-import Tyr.FFI.Gemma4
+import Tyr.Core.Typed.Neural
+import Tyr.Core.FFI.Qwen35
+import Tyr.Core.FFI.Gemma4
 
 open torch
 

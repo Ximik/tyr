@@ -1,4 +1,4 @@
-import Tyr.FFI.RawTensor
+import Tyr.Core.FFI.RawTensor
 
 -- Callbacks for `cc/tools/test_functional_grad_callback.cpp`, compiled by Lean so
 -- they carry its real ownership code.

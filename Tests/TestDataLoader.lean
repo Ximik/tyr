@@ -1,5 +1,5 @@
 /- Generated-fixture regression tests for token coverage, document order and resume. -/
-import Tyr.DataLoader
+import Tyr.Lib.Data.Loader
 import Examples.GPT.GPTDataLoader
 import LeanTest
 

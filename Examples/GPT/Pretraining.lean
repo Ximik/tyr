@@ -5,8 +5,8 @@
   AdamW with linear warmup and cosine decay, and the running loss reported at
   each evaluation interval when validation data is given.
 -/
-import Tyr.Torch
-import Tyr.Optim.Scheduler
+import Tyr.Core.Torch
+import Tyr.Lib.Optim.Scheduler
 import Examples.GPT.GPT
 import Examples.GPT.Train
 

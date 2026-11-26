@@ -13,7 +13,7 @@
 | Qwen base blocks + Flux text encoder | `torch.qwen` | `Tyr.Model.Qwen` | `qwen.QwenConfig` | `qwen.Qwen3Model (device := device) cfg` (no LM head) |
 | Qwen3 | `torch.qwen3` | `Tyr.Model.Qwen3` | `qwen3.Config` | `qwen3.Qwen3ForCausalLM cfg` |
 | Qwen3.5 (dense + MoE, hybrid attention) | `torch.qwen35` | `Tyr.Model.Qwen35` | `qwen35.Config` | `qwen35.Qwen35ForCausalLM cfg` |
-| Qwen3.6 | `torch.qwen36` | `Tyr.Model.Qwen36` | `qwen36.Config` | `qwen36.Qwen36ForCausalLM` |
+| Qwen3.6 | `torch.qwen36` | `Tyr.Model.Qwen35.Qwen36` | `qwen36.Config` | `qwen36.Qwen36ForCausalLM` |
 | Qwen2.5-Omni (thinker text) | `torch.qwen25omni` | `Tyr.Model.Qwen25Omni` | `qwen25omni.Config` | `qwen25omni.Qwen25OmniForCausalLM` |
 | Gemma 4 | `torch.gemma4` | `Tyr.Model.Gemma4` | `gemma4.Config` | `gemma4.Gemma4ForCausalLM cfg` |
 
@@ -21,7 +21,7 @@ The reuse structure matters more than the table suggests:
 
 - `torch.qwen` (`Tyr/Model/Qwen/`) is the base layer: config, GQA attention with KV cache, SwiGLU MLP, pre-norm layer, and the `Qwen3Model` backbone. Its header still says "for Flux text encoding"; it is also the substrate for Qwen3 and Qwen2.5-Omni.
 - `torch.qwen3` wraps `qwen.Qwen3Model` with an LM head and KV-cached greedy generation. `torch.qwen25omni` is just 3B/7B config defaults plus HF name-prefix-aware (`thinker.`/`language_model.`) weight loading over `qwen3.Qwen3ForCausalLM` (`abbrev` at `Tyr/Model/Qwen25Omni/Weights.lean`).
-- `torch.qwen35` is an independent, much larger implementation (own config, norms, MoE, hybrid linear/full attention) but reuses `qwen.QwenAttention.KVCache` (aliased at `Tyr/Model/Qwen35/Model.lean`). `torch.qwen36` has no `Model.lean` at all — it is `abbrev`s/`export`s over `qwen35` with Qwen3.6-specific defaults (`Tyr/Model/Qwen36/Pretrained.lean`).
+- `torch.qwen35` is an independent, much larger implementation (own config, norms, MoE, hybrid linear/full attention) but reuses `qwen.QwenAttention.KVCache` (aliased at `Tyr/Model/Qwen35/Model.lean`). `torch.qwen36` has no `Model.lean` at all — it is `abbrev`s/`export`s over `qwen35` with Qwen3.6-specific defaults (`Tyr/Model/Qwen35/Qwen36/Pretrained.lean`).
 - `torch.gemma4` mirrors the qwen35 file layout (Config/Model/Weights/ConfigIO/Pretrained/VL*/Multimodal/Media).
 
 ### The per-family idiom
@@ -32,7 +32,7 @@ Each pretrained-capable family splits into the same files:
 - `ConfigIO.lean` — hand-rolled JSON parsing on `Lean.Data.Json`: `Config.loadFromFile`, `Config.loadFromPretrainedDir`. Qwen3 additionally validates invariants (head divisibility, nonzero dims) and throws `IO.userError` on violation (`Tyr/Model/Qwen3/ConfigIO.lean`).
 - `Model.lean` — the model structure, forwards, and generation loops.
 - `Weights.lean` — SafeTensors loading: `load path`, where `path` is a model directory (sharded via its index, or its `model.safetensors`) or a single `.safetensors` file. Loaded tensors are frozen via `reqGradFalse`; FP8 checkpoints are dequantized on load.
-- `Pretrained.lean` — `loadFromPretrained` built on `Tyr.Hub.loadModelFromPretrained`, plus the explicit list of covered HF repo ids.
+- `Pretrained.lean` — `loadFromPretrained` built on `Tyr.IO.Hub.loadModelFromPretrained`, plus the explicit list of covered HF repo ids.
 
 The model itself is a structure over a config value (Qwen3 shown, `Tyr/Model/Qwen3/Model.lean`):
 
@@ -50,7 +50,7 @@ The model shares one concrete `device` parameter across its fields and inputs. B
 
 ### Shared generation infrastructure
 
-`Tyr/Model/Generation.lean` (namespace `torch.Model`) is the common sampling surface:
+`Tyr/Lib/Inference/Generation.lean` (namespace `torch.Model`) is the common sampling surface:
 
 ```lean
 variable {device : Device}
@@ -160,11 +160,11 @@ Three `@[extern]` opaque kernels sit inside this component (declared `private`, 
 
 ### Model utils (`torch.Model`)
 
-`Tyr/Model/Utils.lean` holds cross-family helpers: `initWeight` (Kaiming-like `randn * sqrt(2 / fanIn)`, trainable), `initBias`, `reqGradFalse` (freeze loaded tensors), and FP8 blockwise dequantization `dequantizeFP8` / `dequantizeFP8Experts` (128×128 blocks, HF `weight_scale_inv` convention).
+`Tyr/Lib/Module/Init.lean` holds `initWeight` (Kaiming-like `randn * sqrt(2 / fanIn)`, trainable) and `initBias`; `Tyr/Lib/Quantization/FP8.lean` holds FP8 blockwise dequantization `dequantizeFP8` / `dequantizeFP8Experts` (128×128 blocks, HF `weight_scale_inv` convention).
 
 ## Key APIs
 
-### Generation (`Tyr/Model/Generation.lean`, `torch.Model`)
+### Generation (`Tyr/Lib/Inference/Generation.lean`, `torch.Model`)
 
 | Symbol | Signature / meaning |
 |---|---|
@@ -174,13 +174,12 @@ Three `@[extern]` opaque kernels sit inside this component (declared `private`, 
 | `tokenInSet` | `Tensor { shape := #[n], dtype := .Int64, device := device } → Array UInt64 → Tensor { shape := #[n], dtype := .Bool, device := device }` boolean membership mask |
 | `applyFinishedEos` | `Tensor { shape := #[n], dtype := .Int64, device := device } → Tensor { shape := #[n], dtype := .Bool, device := device } → UInt64 → Tensor { shape := #[n], dtype := .Int64, device := device }` overwrite finished rows with EOS |
 
-### Model utils (`Tyr/Model/Utils.lean`, `torch.Model`)
+### Model utils (`Tyr/Lib/Module/Init.lean`, `Tyr/Lib/Quantization/FP8.lean`, `torch.Model`)
 
 | Symbol | Signature |
 |---|---|
 | `initWeight` | `(shape : Shape) → (fanIn : UInt64) → (dtype : DType := .Float32) → (device : Device := .CPU) → IO (Tensor { shape := shape, dtype := dtype, device := device })` |
 | `initBias` | `(shape : Shape) → (dtype : DType := .Float32) → (device : Device := .CPU) → IO (Tensor { shape := shape, dtype := dtype, device := device })` |
-| `reqGradFalse` | `Tensor σ → Tensor σ` |
 | `dequantizeFP8` | `Tensor ⟨#[out, in], weightDType, device⟩ → Tensor ⟨#[out/128, in/128], scaleDType, device⟩ → Tensor ⟨#[out, in], .Float32, device⟩` |
 | `dequantizeFP8Experts` | `Tensor ⟨#[e, out, in], weightDType, device⟩ → Tensor ⟨#[e, out/128, in/128], scaleDType, device⟩ → Tensor ⟨#[e, out, in], .Float32, device⟩` |
 
@@ -225,7 +224,7 @@ def Qwen35ForCausalLM.loadFromPretrained
     (device : Device := Device.CPU) : IO (Sigma (fun cfg => Qwen35ForCausalLM (device := device) cfg))
 ```
 
-`loadFromPretrained` accepts a local directory or an HF repo id, downloads via `Tyr.Hub`, parses `config.json` over the defaults, loads the weights from the model directory, and returns the config alongside the model as a `Sigma` (the config is only known at runtime). The covered repo ids are listed in `qwen35.hub.qwen35CollectionRepoIds` (`Qwen35/Pretrained.lean`). Qwen3.6 exposes the identical surface as `qwen36.Qwen36ForCausalLM` with `Config.qwen36_35B_A3B` defaults. The multimodal twins `Qwen35ForConditionalGeneration` / `Qwen36ForConditionalGeneration` have the same shape plus `getImageFeatures` / `getVideoFeatures`.
+`loadFromPretrained` accepts a local directory or an HF repo id, downloads via `Tyr.IO.Hub`, parses `config.json` over the defaults, loads the weights from the model directory, and returns the config alongside the model as a `Sigma` (the config is only known at runtime). The covered repo ids are listed in `qwen35.hub.qwen35CollectionRepoIds` (`Qwen35/Pretrained.lean`). Qwen3.6 exposes the identical surface as `qwen36.Qwen36ForCausalLM` with `Config.qwen36_35B_A3B` defaults. The multimodal twins `Qwen35ForConditionalGeneration` / `Qwen36ForConditionalGeneration` have the same shape plus `getImageFeatures` / `getVideoFeatures`.
 
 ### Gemma 4 (`torch.gemma4`)
 
@@ -238,9 +237,9 @@ Same pattern: `Gemma4ForCausalLM.generate` / `generateStream` / `generateFromEmb
 Reconstructed example (from `Examples/Qwen35/RunHF.lean`, built as `lake exe Qwen35RunHF`):
 
 ```lean
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.Qwen35
-import Tyr.Tokenizer.Qwen35
+import Tyr.Model.Qwen35.Tokenizer
 import Examples.ModelRunner
 
 open torch torch.Model torch.qwen35
@@ -316,7 +315,7 @@ let txtEmb := qwen.encodeMasked qwenCfg maxSeqLen tokens attnMask
 - [Tensors](../core/tensors.md) — `Tensor σ`, shapes, and the ops used in forwards
 - [TensorStruct](../core/tensorstruct.md) — the parameter-tree class behind `deriving TensorStruct`
 - [Modules](../modules.md) — `Linear`/`RMSNorm` and the `Module` classes these models build on
-- [Serialization](../serialization.md) — SafeTensors loading and `Tyr.Hub` downloads
+- [Serialization](../serialization.md) — SafeTensors loading and `Tyr.IO.Hub` downloads
 - [Data and tokenizers](../data.md) — the `tokenizer.qwen35` / `tokenizer.gemma4` codecs
 - [Generative models](generative.md) — Flux, which consumes `QwenFluxEmbedder`
 - [Audio and speech models](audio-speech.md) — Qwen3-ASR/TTS, built on the same Qwen base

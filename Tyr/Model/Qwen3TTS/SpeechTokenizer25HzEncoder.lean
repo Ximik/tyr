@@ -13,14 +13,14 @@
     `Qwen3TTSTokenizerV1Encoder`.
   - Decoder-side 25Hz architecture (DiT + BigVGAN) is handled separately.
 -/
-import Tyr.Typed.Neural
-import Tyr.SafeTensors.Source
+import Tyr.Core.Typed.Neural
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.DTypes
-import Tyr.TensorStruct
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Qwen3ASR.Frontend
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
 
 namespace torch.qwen3tts
 

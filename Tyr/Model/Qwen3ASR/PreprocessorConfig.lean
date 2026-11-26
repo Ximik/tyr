@@ -4,8 +4,8 @@
   JSON loader for HuggingFace `preprocessor_config.json` used by
   `WhisperFeatureExtractor` in Qwen3-ASR.
 -/
-import Tyr.FFI.Basic
-import Tyr.Model.ConfigJson
+import Tyr.Core.FFI.Basic
+import Tyr.IO.ConfigJson
 
 namespace torch.qwen3asr
 

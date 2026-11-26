@@ -4,7 +4,8 @@
   HuggingFace `config.json` loader for poolside Laguna causal-LM.
 -/
 import Tyr.Model.Laguna.Config
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
+import Tyr.Lib.Tokenizer.ConfigJson
 
 namespace torch.laguna
 

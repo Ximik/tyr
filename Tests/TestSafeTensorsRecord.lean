@@ -12,7 +12,7 @@ import Tests.SafeTensorsRecords.Indexed
 import Tests.SafeTensorsRecords.IndexedDir
 import Tests.SafeTensorsRecords.NonUniform
 import Tests.SafeTensorsRecords.Traversal
-import Tyr.SafeTensors.Record
+import Tyr.IO.SafeTensors.Record
 import LeanTest
 
 open torch

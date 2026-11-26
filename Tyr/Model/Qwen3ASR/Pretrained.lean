@@ -5,7 +5,7 @@
   - local model directory, or
   - HuggingFace repo id (download to local cache on demand).
 -/
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.Qwen3ASR.ConfigIO
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
 import Tyr.Model.Qwen3ASR.Weights

@@ -5,11 +5,11 @@
   Combines double-stream and single-stream transformer blocks.
 -/
 import Tyr.Model.Flux.TypedOps
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
-import Tyr.Module.Linear
-import Tyr.Module.LayerNorm
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Lib.Module.Linear
+import Tyr.Lib.Module.LayerNorm
 import Tyr.Model.Flux.Config
 import Tyr.Model.Flux.Modulation
 import Tyr.Model.Flux.SingleStreamBlock

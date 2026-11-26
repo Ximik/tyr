@@ -64,6 +64,9 @@ jobs:
           key: ${{ steps.cache-key.outputs.build }}
           restore-keys: ${{ steps.cache-key.outputs.build_prefix }}
 
+      - name: Check layer imports
+        run: lake exe CheckLayers
+
       - name: Build required test runners
         run: |
           python3 scripts/test_inventory.py --build --wfail

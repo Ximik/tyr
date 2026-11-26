@@ -2,9 +2,9 @@ import Tyr.Model.Qwen3ASR.ConfigIO
 import Tyr.Model.Qwen3ASR.Pretrained
 import Tyr.Model.Qwen3ASR.Weights
 import Tyr.Model.Qwen3ASR.Streaming
-import Tyr.Text.StreamingConsensus
-import Tyr.Text.VADProvider
-import Tyr.Tokenizer.Qwen3
+import Tyr.Lib.Inference.StreamingConsensus
+import Tyr.Model.SileroVAD.VADProvider
+import Tyr.Model.Qwen.Tokenizer
 
 namespace torch.qwen3asr
 

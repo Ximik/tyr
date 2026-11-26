@@ -1,5 +1,5 @@
 import Tests.Devices
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 import LeanTest
 import Tests.Assertions
 

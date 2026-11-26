@@ -76,11 +76,11 @@ structure Gemma4VLConfig where
   text_config : Config := Config.gemma4_E4B
   vision_config : Gemma4VisionConfig := {}
   image_processor : Gemma4ImageProcessorConfig := {}
-  boi_token_id : tokenizer.TokenId := 255999
-  image_token_id : tokenizer.TokenId := 258880
-  eoi_token_id : tokenizer.TokenId := 258882
-  video_token_id : tokenizer.TokenId := 258884
-  audio_token_id : tokenizer.TokenId := 258881
+  boi_token_id : UInt32 := 255999
+  image_token_id : UInt32 := 258880
+  eoi_token_id : UInt32 := 258882
+  video_token_id : UInt32 := 258884
+  audio_token_id : UInt32 := 258881
   vision_soft_tokens_per_image : Nat := 280
   tie_word_embeddings : Bool := true
   /-- Media placeholder and boundary ids are text tokens; checked when the config is built. -/

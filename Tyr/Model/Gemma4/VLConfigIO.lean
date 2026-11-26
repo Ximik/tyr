@@ -6,7 +6,8 @@
 -/
 import Tyr.Model.Gemma4.VLConfig
 import Tyr.Model.Gemma4.ConfigIO
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
+import Tyr.Lib.Tokenizer.ConfigJson
 
 namespace torch.gemma4
 

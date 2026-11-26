@@ -43,8 +43,8 @@
     let cos : Tensor { shape := #[seq, 32], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
     let q' := applyRotaryPartial q cos sin               -- q : Tensor { shape := #[b, 1, h, 128] }
 -/
-import Tyr.FFI.Basic
-import Tyr.Typed.Neural
+import Tyr.Core.FFI.Basic
+import Tyr.Core.Typed.Neural
 import Tyr.Model.Laguna.Config
 
 namespace torch.laguna

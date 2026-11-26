@@ -7,11 +7,12 @@
   - generate codec tokens with Lean talker
   - decode codec tokens to waveform with Lean speech-tokenizer decoder
 -/
-import Tyr.Torch
+import Tyr.Core.Torch
 import Tyr.Model.Qwen3TTS
 import Examples.Qwen3TTS.SpeechTokenizerBridge
-import Tyr.Tokenizer
+import Tyr.Lib.Tokenizer
 import Tyr.Model.Qwen35.TypedOps
+import Tyr.Model.Qwen.Tokenizer
 
 namespace Examples.Qwen3TTS
 
@@ -334,7 +335,7 @@ private def parseThinkMode (s : String) : ThinkMode :=
   | "no_think" => .noThink
   | _ => .auto
 
-private def lookupLanguageId? (cfg : Qwen3TTSConfig) (language : String) : Option tokenizer.TokenId := Id.run do
+private def lookupLanguageId? (cfg : Qwen3TTSConfig) (language : String) : Option UInt32 := Id.run do
   let q := language.toLower
   for (k, v) in cfg.talkerConfig.codecLanguageId do
     if k.toLower == q then
@@ -372,7 +373,7 @@ private def buildTalkerInputsEquivalent
     (cfg : Qwen3TTSConfig)
     (model : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (inputIds : Array UInt64)
-    (languageId : Option tokenizer.TokenId)
+    (languageId : Option UInt32)
     (thinkMode : ThinkMode := .auto)
     (speakerEmbed : Option (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device }) := none)
     : IO ((Sigma fun seq => Tensor { shape := #[1, seq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device }) × Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device }) := do
@@ -399,7 +400,7 @@ private def buildTalkerInputsEquivalent
   let ttsEosEmbed : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.slice ttsSpecialEmb 1 1 1
   let ttsPadEmbed : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.slice ttsSpecialEmb 1 2 1
 
-  let codecPrefillIds : Array tokenizer.TokenId :=
+  let codecPrefillIds : Array UInt32 :=
     match thinkMode, languageId with
     | .noThink, _ =>
         #[

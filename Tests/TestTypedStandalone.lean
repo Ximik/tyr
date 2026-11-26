@@ -1,9 +1,9 @@
 import LeanTest
 import Tests.Devices
-import Tyr.Typed
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.TensorStruct.Cast
+import Tyr.Core.Typed
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.Cast
 
 /-! This module intentionally imports no compatibility or legacy runtime API. -/
 

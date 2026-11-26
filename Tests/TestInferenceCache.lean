@@ -1,5 +1,5 @@
-import Tyr.Typed.Neural
-import Tyr.Inference.KVCache
+import Tyr.Core.Typed.Neural
+import Tyr.Lib.Inference.KVCache
 import LeanTest
 import Tests.Devices
 

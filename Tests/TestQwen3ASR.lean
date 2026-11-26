@@ -2,6 +2,7 @@ import Tests.Assertions
 import Tyr
 import Tyr.Model.Qwen3ASR
 import LeanTest
+import Tyr.Model.Qwen.Tokenizer
 
 open torch
 open torch.qwen3asr
@@ -131,25 +132,25 @@ private def writeDeterministicWavFixture
 
 private def mkAsciiStreamingTokenizer : tokenizer.qwen3.QwenTokenizer := Id.run do
   let mut idToToken : Array String := #[]
-  let mut tokenToId : Std.HashMap String tokenizer.TokenId := {}
-  let mut charToId : Std.HashMap Char tokenizer.TokenId := {}
+  let mut tokenToId : Std.HashMap String UInt32 := {}
+  let mut charToId : Std.HashMap Char UInt32 := {}
   let mut next : Nat := 0
   for code in [32:127] do
     let c := Char.ofNat code
     let s := String.ofList [c]
-    let id : tokenizer.TokenId := next.toUInt32
+    let id : UInt32 := next.toUInt32
     idToToken := idToToken.push s
     tokenToId := tokenToId.insert s id
     charToId := charToId.insert c id
     next := next + 1
   let asrTag := "<asr_text>"
-  let asrId : tokenizer.TokenId := next.toUInt32
+  let asrId : UInt32 := next.toUInt32
   idToToken := idToToken.push asrTag
   tokenToId := tokenToId.insert asrTag asrId
-  let specialTokens : Std.HashMap String tokenizer.TokenId :=
-    ({} : Std.HashMap String tokenizer.TokenId).insert asrTag asrId
-  let idToSpecial : Std.HashMap tokenizer.TokenId String :=
-    ({} : Std.HashMap tokenizer.TokenId String).insert asrId asrTag
+  let specialTokens : Std.HashMap String UInt32 :=
+    ({} : Std.HashMap String UInt32).insert asrTag asrId
+  let idToSpecial : Std.HashMap UInt32 String :=
+    ({} : Std.HashMap UInt32 String).insert asrId asrTag
   {
     vocabSize := idToToken.size
     idToToken
@@ -1167,7 +1168,7 @@ def testQwen3ASRForwardVariableFeatureMaskChunkedBatch : IO Unit := do
 def testQwen3ASRForcedAlignFromOutputIds : IO Unit := do
   let batch : Nat := 1
   let seq : Nat := 6
-  let timestampTokenId : tokenizer.TokenId := 99
+  let timestampTokenId : UInt32 := 99
   let inputVals : Array Int64 := #[1, 99, 99, 7, 99, 99]
   let outputVals : Array Int64 := #[0, 10, 20, 0, 30, 40]
   let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array inputVals) #[batch, seq]

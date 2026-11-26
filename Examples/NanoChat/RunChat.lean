@@ -6,8 +6,8 @@
   This executable loads a trained NanoChat checkpoint + tokenizer and runs
   autoregressive decoding with the same per-token sampling path used in RL.
 -/
-import Tyr.Torch
-import Tyr.Tokenizer
+import Tyr.Core.Torch
+import Tyr.Lib.Tokenizer
 import Examples.NanoChat.ModdedGPT
 import Examples.NanoChat.ModdedTrain
 

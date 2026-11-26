@@ -4,7 +4,7 @@
   Kokoro / KittenTTS `config.json` loader.
 -/
 import Tyr.Model.KittenTTS.Config
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
 
 namespace torch.kittentts
 

@@ -1,7 +1,7 @@
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.Qwen3ASR
 import Tyr.Model.Qwen3ASR.StreamModel
-import Tyr.Tokenizer.Qwen3
+import Tyr.Model.Qwen.Tokenizer
 
 open torch.qwen3asr
 

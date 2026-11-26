@@ -4,14 +4,14 @@
 
 Tyr has three cooperating serialization subsystems, each aimed at a different job:
 
-- `Tyr/SafeTensors/` reads HuggingFace `.safetensors` checkpoints — single files,
+- `Tyr/IO/SafeTensors/` reads HuggingFace `.safetensors` checkpoints — single files,
   sharded directories, and `model.safetensors.index.json` layouts — and can generate
   shape-typed Lean loaders from a checkpoint at elaboration time. Use this for
   pretrained weight loading.
-- `Tyr/Hub.lean` resolves a local directory or a HuggingFace `repo_id` to a local
+- `Tyr/IO/Hub.lean` resolves a local directory or a HuggingFace `repo_id` to a local
   model directory, downloading and caching as needed. Use this as the front door
   for `loadFromPretrained`-style APIs.
-- `Tyr/Checkpoint.lean` persists training state — any `TensorStruct` parameter tree
+- `Tyr/IO/Checkpoint.lean` persists training state — any `TensorStruct` parameter tree
   plus mirrored Adam-style optimizer state — for resume. Use this for Tyr's own
   training checkpoints, not for HF interop.
 
@@ -22,11 +22,11 @@ Everything below lives in three namespaces: `torch.safetensors`, `torch.Hub`, an
 
 ### Loading: `Source`
 
-`Tyr.SafeTensors.File` parses and validates SafeTensors headers in Lean; native
-code (`Tyr.FFI.SafeTensors`) only reads a tensor's byte range and writes
+`Tyr.IO.SafeTensors.File` parses and validates SafeTensors headers in Lean; native
+code (`Tyr.Core.FFI.SafeTensors`) only reads a tensor's byte range and writes
 tensor bytes. Headers are parsed once per file and per directory.
 
-`Tyr.SafeTensors.Source` is the loading API. `Source.open path` accepts:
+`Tyr.IO.SafeTensors.Source` is the loading API. `Source.open path` accepts:
 
 - a `.safetensors` file;
 - a model directory with `model.safetensors.index.json` — only the shards its
@@ -55,8 +55,8 @@ Lean builds the header. Training snapshots use the separate checkpoint APIs.
 
 ### Runtime schema introspection
 
-`Tyr/SafeTensors/Schema.lean` builds a metadata surface on top of the FFI. The two
-central types (`Tyr/SafeTensors/Schema.lean`):
+`Tyr/IO/SafeTensors/Schema.lean` builds a metadata surface on top of the FFI. The two
+central types (`Tyr/IO/SafeTensors/Schema.lean`):
 
 ```lean
 structure TensorSchema where
@@ -72,7 +72,7 @@ structure Schema where
   tensors : Array TensorSchema
 ```
 
-`introspect (source : String) : IO Schema` (`Tyr/SafeTensors/Schema.lean`) is
+`introspect (source : String) : IO Schema` (`Tyr/IO/SafeTensors/Schema.lean`) is
 the central entry point. It accepts:
 
 - a single `.safetensors` file — parses the 8-byte little-endian header size and
@@ -88,7 +88,7 @@ Results are sorted by name.
 
 `lake exe GenerateSafeTensorsRecord <source> <Namespace>` prints a Lean module
 with a typed record for the tensors of `<source>` (a file or a model directory); the output is redirected into a source file and kept in
-Git. `Tyr.SafeTensors.Record` builds the record as data (`Record.ofSchema`), and
+Git. `Tyr.IO.SafeTensors.Record` builds the record as data (`Record.ofSchema`), and
 the tool in `Tools/` renders it.
 
 Tensor names split on `.` form a hierarchy. Named segments become fields of
@@ -108,8 +108,8 @@ pinned revision, converts it and regenerates the record.
 
 ### HuggingFace Hub resolution
 
-`Tyr/Hub.lean` (namespace `torch.Hub`) is deliberately small and depends only on
-`Lean.Data.Json` and an external `curl` binary — no `Tyr.Torch` import. The flow:
+`Tyr/IO/Hub.lean` (namespace `torch.Hub`) is deliberately small and depends only on
+`Lean.Data.Json` and an external `curl` binary — no `Tyr.Core.Torch` import. The flow:
 
 ```lean
 structure DownloadOptions where
@@ -121,7 +121,7 @@ def resolvePretrainedDir (source : String) (opts : DownloadOptions := {})
     (tokenizerFiles : Array String := #[]) : IO String
 ```
 
-`resolvePretrainedDir` resolves in order (`Tyr/Hub.lean`):
+`resolvePretrainedDir` resolves in order (`Tyr/IO/Hub.lean`):
 
 1. an existing local directory is returned as-is;
 2. the standard HF hub cache is searched (`findCachedSnapshot?` scans
@@ -133,7 +133,7 @@ def resolvePretrainedDir (source : String) (opts : DownloadOptions := {})
    falls back to a single `model.safetensors`), tokenizer files best-effort.
 
 Downloads shell out to `curl -fL --retry 3` with `.tmp`-file resume and an
-optional `HF_TOKEN` bearer header (`Tyr/Hub.lean`). The generic entry point
+optional `HF_TOKEN` bearer header (`Tyr/IO/Hub.lean`). The generic entry point
 used by every `Tyr/Model/*/Pretrained.lean` is:
 
 ```lean
@@ -151,7 +151,7 @@ returns the config and model as a dependent pair.
 
 ### Training checkpoints
 
-`Tyr/Checkpoint.lean` (namespace `torch.checkpoint`) is model-agnostic
+`Tyr/IO/Checkpoint.lean` (namespace `torch.checkpoint`) is model-agnostic
 persistence over the `TensorStruct` class (see
 [TensorStruct](core/tensorstruct.md)):
 
@@ -220,7 +220,7 @@ SafeTensors export.
 
 ## Key APIs
 
-### SafeTensors schema (`torch.safetensors`, `Tyr/SafeTensors/Schema.lean`)
+### SafeTensors schema (`torch.safetensors`, `Tyr/IO/SafeTensors/Schema.lean`)
 
 | API | Signature | Notes |
 | --- | --- | --- |
@@ -228,7 +228,7 @@ SafeTensors export.
 | `Schema.find?` | `Schema → String → Option TensorSchema` | exact-name lookup |
 | `TensorSchema.toSpec` | `TensorSchema → TensorSpec` | shape + dtype |
 
-### Hub (`torch.Hub`, `Tyr/Hub.lean`)
+### Hub (`torch.Hub`, `Tyr/IO/Hub.lean`)
 
 | API | Signature | Notes |
 | --- | --- | --- |
@@ -239,7 +239,7 @@ SafeTensors export.
 | `ensureModelWeights` / `ensureTokenizerFiles` | `... → IO Unit` | explicit download steps |
 | `loadModelFromPretrained` | see signature above | generic `from_pretrained` |
 
-### Checkpoint (`torch.checkpoint`, `Tyr/Checkpoint.lean`)
+### Checkpoint (`torch.checkpoint`, `Tyr/IO/Checkpoint.lean`)
 
 | API | Signature | Notes |
 | --- | --- | --- |

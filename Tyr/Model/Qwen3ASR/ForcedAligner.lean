@@ -6,7 +6,7 @@
   - timestamp monotonic fixup
   - conversion from thinker logits/output IDs to structured spans
 -/
-import Tyr.Typed
+import Tyr.Core.Typed
 import Tyr.Model.Qwen3ASR.Config
 
 namespace torch.qwen3asr
@@ -256,7 +256,7 @@ end Qwen3ForceAlignProcessor
 private def extractTimestampRows {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (timestampTokenId : tokenizer.TokenId)
+    (timestampTokenId : UInt32)
     (timestampSegmentTime : Float)
     : IO (Array (Array UInt64)) := do
   let inFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 inputIds) #[batch * seq]
@@ -279,7 +279,7 @@ def alignFromOutputIds {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (wordLists : Array (Array String))
-    (timestampTokenId : tokenizer.TokenId)
+    (timestampTokenId : UInt32)
     (timestampSegmentTime : Float := 1.0)
     : IO (Array ForcedAlignResult) := do
   let rows ← extractTimestampRows inputIds outputIds timestampTokenId timestampSegmentTime
@@ -295,7 +295,7 @@ def alignFromLogits {batch seq vocab : Nat} {dtype : DType} [DType.Ordered dtype
     (logits : Tensor { device := device, shape := #[batch, seq, vocab], dtype := dtype })
     (hVocab : 0 < vocab)
     (wordLists : Array (Array String))
-    (timestampTokenId : tokenizer.TokenId)
+    (timestampTokenId : UInt32)
     (timestampSegmentTime : Float := 1.0)
     : IO (Array ForcedAlignResult) := do
   let indices := Tensor.argmax logits 2 (_nonempty := by simpa using hVocab)

@@ -7,10 +7,10 @@
   Indexed shapes and a shared dtype parameter preserve Float32 and BF16
   execution. Native attention operations live behind typed adapters.
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.RoPE
 
@@ -89,8 +89,8 @@ def initKVCache {batch num_kv_heads head_dim : Nat}
 /-! ## Extern adapters
 
 Typed wrappers over existing attention externs that have no counterpart in
-`Tyr.Typed.Ops` yet. Each re-asserts the output spec the extern is known to
-produce (see `Tyr/Inference/KVCache.lean` for the same pattern). -/
+`Tyr.Core.Typed.Ops` yet. Each re-asserts the output spec the extern is known to
+produce (see `Tyr/Lib/Inference/KVCache.lean` for the same pattern). -/
 
 /-- [batch, seq, n_head, head_dim] → [batch, n_head, seq, head_dim] (contiguous). -/
 private def project {batch seq inDim outDim : Nat}

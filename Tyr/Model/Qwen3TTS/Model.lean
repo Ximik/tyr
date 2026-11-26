@@ -6,7 +6,7 @@
   - talker (codec generation)
   - optional speaker encoder (base model mode)
 -/
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 import Tyr.Model.Qwen3TTS.Config
 import Tyr.Model.Qwen3TTS.SpeakerEncoder
 import Tyr.Model.Qwen3TTS.Talker

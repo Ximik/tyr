@@ -4,7 +4,8 @@
   HuggingFace `config.json` loader for Gemma 4 text checkpoints.
 -/
 import Tyr.Model.Gemma4.Config
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
+import Tyr.Lib.Tokenizer.ConfigJson
 
 namespace torch.gemma4
 
@@ -22,8 +23,8 @@ private def ropeFieldD? (j : Json) (layerType field : String) (default : Float) 
   fieldD? params field default
 
 /-- A token id or a list of them at `key`; `default` when absent. -/
-private def tokenIdsD? (j : Json) (key : String) (default : Array tokenizer.TokenId) :
-    Except String (Array tokenizer.TokenId) := do
+private def tokenIdsD? (j : Json) (key : String) (default : Array UInt32) :
+    Except String (Array UInt32) := do
   match ← member? j key with
   | none | some .null => pure default
   | some (.arr _) => tokenIdArrayFieldD? j key default

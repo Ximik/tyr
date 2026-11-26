@@ -5,10 +5,10 @@
   Applies RMSNorm to Q and K independently.
 -/
 import Tyr.Model.Flux.TypedOps
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
-import Tyr.Module.RMSNorm
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Lib.Module.RMSNorm
 
 namespace torch.flux
 

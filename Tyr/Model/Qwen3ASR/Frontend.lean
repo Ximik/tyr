@@ -7,9 +7,9 @@
   - Whisper-style log-mel extraction
   - feature attention-mask generation
 -/
-import Tyr.Tokenizer.IO
-import Tyr.Torch
-import Tyr.Typed.Neural
+import Tyr.Lib.Tokenizer.IO
+import Tyr.Core.Torch
+import Tyr.Core.Typed.Neural
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
 
 namespace torch.qwen3asr

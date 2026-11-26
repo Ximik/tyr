@@ -29,7 +29,7 @@
 
   Runs on CUDA only; skipped silently otherwise.
 -/
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.MoE
 import Tyr.Model.Laguna.Fused

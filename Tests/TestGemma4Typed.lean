@@ -4,7 +4,7 @@ import Tyr.Model.Gemma4.Media
 import Tyr.Model.Gemma4.Weights
 import Tyr.Model.Gemma4.ConfigIO
 import Tyr.Model.Gemma4.VLWeights
-import Tyr.Checkpoint
+import Tyr.IO.Checkpoint
 import LeanTest
 
 open torch torch.gemma4

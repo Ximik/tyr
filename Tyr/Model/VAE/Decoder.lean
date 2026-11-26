@@ -14,9 +14,9 @@
   - norm_out, conv_out: 128→3
 -/
 import Tyr.Model.VAE.TypedOps
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.VAE.ResnetBlock
 import Tyr.Model.VAE.AttnBlock
 import Tyr.Model.VAE.Upsample

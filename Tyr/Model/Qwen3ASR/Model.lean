@@ -7,17 +7,17 @@
   - LM head (ASR / forced-aligner shape aware)
   - rope-delta helpers + greedy generation utilities
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Qwen.Model
 import Tyr.Model.Qwen.Layer
 import Tyr.Model.Qwen.RoPE
 import Tyr.Model.Qwen3ASR.Config
 import Tyr.Model.Qwen3ASR.AudioEncoder
 import Tyr.Model.Qwen3ASR.ForcedAligner
-import Tyr.Model.Utils
+import Tyr.Lib.Module.Init
 
 namespace torch.qwen3asr
 
@@ -33,7 +33,7 @@ abbrev ThinkerLmVocabSize (cfg : ThinkerConfig) : Nat :=
 
 private def tokenInSetMask {batch : Nat}
     (tokens : Tensor { device := device, shape := #[batch], dtype := .Int64 })
-    (allow : Array tokenizer.TokenId)
+    (allow : Array UInt32)
     : Tensor { device := device, shape := #[batch], dtype := .Bool } :=
   Id.run do
     let mut out : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.eqScalar tokens (-1)
@@ -43,7 +43,7 @@ private def tokenInSetMask {batch : Nat}
     out
 
 private def eosVectorOnDevice {batch : Nat}
-    (eosTokenIds : Array tokenizer.TokenId)
+    (eosTokenIds : Array UInt32)
     (device : Device)
     : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }) :=
   match eosTokenIds[0]? with
@@ -451,7 +451,7 @@ private partial def greedyLoopCached {batch maxLen : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
     (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
-    (eosTokenIds : Array tokenizer.TokenId)
+    (eosTokenIds : Array UInt32)
     (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)
     {curSeq : Nat}
@@ -646,7 +646,7 @@ private partial def greedyLoopUncached {batch : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     {promptSeq : Nat}
     (promptEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, promptSeq, cfg.textConfig.hiddenSize] })
-    (eosTokenIds : Array tokenizer.TokenId)
+    (eosTokenIds : Array UInt32)
     (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)
     (finished : Option (Tensor { device := device, shape := #[batch], dtype := .Bool }))
@@ -719,7 +719,7 @@ def generateGreedyUncached {batch seq frames : Nat}
     (inputFeatures : Option (Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if seq == 0 then
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
@@ -744,7 +744,7 @@ def generateGreedy {batch seq frames : Nat}
     (inputFeatures : Option (Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
@@ -823,7 +823,7 @@ def generateGreedyFromInputsEmbedsWithPromptCache {seq : Nat}
     (promptTokenIds : Array UInt32)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ((Sigma (fun outSeq => Tensor { device := device, shape := #[1, outSeq], dtype := .Int64 })) × StreamingPromptCache (device := device) (dtype := dtype) cfg) := do
   let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
     throw <| IO.userError "generateGreedyWithPromptCache requires non-empty prompt sequence"
@@ -861,7 +861,7 @@ def generateGreedyWithPromptCache {seq frames : Nat}
     (promptTokenIds : Array UInt32)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ((Sigma (fun outSeq => Tensor { device := device, shape := #[1, outSeq], dtype := .Int64 })) × StreamingPromptCache (device := device) (dtype := dtype) cfg) := do
   let inputsEmbeds ← buildInputsEmbeds m inputIds inputFeatures featureAttentionMask
   m.generateGreedyFromInputsEmbedsWithPromptCache
@@ -968,7 +968,7 @@ def generateGreedy {batch seq frames : Nat}
     (inputFeatures : Option (Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   m.thinker.generateGreedy inputIds inputFeatures featureAttentionMask maxNewTokens eosTokenIds
 
@@ -984,7 +984,7 @@ def generateGreedyWithPromptCache {seq frames : Nat}
     (promptTokenIds : Array UInt32)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ((Sigma (fun outSeq => Tensor { device := device, shape := #[1, outSeq], dtype := .Int64 })) × StreamingPromptCache (device := device) (dtype := dtype) cfg) :=
   m.thinker.generateGreedyWithPromptCache
     inputIds
@@ -1004,7 +1004,7 @@ def generateGreedyFromInputsEmbedsWithPromptCache {seq : Nat}
     (promptTokenIds : Array UInt32)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ((Sigma (fun outSeq => Tensor { device := device, shape := #[1, outSeq], dtype := .Int64 })) × StreamingPromptCache (device := device) (dtype := dtype) cfg) :=
   m.thinker.generateGreedyFromInputsEmbedsWithPromptCache
     inputIds
@@ -1020,7 +1020,7 @@ def generateGreedyUncached {batch seq frames : Nat}
     (inputFeatures : Option (Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   m.thinker.generateGreedyUncached inputIds inputFeatures featureAttentionMask maxNewTokens eosTokenIds
 
@@ -1029,7 +1029,7 @@ def alignFromOutputIds {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (wordLists : Array (Array String))
-    (timestampTokenId : tokenizer.TokenId := cfg.timestampTokenId)
+    (timestampTokenId : UInt32 := cfg.timestampTokenId)
     (timestampSegmentTime : Float := cfg.timestampSegmentTime)
     : IO (Array ForcedAlignResult) :=
   torch.qwen3asr.alignFromOutputIds inputIds outputIds wordLists timestampTokenId timestampSegmentTime
@@ -1039,7 +1039,7 @@ def alignFromLogits {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (logits : Tensor { dtype := dtype, device := device, shape := #[batch, seq, ThinkerLmVocabSize cfg.thinkerConfig] })
     (wordLists : Array (Array String))
-    (timestampTokenId : tokenizer.TokenId := cfg.timestampTokenId)
+    (timestampTokenId : UInt32 := cfg.timestampTokenId)
     (timestampSegmentTime : Float := cfg.timestampSegmentTime)
     : IO (Array ForcedAlignResult) :=
   torch.qwen3asr.alignFromLogits inputIds logits (ThinkerConfig.lmHeadOutDim_pos _) wordLists
@@ -1052,7 +1052,7 @@ def alignPrepared {batch seq frames : Nat}
     (inputFeatures : Option (Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (attentionMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
-    (timestampTokenId : tokenizer.TokenId := cfg.timestampTokenId)
+    (timestampTokenId : UInt32 := cfg.timestampTokenId)
     (timestampSegmentTime : Float := cfg.timestampSegmentTime)
     : IO (Array ForcedAlignResult) := do
   let logits ← m.forward inputIds inputFeatures featureAttentionMask attentionMask

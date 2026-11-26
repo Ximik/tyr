@@ -13,8 +13,8 @@ import Tyr.Model.Whisper.Model
 import Tyr.Model.Whisper.Weights
 import Tyr.Model.Qwen3ASR.Frontend
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
-import Tyr.Tokenizer.Qwen3
-import Tyr.Util
+import Tyr.Model.Qwen.Tokenizer
+import Tyr.Core.Util
 
 namespace torch.whisper
 
@@ -502,7 +502,7 @@ private def applyTimestampPairMask
     {cfg : WhisperConfig}
     (rules : DecodeTokenRules)
     (generated : Array UInt32)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     : DecodeTokenRules :=
   match rules.timestampBeginId with
   | none => rules
@@ -602,7 +602,7 @@ private def filteredSamplingLogits {vocab : Nat}
 private def argmaxTokenFromLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })
     (hVocab : 0 < vocab)
-    (fallback : tokenizer.TokenId)
+    (fallback : UInt32)
     (rules : DecodeTokenRules := {})
     : IO UInt32 := do
   let kNat := Nat.max 1 (Nat.min 64 vocab)
@@ -621,7 +621,7 @@ private def sampleTokenFromLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })
     (hVocab : 0 < vocab)
     (rules : DecodeTokenRules := {})
-    (fallback : tokenizer.TokenId := 0)
+    (fallback : UInt32 := 0)
     : IO UInt32 := do
   let vals ← Tensor.toFloatArray logits
   let probsVals := (logProbsFromLogitsArray vals).map Float.exp
@@ -668,7 +668,7 @@ private partial def decodeLoopCached
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     (temperature : Float)
     (topK : TopK)
     (topP : Float)
@@ -762,7 +762,7 @@ private def expandBeamCached
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     (beamWidth : Nat)
     (beam : BeamState (device := device) (dtype := dtype) cfg)
     : IO (Array (BeamState (device := device) (dtype := dtype) cfg)) := do
@@ -847,7 +847,7 @@ private partial def beamDecodeLoopCached
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     (beamWidth : Nat)
     (remaining : Nat)
     (beams : Array (BeamState (device := device) (dtype := dtype) cfg))
@@ -902,7 +902,7 @@ private def decodeBeamCached
     (promptIds : Array UInt32)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     (beamWidth : Nat)
     (remaining : Nat)
     (hfit : promptIds.size + remaining ≤ cfg.maxTargetPositions)
@@ -977,7 +977,7 @@ private def decodeAtTemperature
     (promptIds : Array UInt32) (hPrompt : promptIds.size ≤ cfg.maxTargetPositions)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     (maxNewTokens : Nat)
     (opts : WhisperDecodeOptions)
     (temperature : Float)
@@ -1062,7 +1062,7 @@ private partial def decodeWithFallbackLoop
     (promptIdsFallback : Array UInt32) (hFallback : promptIdsFallback.size ≤ cfg.maxTargetPositions)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     (maxNewTokens : Nat)
     (opts : WhisperDecodeOptions)
     (temperatures : Array Float)
@@ -1117,7 +1117,7 @@ private def decodeWithFallback
     (promptIdsFallback : Array UInt32) (hFallback : promptIdsFallback.size ≤ cfg.maxTargetPositions)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     (maxNewTokens : Nat)
     (opts : WhisperDecodeOptions)
     : IO (WhisperDecodeCandidate × Bool) := do

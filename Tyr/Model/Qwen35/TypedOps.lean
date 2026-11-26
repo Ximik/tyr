@@ -1,6 +1,5 @@
-import Tyr.Typed.Neural
-import Tyr.FFI.Qwen35
-import Tyr.Model.Utils
+import Tyr.Core.Typed.Neural
+import Tyr.Core.FFI.Qwen35
 
 namespace torch.qwen35
 

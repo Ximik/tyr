@@ -50,17 +50,17 @@
     storage. The functional cache APIs retain snapshot semantics.
 -/
 import Tyr.Model.Laguna.TypedOps
-import Tyr.Inference.OwnedKV
-import Tyr.TensorStruct
-import Tyr.TensorStruct.DeriveCast
-import Tyr.TensorStruct.Indexed
-import Tyr.Module.Derive
+import Tyr.Core.Typed.Inplace
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.DeriveCast
+import Tyr.Core.TensorStruct.Indexed
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Qwen.Attention
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.Rope
 import Tyr.Model.Laguna.MoE
-import Tyr.Model.Utils
-import Tyr.Model.Generation
+import Tyr.Lib.Module.Init
+import Tyr.Lib.Inference.Generation
 
 namespace torch.laguna
 
@@ -870,7 +870,7 @@ private partial def decodeLoopCached {batch : Nat}
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
     {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (strategy : SamplingStrategy)
-    (eosTokenIds : Array tokenizer.TokenId)
+    (eosTokenIds : Array UInt32)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
     (remaining : Nat)
     {maxLen curSeq : Nat}
@@ -926,7 +926,7 @@ private def generateCore {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat)
     (strategy : SamplingStrategy)
-    (eosTokenIds : Array tokenizer.TokenId)
+    (eosTokenIds : Array UInt32)
     (onStep : Option (StreamCallback (device := device) batch))
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let m := TensorStruct.detach m
@@ -994,7 +994,7 @@ def generate {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := cfg.eos_token_ids)
+    (eosTokenIds : Array UInt32 := cfg.eos_token_ids)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds none
 
@@ -1006,7 +1006,7 @@ def generateStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := cfg.eos_token_ids)
+    (eosTokenIds : Array UInt32 := cfg.eos_token_ids)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds (some onStep)
 
@@ -1016,7 +1016,7 @@ def generateGreedy {batch seq : Nat}
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
-    (eosTokenIds : Array tokenizer.TokenId := cfg.eos_token_ids)
+    (eosTokenIds : Array UInt32 := cfg.eos_token_ids)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generate cfg m inputIds maxNewTokens .greedy eosTokenIds
 

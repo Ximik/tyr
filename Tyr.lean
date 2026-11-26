@@ -1,59 +1,58 @@
 -- Core infrastructure
-import Tyr.FFI.Basic
-import Tyr.Log
-import Tyr.Util
-import Tyr.Torch
-import Tyr.Typed
-import Tyr.SafeTensors
-import Tyr.TensorStruct
-import Tyr.TensorStruct.Cast
-import Tyr.TensorStruct.DeriveCast
-import Tyr.TensorStruct.Indexed
-import Tyr.TensorStruct.Schema
+import Tyr.Core.FFI.Basic
+import Tyr.IO.Log
+import Tyr.Core.Util
+import Tyr.Core.Torch
+import Tyr.Core.Typed
+import Tyr.IO.SafeTensors
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.Cast
+import Tyr.Core.TensorStruct.DeriveCast
+import Tyr.Core.TensorStruct.Indexed
+import Tyr.Core.TensorStruct.Schema
 
 -- Neural network modules
-import Tyr.Module
+import Tyr.Lib.Module
+import Tyr.Lib.Quantization.FP8
 
 -- Optimizers
-import Tyr.Optim
-import Tyr.Optim.ManifoldMuon
-import Tyr.Optim.RiemannianSGD
-import Tyr.Optim.RiemannianTreeSGD
-import Tyr.Optim.Scheduler
-import Tyr.Optim.DualOptimizer
-import Tyr.Optim.DistAdam
+import Tyr.Lib.Optim
+import Tyr.Lib.Optim.ManifoldMuon
+import Tyr.Lib.Optim.RiemannianSGD
+import Tyr.Lib.Optim.RiemannianTreeSGD
+import Tyr.Lib.Optim.Scheduler
+import Tyr.Lib.Optim.DualOptimizer
+import Tyr.Lib.Optim.DistAdam
 
 -- Modular and manifold optimization primitives
-import Tyr.Modular
-import Tyr.Manifolds
+import Tyr.Lib.Optim.Modular
+import Tyr.Lib.Optim.Manifolds
 
 -- Distributed training
-import Tyr.Distributed
-import Tyr.Sharding
+import Tyr.Lib.Distributed
+import Tyr.Lib.Distributed.Sharding
 
 -- Data loading and tokenization
-import Tyr.Data
-import Tyr.DataLoader
-import Tyr.Tokenizer
-import Tyr.Text
+import Tyr.Lib.Data
+import Tyr.Lib.Data.Loader
+import Tyr.Lib.Tokenizer
 
 -- HuggingFace Hub utilities
-import Tyr.Hub
+import Tyr.IO.Hub
 
 -- Shared model utilities and generation infrastructure
-import Tyr.Model.Utils
-import Tyr.Model.Generation
+import Tyr.Lib.Inference.Generation
 
 -- Checkpointing
-import Tyr.Checkpoint
+import Tyr.IO.Checkpoint
 
 -- Pipeline orchestration
-import Tyr.Pipeline
+import Tyr.Lib.Train.Pipeline
 
 -- Training loops
-import Tyr.Train.RunLedger
-import Tyr.Train.ChatSFT
-import Tyr.RL.GRPO
+import Tyr.Lib.Train.RunLedger
+import Tyr.Lib.Train.ChatSFT
+import Tyr.Lib.Train.GRPO
 
 
 /-!
@@ -67,22 +66,21 @@ Its central goal is to make tensor programs safer by tracking key invariants
 
 This root module re-exports the core, general-purpose surface area:
 
-- `Tyr.FFI.Basic`: foundational tensor aliases and shared utilities.
-- `Tyr.Torch`: low-level tensor operations and libtorch bindings.
-- `Tyr.Typed`: tensor wrappers with static shape/dtype checks and checked raw boundaries.
-- `Tyr.SafeTensors`: typed SafeTensors schema and loading support.
-- `Tyr.TensorStruct`: generic traversal/mapping over tensor-containing structures.
-- `Tyr.TensorStruct.Cast`: conversion to a destination tree of tensor types,
+- `Tyr.Core.FFI.Basic`: foundational tensor aliases and shared utilities.
+- `Tyr.Core.Torch`: low-level tensor operations and libtorch bindings.
+- `Tyr.Core.Typed`: tensor wrappers with static shape/dtype checks and checked raw boundaries.
+- `Tyr.IO.SafeTensors`: typed SafeTensors schema and loading support.
+- `Tyr.Core.TensorStruct`: generic traversal/mapping over tensor-containing structures.
+- `Tyr.Core.TensorStruct.Cast`: conversion to a destination tree of tensor types,
   with per-leaf dtype/device specifications and no allocated destination template.
-- `Tyr.TensorStruct.Indexed`: `Select`, a value whose type is chosen by a `Bool` index, and
+- `Tyr.Core.TensorStruct.Indexed`: `Select`, a value whose type is chosen by a `Bool` index, and
   `IndexedList`, a sequence whose element types depend on the position.
-- `Tyr.Module`: neural network module abstractions and layers.
-- `Tyr.Optim` (+ scheduler/dist variants): optimizers and learning-rate scheduling.
-- `Tyr.Distributed` and `Tyr.Sharding`: distributed training and partitioning utilities.
-- `Tyr.Data`, `Tyr.DataLoader`, `Tyr.Tokenizer`: data ingestion, batching, and tokenization.
-- `Tyr.Text`: streaming text consensus and voice-activity (VAD) providers.
-- `Tyr.Checkpoint`: model/optimizer checkpoint save and restore.
-- `Tyr.Pipeline`: training/inference orchestration helpers.
+- `Tyr.Lib.Module`: neural network module abstractions and layers.
+- `Tyr.Lib.Optim` (+ scheduler/dist variants): optimizers and learning-rate scheduling.
+- `Tyr.Lib.Distributed` and `Tyr.Lib.Distributed.Sharding`: distributed training and partitioning utilities.
+- `Tyr.Lib.Data`, `Tyr.Lib.Data.Loader`, `Tyr.Lib.Tokenizer`: data ingestion, batching, and tokenization.
+- `Tyr.IO.Checkpoint`: model/optimizer checkpoint save and restore.
+- `Tyr.Lib.Train.Pipeline`: training/inference orchestration helpers.
 
 ## Example
 

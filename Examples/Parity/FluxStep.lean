@@ -12,7 +12,7 @@
 import Examples.Parity.Common
 import Tyr.Model.Flux
 import Tyr.Model.Flux.Weights
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 
 namespace Examples.Parity.FluxStep
 

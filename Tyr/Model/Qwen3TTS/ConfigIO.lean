@@ -4,15 +4,16 @@
   JSON config loader for Qwen3-TTS HuggingFace `config.json`.
 -/
 import Tyr.Model.Qwen3TTS.Config
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
+import Tyr.Lib.Tokenizer.ConfigJson
 
 namespace torch.qwen3tts
 
 open Lean ConfigJson
 
 /-- A `{name: token id}` object at `key`, `default` when absent. -/
-private def tokenIdMapD? (j : Json) (key : String) (default : Array (String × tokenizer.TokenId)) :
-    Except String (Array (String × tokenizer.TokenId)) := do
+private def tokenIdMapD? (j : Json) (key : String) (default : Array (String × UInt32)) :
+    Except String (Array (String × UInt32)) := do
   let some obj ← objectField? j key | pure default
   let some (entries : Std.TreeMap.Raw String Json) := (match obj with | .obj kvs => some kvs | _ => none)
     | pure default

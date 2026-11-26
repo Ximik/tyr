@@ -10,10 +10,10 @@
   and block scales keep independent dtype indices until the existing Float32
   dequantization step.
 -/
-import Tyr.Typed
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Model.Utils
+import Tyr.Core.Typed
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
+import Tyr.Lib.Quantization.FP8
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.Model
 import Tyr.Model.Qwen.Embedder

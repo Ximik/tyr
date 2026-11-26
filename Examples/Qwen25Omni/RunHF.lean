@@ -4,12 +4,12 @@
   Text generation demo for Qwen2.5-Omni thinker checkpoints (3B/7B),
   resolved by local path or HuggingFace repo id.
 -/
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.Qwen25Omni.Config
 import Tyr.Model.Qwen25Omni.ConfigIO
 import Tyr.Model.Qwen25Omni.Weights
-import Tyr.TensorStruct
-import Tyr.Tokenizer.Qwen3
+import Tyr.Core.TensorStruct
+import Tyr.Model.Qwen.Tokenizer
 import Examples.ModelRunner
 
 open torch
@@ -79,7 +79,7 @@ private def runBatches
     (args : Args)
     (prompts : Array String)
     : IO Unit := do
-  let eos : Array tokenizer.TokenId := #[]
+  let eos : Array UInt32 := #[]
   let buildBatch chunk := do
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInput tok.padToken.toUInt64 chunk (encodePromptToIds tok)

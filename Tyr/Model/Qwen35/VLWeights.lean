@@ -3,10 +3,9 @@
 
   Pretrained weight loading for Qwen3.5 multimodal wrapper.
 -/
-import Tyr.Typed.Neural
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Model.Utils
+import Tyr.Core.Typed.Neural
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen35.Weights
 import Tyr.Model.Qwen35.Multimodal
 

@@ -1,6 +1,6 @@
 import LeanTest
 import Tests.Assertions
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen.Weights
 
 namespace Tests.SafeTensorsSource

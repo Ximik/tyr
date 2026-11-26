@@ -7,10 +7,10 @@
   Shape-indexed activations and weights share a dtype parameter. Normalization
   accumulates in Float32 and restores the input dtype for BF16 checkpoints.
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 
 namespace torch.qwen
 

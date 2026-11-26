@@ -16,8 +16,8 @@
   - up_blocks numbered 0→3 (low index = low res), opposite of BFL's 3→0
 -/
 import Tyr.Model.VAE.TypedOps
-import Tyr.SafeTensors.Source
-import Tyr.Log
+import Tyr.IO.SafeTensors.Source
+import Tyr.IO.Log
 import Tyr.Model.VAE.Decoder
 
 namespace torch.vae

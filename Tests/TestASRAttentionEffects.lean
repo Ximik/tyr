@@ -1,6 +1,6 @@
 import LeanTest
 import Tyr.Model.Qwen3ASR.Model
-import Tyr.Torch
+import Tyr.Core.Torch
 
 namespace Tests.ASRAttentionEffects
 

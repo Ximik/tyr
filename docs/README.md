@@ -50,7 +50,7 @@ Two kinds of documentation exist:
   shape-erased), parquet/shard loading, task mixtures, streaming text.
 - [Autodiff](autodiff.md) — the `torch.autograd` FFI path.
 - [Modules](modules.md) — neural network layers, `deriving Model`, and the
-  `Tyr/Modular` normed-module / LR-budget machinery.
+  `Tyr/Lib/Optim/Modular` normed-module / LR-budget machinery.
 - [Optimization](optimization.md) — Optax-style `GradientTransformation`s,
   AdamW, Muon variants, Riemannian optimizers, schedulers, and the manifold
   library.
@@ -79,6 +79,6 @@ Two kinds of documentation exist:
 - Code examples are reconstructed from real call sites and labeled with their
   source; signatures were verified against the Lean sources at the commit
   where each guide was written.
-- Source citations use `path:line` (e.g. `Tyr/Torch.lean`).
+- Source citations use `path:line` (e.g. `Tyr/Core/Torch.lean`).
 - Guides describe intent and key APIs; the doc-gen4 reference remains the
   source of truth for exhaustive symbol documentation.

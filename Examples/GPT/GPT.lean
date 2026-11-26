@@ -5,12 +5,12 @@
   Shapes are tracked at compile time to catch dimension mismatches.
 -/
 import Examples.GPT.TensorOps
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
-import Tyr.TensorStruct.DeriveCast
-import Tyr.Optim
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Core.TensorStruct.DeriveCast
+import Tyr.Lib.Optim
 
 namespace torch.gpt
 

@@ -5,10 +5,10 @@
   Processes concatenated image and text tokens together.
 -/
 import Tyr.Model.Flux.TypedOps
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
-import Tyr.Module.LayerNorm
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Lib.Module.LayerNorm
 import Tyr.Model.Flux.Config
 import Tyr.Model.Flux.RoPE
 import Tyr.Model.Flux.Modulation

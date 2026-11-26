@@ -1,0 +1,75 @@
+/-
+  Tyr/Lib/Module/RMSNorm.lean
+
+  RMS Layer Normalization module with TensorStruct and Module instances.
+  Used in LLaMA, Qwen, and other modern transformer architectures.
+-/
+import Tyr.Core.Typed.Neural
+import Tyr.Core.FFI.ConstantSupport
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
+
+namespace torch
+
+/-- RMS Layer Normalization: normalizes using root mean square.
+    y = x / sqrt(mean(x^2) + eps) * weight
+    Unlike LayerNorm, RMSNorm has no bias and doesn't subtract the mean.
+
+    Normalize in Float32, restore the activation dtype, then apply the learned
+    weight. This matches checkpoint inference rounding for BF16 models. -/
+structure RMSNorm (dim : Nat) (dtype : DType := .Float32)
+    (device : Device := .CPU) where
+  weight : Tensor ⟨#[dim], dtype, device⟩
+  eps : Static Float := ⟨1e-6⟩
+  deriving TensorStruct
+
+namespace RMSNorm
+
+/-- Initialize RMSNorm with ones for weight -/
+def init (dim : Nat) (eps : Float := 1e-6) (dtype : DType := .Float32)
+    (device : Device := .CPU) : IO (RMSNorm dim dtype device) := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  let weight ← Tensor.parameter (Tensor.onesFor { shape := #[dim], dtype, device })
+  pure { weight, eps := ⟨eps⟩ }
+
+/-- Forward pass for 2D input [seq, dim] -/
+def forward2d {dim seq : Nat} {d : DType} {dev : Device} (rn : RMSNorm dim d dev)
+    (x : Tensor ⟨#[seq, dim], d, dev⟩)
+    :
+    Tensor ⟨#[seq, dim], d, dev⟩ :=
+  Tensor.rmsNormPreserving x rn.weight rn.eps.val
+
+/-- Forward pass for 3D input [batch, seq, dim] -/
+def forward3d {dim batch seq : Nat} {d : DType} {dev : Device} (rn : RMSNorm dim d dev)
+    (x : Tensor ⟨#[batch, seq, dim], d, dev⟩)
+    :
+    Tensor ⟨#[batch, seq, dim], d, dev⟩ :=
+  Tensor.rmsNormPreserving x rn.weight rn.eps.val
+
+/-- Forward pass for 4D input [batch, seq, n_head, head_dim]
+    Normalizes over the last dimension (head_dim). -/
+def forward4d {batch seq n_head head_dim : Nat} {d : DType} {dev : Device}
+    (rn : RMSNorm head_dim d dev)
+    (x : Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩)
+    :
+    Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩ :=
+  Tensor.rmsNormPreserving x rn.weight rn.eps.val
+
+end RMSNorm
+
+/-- Module instance for 2D forward pass (Float32 layers; other dtypes can call
+    the forward functions directly with an explicit `isFloating` proof). -/
+instance {dim seq : Nat} {dev : Device} :
+    Module (RMSNorm dim .Float32 dev) (Tensor ⟨#[seq, dim], .Float32, dev⟩)
+      (Tensor ⟨#[seq, dim], .Float32, dev⟩) where
+  forward rn x := RMSNorm.forward2d rn x
+
+/-- Module instance for 3D forward pass (Float32 layers). -/
+instance {dim batch seq : Nat} {dev : Device} :
+    Module (RMSNorm dim .Float32 dev) (Tensor ⟨#[batch, seq, dim], .Float32, dev⟩)
+      (Tensor ⟨#[batch, seq, dim], .Float32, dev⟩) where
+  forward rn x := RMSNorm.forward3d rn x
+
+end torch

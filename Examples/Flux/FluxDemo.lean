@@ -4,7 +4,7 @@
   End-to-end demonstration of Flux Klein 4B image generation.
   Shows complete pipeline: text encoding → diffusion → VAE decoding.
 -/
-import Tyr.Torch
+import Tyr.Core.Torch
 import Tyr.Model.Qwen
 import Tyr.Model.Qwen.Weights
 import Tyr.Model.Qwen3.ConfigIO
@@ -12,7 +12,7 @@ import Tyr.Model.VAE
 import Tyr.Model.VAE.Weights
 import Tyr.Model.Flux
 import Tyr.Model.Flux.Weights
-import Tyr.Tokenizer.Qwen3
+import Tyr.Model.Qwen.Tokenizer
 
 namespace Examples.Flux
 

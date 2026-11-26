@@ -1,13 +1,13 @@
 import LeanTest
-import Tyr.Modular.MetricFactor
-import Tyr.Manifolds.Embedded
+import Tyr.Lib.Optim.Modular.MetricFactor
+import Tyr.Lib.Optim.Manifolds.Embedded
 
 namespace Tests.MetricFactor
 
 open LeanTest
 open torch
-open Tyr.Modular
-open Tyr.Manifolds
+open Tyr.Lib.Optim.Modular
+open Tyr.Lib.Optim.Manifolds
 
 private def vectorToColumn {n : Nat} (v : Tensor { shape := #[n], dtype := .Float32, device := .CPU }) : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
   Tensor.reshape v #[n, 1] (by simp [Shape.numel])

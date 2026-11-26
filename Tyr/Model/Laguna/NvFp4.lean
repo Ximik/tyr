@@ -25,7 +25,7 @@
     (`e2m1 * (scale / global)`), then rounded once to BF16, so results are
     bitwise-identical to a PyTorch F32 dequant followed by `.to(bfloat16)`.
 -/
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 
 namespace torch.laguna.nvfp4
 

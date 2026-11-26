@@ -1,7 +1,7 @@
 import LeanTest
-import Tyr.Module.Linear
-import Tyr.Module.Derive
-import Tyr.Torch
+import Tyr.Lib.Module.Linear
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Core.Torch
 
 namespace Tests.ModuleTyped
 

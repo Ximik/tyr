@@ -1,5 +1,5 @@
 import LeanTest
-import Tyr.Torch
+import Tyr.Core.Torch
 
 namespace Tests.TestResampleOwnership
 

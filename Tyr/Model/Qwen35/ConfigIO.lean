@@ -4,7 +4,8 @@
   HuggingFace `config.json` loader for standalone Qwen3.5 causal-LM.
 -/
 import Tyr.Model.Qwen35.Config
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
+import Tyr.Lib.Tokenizer.ConfigJson
 
 namespace torch.qwen35
 

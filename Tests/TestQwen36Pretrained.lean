@@ -1,4 +1,4 @@
-import Tyr.Model.Qwen36
+import Tyr.Model.Qwen35.Qwen36
 import Tyr.Model.Qwen35
 import LeanTest
 

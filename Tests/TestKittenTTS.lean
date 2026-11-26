@@ -1,6 +1,6 @@
 import Tyr.Model.KittenTTS.Model
 import Tyr.Model.KittenTTS.ConfigIO
-import Tyr.Checkpoint
+import Tyr.IO.Checkpoint
 import LeanTest
 
 open torch

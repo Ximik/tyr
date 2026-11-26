@@ -3,13 +3,13 @@
 
   Tests for checkpointing functionality and TensorStruct integration.
 -/
-import Tyr.Typed.Neural
-import Tyr.Checkpoint
+import Tyr.Core.Typed.Neural
+import Tyr.IO.Checkpoint
 import Examples.GPT.GPT
 import Examples.NanoChat.ModdedGPT
 import Examples.NanoChat.ModdedTrain
-import Tyr.Optim.DistAdam
-import Tyr.Optim.NorMuon
+import Tyr.Lib.Optim.DistAdam
+import Tyr.Lib.Optim.NorMuon
 import LeanTest
 
 open torch

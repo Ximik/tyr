@@ -1,6 +1,6 @@
 import LeanTest
 import Tests.Devices
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 
 namespace Tests.ExactDType
 

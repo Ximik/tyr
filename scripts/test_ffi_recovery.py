@@ -13,10 +13,10 @@ class RecoveryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="tyr-ffi-recovery-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        (self.root / "Tyr/FFI").mkdir(parents=True)
+        (self.root / "Tyr/Core/FFI").mkdir(parents=True)
         (self.root / "cc/src").mkdir(parents=True)
-        self.write("Tyr/FFI/Basic.lean", "")
-        self.write("Tyr/FFI/ConstantSupport.lean", "")
+        self.write("Tyr/Core/FFI/Basic.lean", "")
+        self.write("Tyr/Core/FFI/ConstantSupport.lean", "")
         self.declare()
         self.native('return tyr::ioCall("example", [&] { return run(); });')
 
@@ -24,7 +24,7 @@ class RecoveryTests(unittest.TestCase):
         (self.root / path).write_text(source)
 
     def declare(self, carrier="IO RawTensor", symbol="lean_torch_example"):
-        self.write("Tyr/FFI/RawTensor.lean",
+        self.write("Tyr/Core/FFI/RawTensor.lean",
                    f'@[extern "{symbol}"] opaque example (value : @& RawTensor) : {carrier}\n')
 
     def native(self, body, path="cc/src/example.cpp", symbol="lean_torch_example"):
@@ -47,40 +47,40 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(self.errors())
 
     def test_new_declaration_is_not_silently_omitted(self):
-        self.write("Tyr/FFI/New.lean",
+        self.write("Tyr/Core/FFI/New.lean",
                    '@[extern "new_export"] private opaque fresh : IO Unit\n')
         errors = self.errors()
         self.assertEqual(len(errors), 1)
-        self.assertIn("Tyr/FFI/New.lean:1", errors[0])
+        self.assertIn("Tyr/Core/FFI/New.lean:1", errors[0])
         self.assertIn("no recognized native definition for new_export", errors[0])
 
     def test_pretraining_io_declarations_are_in_scope_without_symbol_list(self):
-        self.write("Tyr/FFI/Parquet.lean", '''
+        self.write("Tyr/Core/FFI/Parquet.lean", '''
 @[extern "lean_parquet_get_metadata"] opaque metadata : IO ParquetMetadata
 @[extern "lean_parquet_future_operation"] opaque futureOperation : IO Unit
 ''')
         self.native('return read_metadata();', "cc/src/tyr_parquet.cpp",
                     "lean_parquet_get_metadata")
         errors = self.errors()
-        self.assertTrue(any("lean_parquet_get_metadata from Tyr/FFI/Parquet.lean:2" in error
+        self.assertTrue(any("lean_parquet_get_metadata from Tyr/Core/FFI/Parquet.lean:2" in error
                             and "must contain only" in error for error in errors))
         self.assertTrue(any("no recognized native definition for lean_parquet_future_operation" in error
                             for error in errors))
 
     def test_torch_runtime_io_declarations_are_in_scope_without_symbol_list(self):
-        self.write("Tyr/FFI/Runtime.lean", '''
+        self.write("Tyr/Core/FFI/Runtime.lean", '''
 @[extern "lean_torch_resample_soxr_hq"] opaque resample : IO (Array Float)
 @[extern "lean_torch_future_runtime_operation"] opaque future : IO Unit
 ''')
         self.native('return resample();', "cc/src/tyr.cpp", "lean_torch_resample_soxr_hq")
         errors = self.errors()
-        self.assertTrue(any("lean_torch_resample_soxr_hq from Tyr/FFI/Runtime.lean:2" in error
+        self.assertTrue(any("lean_torch_resample_soxr_hq from Tyr/Core/FFI/Runtime.lean:2" in error
                             and "must contain only" in error for error in errors))
         self.assertTrue(any("no recognized native definition for lean_torch_future_runtime_operation" in error
                             for error in errors))
 
     def test_distributed_and_polar_io_are_in_scope_without_symbol_list(self):
-        self.write("Tyr/FFI/Distributed.lean", '''
+        self.write("Tyr/Core/FFI/Distributed.lean", '''
 @[extern "lean_torch_dist_get_rank"] opaque rank : IO UInt64
 @[extern "lean_torch_xxt"] opaque xxt (t : @& RawTensor) : IO RawTensor
 @[extern "lean_torch_dist_future"] opaque future : IO Unit
@@ -96,7 +96,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_parquet_arrow_and_disabled_variants_are_both_checked(self):
         symbol = "lean_parquet_get_metadata"
-        self.write("Tyr/FFI/Parquet.lean",
+        self.write("Tyr/Core/FFI/Parquet.lean",
                    f'@[extern "{symbol}"] opaque metadata : IO ParquetMetadata\n')
         guarded = 'return tyr::ioCall("metadata", [&] { return read_metadata(); });'
         unavailable = 'return tyr::ioCall("metadata", [&] { return parquet_unavailable(); });'
@@ -136,13 +136,13 @@ class RecoveryTests(unittest.TestCase):
                          [("checked", "Except")])
 
     def test_unsupported_extern_syntax_fails_closed(self):
-        self.write("Tyr/FFI/RawTensor.lean", '@[extern nativeName] opaque example : IO Unit\n')
+        self.write("Tyr/Core/FFI/RawTensor.lean", '@[extern nativeName] opaque example : IO Unit\n')
         self.assertTrue(any("literal C symbol" in error for error in self.errors()))
-        self.write("Tyr/FFI/RawTensor.lean", '@[extern "example"] opaque example := IO Unit\n')
+        self.write("Tyr/Core/FFI/RawTensor.lean", '@[extern "example"] opaque example := IO Unit\n')
         self.assertTrue(any("explicit result type" in error for error in self.errors()))
 
     def test_result_alias_cannot_hide_recoverable_export(self):
-        self.write("Tyr/FFI/RawTensor.lean", '''
+        self.write("Tyr/Core/FFI/RawTensor.lean", '''
 abbrev NativeResult := IO RawTensor
 @[extern "lean_torch_example"] opaque example : NativeResult
 ''')
@@ -150,7 +150,7 @@ abbrev NativeResult := IO RawTensor
                             for error in self.errors()))
 
     def test_polymorphic_invariant_failure_must_only_report_and_abort(self):
-        self.write("Tyr/FFI/Basic.lean", '''
+        self.write("Tyr/Core/FFI/Basic.lean", '''
 @[extern "lean_torch_native_invariant_failure"]
 opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : α
 ''')
@@ -166,8 +166,8 @@ opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : 
                 self.assertTrue(any("must contain only" in error for error in self.errors()))
 
     def test_polymorphic_result_exception_is_specific_to_the_abort_export(self):
-        for path, symbol in [("Tyr/FFI/Basic.lean", "lean_torch_other"),
-                             ("Tyr/FFI/RawTensor.lean", "lean_torch_native_invariant_failure")]:
+        for path, symbol in [("Tyr/Core/FFI/Basic.lean", "lean_torch_other"),
+                             ("Tyr/Core/FFI/RawTensor.lean", "lean_torch_native_invariant_failure")]:
             with self.subTest(path=path, symbol=symbol):
                 self.write(path, f'@[extern "{symbol}"] opaque other {{α : Type}} : α\n')
                 self.assertTrue(any("unrecognized extern result constructor α" in error

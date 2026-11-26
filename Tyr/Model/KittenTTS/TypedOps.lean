@@ -1,6 +1,6 @@
-import Tyr.Typed.Neural
-import Tyr.FFI.Neural
-import Tyr.TensorStruct
+import Tyr.Core.Typed.Neural
+import Tyr.Core.FFI.Neural
+import Tyr.Core.TensorStruct
 
 namespace torch.kittentts
 

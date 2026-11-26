@@ -3,14 +3,14 @@
 
   Adapted from GPT training for masked discrete diffusion.
 -/
-import Tyr.Torch
-import Tyr.TensorStruct
-import Tyr.Optim
+import Tyr.Core.Torch
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Optim
 import Examples.Diffusion.Parameters
 import Examples.Diffusion.Diffusion
 import Examples.Diffusion.DiffusionSchedule
 import Examples.Diffusion.DiffusionCheckpoint
-import Tyr.Util
+import Tyr.Core.Util
 
 namespace torch.diffusion.train
 

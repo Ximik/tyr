@@ -1,5 +1,5 @@
 import LeanTest
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 
 namespace Tests.DTypeUnary
 

@@ -4,7 +4,7 @@
   Rotary Position Embeddings for Qwen3.
   Standard 2D rotation (different from Flux's 4-axis RoPE).
 -/
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 
 namespace torch.qwen
 

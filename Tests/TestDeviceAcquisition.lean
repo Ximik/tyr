@@ -1,5 +1,5 @@
 import Tests.Assertions
-import Tyr.Torch
+import Tyr.Core.Torch
 
 open torch
 

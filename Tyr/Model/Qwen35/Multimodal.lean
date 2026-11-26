@@ -6,13 +6,13 @@
   - Placeholder-based fusion into text embeddings
   - Conditional generation wrapper over existing Qwen35 text model
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Qwen35.Model
 import Tyr.Model.Qwen35.VLConfig
-import Tyr.Model.Utils
+import Tyr.Lib.Module.Init
 
 namespace torch.qwen35
 
@@ -422,7 +422,7 @@ def getVideoFeatures {nPatches : Nat}
 private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat} {featureDType : DType}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype })
-    (tokenId : tokenizer.TokenId)
+    (tokenId : UInt32)
     (features : Tensor { device := device, shape := #[featTokens, featDim], dtype := featureDType })
     (_hDim : featDim = hidden)
     : IO (Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype }) := do
@@ -582,7 +582,7 @@ def generate {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     (images videos : Option (VisualFeatures (device := device) cfg visionDType) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds images videos
@@ -610,7 +610,7 @@ def generateStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     (images videos : Option (VisualFeatures (device := device) cfg visionDType) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds images videos

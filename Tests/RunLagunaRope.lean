@@ -15,8 +15,8 @@
 -/
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.Rope
-import Tyr.Torch
-import Tyr.SafeTensors.Source
+import Tyr.Core.Torch
+import Tyr.IO.SafeTensors.Source
 
 open torch torch.laguna
 

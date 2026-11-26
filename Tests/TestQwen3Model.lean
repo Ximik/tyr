@@ -1,4 +1,4 @@
-import Tyr.Typed
+import Tyr.Core.Typed
 import Tyr.Model.Qwen3
 import LeanTest
 
