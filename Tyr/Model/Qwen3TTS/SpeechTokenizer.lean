@@ -18,7 +18,7 @@ import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.SpeechTokenizerDTypes
 import Tyr.Core.TensorStruct
 import Tyr.Lib.Module.RMSNorm
-import Tyr.Model.Qwen.RoPE
+import Tyr.Lib.RoPE
 import Tyr.IO.ConfigJson
 
 namespace torch.qwen3tts

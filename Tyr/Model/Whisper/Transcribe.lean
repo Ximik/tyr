@@ -11,16 +11,16 @@
 import Tyr.Model.Whisper.ConfigIO
 import Tyr.Model.Whisper.Model
 import Tyr.Model.Whisper.Weights
-import Tyr.Model.Qwen3ASR.Frontend
-import Tyr.Model.Qwen3ASR.PreprocessorConfig
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Audio.LogMel
+import Tyr.Lib.Audio.Waveform
+import Tyr.Lib.Audio.LogMelConfig
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 import Tyr.Core.Util
 
 namespace torch.whisper
 
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
-open torch.qwen3asr
 
 structure WhisperTranscription where
   language : String
@@ -33,8 +33,8 @@ structure WhisperBundle where
   device : Device
   dtype : RealFloatingDType
   model : WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg
-  tok : tokenizer.qwen3.QwenTokenizer
-  preprocessor : PreprocessorConfig
+  tok : tokenizer.ByteLevelBPETokenizer
+  preprocessor : audio.LogMelConfig
   /-- The preprocessor produces as many mel bins as the encoder consumes; checked on load. -/
   melBinsMatch : preprocessor.featureSize = cfg.numMelBins
 
@@ -129,14 +129,14 @@ private def languageTokenString (language : String) : String :=
   else
     s!"<|{code}|>"
 
-private def tokenIdByText? (tok : tokenizer.qwen3.QwenTokenizer) (text : String) : Option UInt32 :=
+private def tokenIdByText? (tok : tokenizer.ByteLevelBPETokenizer) (text : String) : Option UInt32 :=
   tok.specialTokens.get? text <|> tok.tokenToId.get? text
 
 private def isTimestampSpecialToken (text : String) : Bool :=
   text.startsWith "<|" && text.endsWith "|>" && text.contains '.'
 
 private def buildDecodeTokenRules
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (cfg : WhisperConfig)
     (noTimestamps : Bool)
     : DecodeTokenRules :=
@@ -168,7 +168,7 @@ private def buildDecodeTokenRules
 
 private def buildPromptIds
     (cfg : WhisperConfig)
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (language : String)
     (noTimestamps : Bool := true)
     : Array UInt32 :=
@@ -187,11 +187,11 @@ private def buildPromptIds
     out
 
 private def decodeGeneratedText
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (ids : Array UInt32)
     : String :=
   let filtered := ids.filter (fun id => !tok.idToSpecial.contains id)
-  (tokenizer.qwen3.decodeText tok filtered).trimAscii.toString
+  (tokenizer.ByteLevelBPETokenizer.decodeText tok filtered).trimAscii.toString
 
 private def takeLast (xs : Array α) (n : Nat) : Array α :=
   if n == 0 then
@@ -280,7 +280,7 @@ private def splitWaveformWithOverlap
       out
 
 private def isTimestampTokenId
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (id : UInt32)
     : Bool :=
   match tok.idToSpecial.get? id with
@@ -312,7 +312,7 @@ private def timestampAdvanceSamples
 
 private def whisperMaxChunkSeconds
     (cfg : WhisperConfig)
-    (pre : PreprocessorConfig)
+    (pre : audio.LogMelConfig)
     : Float :=
   let sr := pre.samplingRate
   let hop := pre.hopLength
@@ -942,7 +942,7 @@ private def decodeBeamCached
     }
 
 private def toDecodeCandidate
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (st : DecodeState)
     (temperature : Float)
     : WhisperDecodeCandidate :=
@@ -971,7 +971,7 @@ private def decodeAtTemperature
     {cfg : WhisperConfig}
     {encSeq : Nat}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (encoderHidden : Tensor { dtype := dtype, device := device, shape := #[1, encSeq, cfg.dModel] })
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (promptIds : Array UInt32) (hPrompt : promptIds.size ≤ cfg.maxTargetPositions)
@@ -1055,7 +1055,7 @@ private partial def decodeWithFallbackLoop
     {cfg : WhisperConfig}
     {encSeq : Nat}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (encoderHidden : Tensor { dtype := dtype, device := device, shape := #[1, encSeq, cfg.dModel] })
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (promptIds : Array UInt32) (hPrompt : promptIds.size ≤ cfg.maxTargetPositions)
@@ -1111,7 +1111,7 @@ private def decodeWithFallback
     {cfg : WhisperConfig}
     {encSeq : Nat}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (encoderHidden : Tensor { dtype := dtype, device := device, shape := #[1, encSeq, cfg.dModel] })
     (promptIds : Array UInt32) (hPrompt : promptIds.size ≤ cfg.maxTargetPositions)
     (promptIdsFallback : Array UInt32) (hFallback : promptIdsFallback.size ≤ cfg.maxTargetPositions)
@@ -1142,8 +1142,8 @@ private def decodeWithFallback
 private def maybeAppendTailRescue
     {cfg : WhisperConfig}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (pre : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (pre : audio.LogMelConfig)
     (hMel : pre.featureSize = cfg.numMelBins)
     (wav16k : Array Float)
     (basePrompt : Array UInt32) (hBase : basePrompt.size ≤ cfg.maxTargetPositions)
@@ -1162,7 +1162,7 @@ private def maybeAppendTailRescue
     let tailSpan := Nat.max 1 (Nat.min wav16k.size targetSamples)
     let tail := wav16k.extract (wav16k.size - tailSpan) wav16k.size
     let pack ←
-      waveformToWhisperFeaturesDynamic
+      audio.logMelFeaturesDynamic
         pre
         tail
         (minSeconds := 0.05)
@@ -1218,9 +1218,9 @@ private def maybeAppendTailRescue
 
 def loadFromPretrainedDir (modelDir : String) (device : Device) : IO WhisperBundle := do
   let cfg ← WhisperConfig.loadFromPretrainedDir modelDir {}
-  let tok ← tokenizer.qwen3.loadTokenizer modelDir
+  let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
   let preprocessor ←
-    PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000) {
+    audio.LogMelConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000) {
       featureSize := cfg.numMelBins
       featureSizePos := cfg.numMelBinsPos
       hopLength := 160
@@ -1239,8 +1239,8 @@ def loadFromPretrainedDir (modelDir : String) (device : Device) : IO WhisperBund
 private def transcribeWavCore
     {cfg : WhisperConfig}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (pre : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (pre : audio.LogMelConfig)
     (hMel : pre.featureSize = cfg.numMelBins)
     (wav16k : Array Float)
     (language : String)
@@ -1328,7 +1328,7 @@ private def transcribeWavCore
         rollingContext := #[]
 
       let pack ←
-        waveformToWhisperFeaturesDynamic
+        audio.logMelFeaturesDynamic
           pre
           chunk
           (minSeconds := 0.05)
@@ -1441,8 +1441,8 @@ private def transcribeWavCore
 def transcribeWaveform16k
     {cfg : WhisperConfig}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (pre : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (pre : audio.LogMelConfig)
     (hMel : pre.featureSize = cfg.numMelBins)
     (wav16k : Array Float)
     (language : String := "en")
@@ -1454,15 +1454,15 @@ def transcribeWaveform16k
 def transcribeWav
     {cfg : WhisperConfig}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (pre : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (pre : audio.LogMelConfig)
     (hMel : pre.featureSize = cfg.numMelBins)
     (wavPath : String)
     (language : String := "en")
     (noTimestamps : Bool := true)
     (decodeOpts : WhisperDecodeOptions := {})
     : IO WhisperTranscription := do
-  let wav16k ← normalizeAudioTo16kFromWav wavPath
+  let wav16k ← audio.normalizeAudioTo16kFromWav wavPath
   transcribeWavCore model tok pre hMel wav16k language noTimestamps decodeOpts
 
 end torch.whisper

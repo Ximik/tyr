@@ -8,7 +8,7 @@
   - chunk-index utilities
 -/
 import Tyr.Model.Qwen3ASR.Config
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 namespace torch.qwen3asr
 
@@ -76,14 +76,14 @@ def replaceMultimodalSpecialTokens
     placeholders and desynchronizing audio/text lengths. -/
 def encodeWithExpandedAudioTokenIds
     (p : Qwen3ASRProcessor)
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (text : String)
     (audioLengths : Array Nat)
     (audioTokenId : UInt32)
     : Except String (Array UInt32) := do
   let parts := (text.splitOn p.audioToken).toArray
   if parts.size ≤ 1 then
-    return tokenizer.qwen3.encodeText tok text
+    return tokenizer.ByteLevelBPETokenizer.encodeText tok text
 
   let needed := parts.size - 1
   if audioLengths.size < needed then
@@ -92,7 +92,7 @@ def encodeWithExpandedAudioTokenIds
   let mut out : Array UInt32 := #[]
   let mut idx : Nat := 0
   for i in [:parts.size] do
-    out := out ++ tokenizer.qwen3.encodeText tok parts[i]!
+    out := out ++ tokenizer.ByteLevelBPETokenizer.encodeText tok parts[i]!
     if i + 1 < parts.size then
       let aLen := audioLengths[idx]!
       for _ in [:aLen] do

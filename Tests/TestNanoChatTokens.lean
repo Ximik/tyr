@@ -1,7 +1,7 @@
 import LeanTest
 import Tyr.Lib.Tokenizer
 import Tyr.Lib.Data.Task
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 open tokenizer
 open torch
@@ -243,7 +243,7 @@ def testQwen3VocabIdBeyondTokenIdsRejected : IO Unit := IO.FS.withTempDir fun di
     "{\"model\": {\"vocab\": {\"a\": 4294967296}, \"merges\": []}}"
   let rejected ←
     try
-      let _ ← tokenizer.qwen3.loadTokenizer dir.toString
+      let _ ← tokenizer.ByteLevelBPETokenizer.load dir.toString
       pure false
     catch e => pure ((toString e).contains "UInt32")
   LeanTest.assertTrue rejected "a vocab id beyond UInt32 is rejected instead of wrapping"

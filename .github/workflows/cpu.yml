@@ -64,9 +64,6 @@ jobs:
           key: ${{ steps.cache-key.outputs.build }}
           restore-keys: ${{ steps.cache-key.outputs.build_prefix }}
 
-      - name: Check layer imports
-        run: lake exe CheckLayers
-
       - name: Build required test runners
         run: |
           python3 scripts/test_inventory.py --build --wfail
@@ -106,6 +103,9 @@ jobs:
 
       - name: Build examples and every executable
         run: .github/scripts/build_executables.sh
+
+      - name: Check layers and externs
+        run: lake exe CheckLayers
 
       - name: Check FFI crash reporting
         run: .github/scripts/check_ffi_crash_probe.sh

@@ -12,7 +12,7 @@
 import Tyr.Model.Qwen3TTS.Model
 import Tyr.Model.Qwen3TTS.SpeechTokenizerEncoder
 import Tyr.Model.Qwen3TTS.SpeechTokenizer25HzEncoder
-import Tyr.Model.Qwen3ASR.Frontend
+import Tyr.IO.Audio
 import Tyr.IO.Log
 
 namespace Examples.Qwen3TTS
@@ -216,7 +216,7 @@ private def computeSpeakerMelFromWave
   pure ⟨frames, mel3⟩
 
 private def loadResampledMonoWav (path : String) (targetSr : Nat) : IO (Array Float) := do
-  let (sr, wav) ← qwen3asr.loadMonoPcm16Wav path
+  let (sr, wav) ← audio.loadMonoPcm16Wav path
   if sr == targetSr then
     pure wav
   else

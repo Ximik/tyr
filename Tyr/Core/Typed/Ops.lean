@@ -1163,4 +1163,15 @@ def randint (low high : Int64) (shape : Shape) (device : Device := .CPU) :
   let raw ← RawTensor.randint low high shape device
   pure (Tensor.ofRaw! raw)
 
+/-- Uniform samples in `[0, 1)`. -/
+def rand (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) :
+    IO (Tensor { device, shape, dtype }) := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  uniformLike (Tensor.zerosFor { shape, dtype, device })
+
+/-- A Bool vector of `false`. -/
+def falseMask {n : Nat} (device : Device) : Tensor { device := device, shape := #[n], dtype := .Bool } :=
+  Tensor.eqScalar ((Tensor.fullInt #[n] 0).to device) 1
+
 end torch.Tensor

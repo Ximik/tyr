@@ -7,7 +7,7 @@
   - audio chunk collect/drop helpers
 -/
 import Tyr.Model.SileroVAD.Model
-import Tyr.Model.Qwen3ASR.Frontend
+import Tyr.Lib.Audio.Waveform
 
 namespace torch.silerovad
 
@@ -311,10 +311,10 @@ def dropChunks (tss : Array SpeechTimestamp) (wav : Array Float) : Array Float :
 
 /-- WAV-only audio loader (PCM16 WAV through existing Qwen3-ASR frontend parser). -/
 def readAudio (path : String) (samplingRate : Nat := 16000) : IO (Array Float) := do
-  let (srcRate, wav) ← qwen3asr.loadMonoPcm16Wav path
+  let (srcRate, wav) ← audio.loadMonoPcm16Wav path
   if srcRate == samplingRate then
     pure wav
   else
-    pure (qwen3asr.resampleLinear wav srcRate samplingRate)
+    pure (audio.resampleLinear wav srcRate samplingRate)
 
 end torch.silerovad

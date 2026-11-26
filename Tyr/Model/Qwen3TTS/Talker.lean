@@ -16,7 +16,7 @@ import Tyr.Lib.Module.Core
 import Tyr.Core.TensorStruct.Derive
 import Tyr.Lib.Module.RMSNorm
 import Tyr.Model.Qwen.Layer
-import Tyr.Model.Qwen.RoPE
+import Tyr.Lib.RoPE
 import Tyr.Model.Qwen3TTS.Config
 import Tyr.Lib.Module.Init
 
@@ -412,29 +412,29 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
 
     let support ← dtype.val.acquireConstantSupport cpDevice
     let _ := support.down
-    let mut cpCachesInit : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq 0 dtype.val) := #[]
+    let mut cpCachesInit : Array (GroupedQueryAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq 0 dtype.val) := #[]
     for _ in [:cpCfg.numHiddenLayers] do
       cpCachesInit := cpCachesInit.push
-        (qwen.QwenAttention.initKVCache
+        (GroupedQueryAttention.initKVCache
           cpMaxSeq
           (batch := batch) (num_kv_heads := cpCfg.numKeyValueHeads) (head_dim := cpCfg.headDim)
           cpDevice dtype.val (h := Nat.succ_pos _))
 
     let cpStep : {n : Nat} →
         Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } →
-        Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq n dtype.val) → n < cpMaxSeq →
+        Array (GroupedQueryAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq n dtype.val) → n < cpMaxSeq →
         IO (Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } ×
-          Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq (n + 1) dtype.val)) :=
+          Array (GroupedQueryAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq (n + 1) dtype.val)) :=
       fun {n} tokenEmbed caches hn => do
         let xProj : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } := TalkerCodePredictor.projectInputs m.codePredictor tokenEmbed
         let cos : Tensor { shape := #[1, cpCfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice cpCosAll 0 n 1
         let sin : Tensor { shape := #[1, cpCfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice cpSinAll 0 n 1
         let mut h : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } := xProj
-        let mut next : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq (n + 1) dtype.val) := Array.mkEmpty caches.size
+        let mut next : Array (GroupedQueryAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq (n + 1) dtype.val) := Array.mkEmpty caches.size
         for hi : i in [:m.codePredictor.layers.size] do
           let layer : CodePredictorLayer (dtype := dtype) (device := device) cpCfg :=
             m.codePredictor.layers[i]'hi.upper
-          let cache : qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq n dtype.val ←
+          let cache : GroupedQueryAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq n dtype.val ←
             match caches[i]? with
             | some cache => pure cache
             | none => throw <| IO.userError s!"missing code predictor cache at index {i}"
@@ -446,7 +446,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
     -- Positions 0 and 1 hold the talker state and the first code; group `g` reads position `g + 1`.
     let rec residual (g : Nat) (hg : g < residualGroups)
         (cpHidden : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device })
-        (caches : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq (g + 2) dtype.val))
+        (caches : Array (GroupedQueryAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq (g + 2) dtype.val))
         (tokenCols : Array (Tensor { shape := #[batch, 1], dtype := .Int64, device := device }))
         (summedEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device })
         : IO (Array (Tensor { shape := #[batch, 1], dtype := .Int64, device := device }) ×
@@ -601,10 +601,10 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
     let support ← dtype.val.acquireConstantSupport cacheDevice
     let _ := support.down
     let cacheMaxLen : Nat := seq + maxFrames + 1
-    let mut caches0 : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen 0 dtype.val) := #[]
+    let mut caches0 : Array (GroupedQueryAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen 0 dtype.val) := #[]
     for _ in [:cfg.numHiddenLayers] do
       caches0 := caches0.push
-        (qwen.QwenAttention.initKVCache
+        (GroupedQueryAttention.initKVCache
           cacheMaxLen
           (batch := batch) (num_kv_heads := cfg.numKeyValueHeads) (head_dim := cfg.headDim)
           cacheDevice dtype.val (h := Nat.succ_pos _))
@@ -616,16 +616,16 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
       sinRaw.to cacheDevice
 
     -- One token through every talker layer, written at the caches' fill position.
-    let talkerStep : {n : Nat} → Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } → Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen n dtype.val) → n < cacheMaxLen →
-        IO (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } × Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen (n + 1) dtype.val)) :=
+    let talkerStep : {n : Nat} → Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } → Array (GroupedQueryAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen n dtype.val) → n < cacheMaxLen →
+        IO (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } × Array (GroupedQueryAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen (n + 1) dtype.val)) :=
       fun {n} x caches hn => do
         let cos : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice cosAll 0 n 1
         let sin : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice sinAll 0 n 1
         let mut h : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := x
-        let mut next : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen (n + 1) dtype.val) := Array.mkEmpty caches.size
+        let mut next : Array (GroupedQueryAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen (n + 1) dtype.val) := Array.mkEmpty caches.size
         for hi : i in [:m.model.layers.size] do
           let layer : TalkerLayer (dtype := dtype) (device := device) cfg := m.model.layers[i]'hi.upper
-          let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen n dtype.val ←
+          let cache : GroupedQueryAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen n dtype.val ←
             match caches[i]? with
             | some cache => pure cache
             | none => throw <| IO.userError s!"missing talker cache at index {i}"
@@ -635,8 +635,8 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
         pure (m.model.norm.forward3d h, next)
 
     -- Prefill KV cache from prompt/context so per-frame generation only runs one token step.
-    let rec prefill (pos : Nat) (hpos : pos ≤ seq) (caches : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen pos dtype.val))
-        (lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) : IO (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } × Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen seq dtype.val)) := do
+    let rec prefill (pos : Nat) (hpos : pos ≤ seq) (caches : Array (GroupedQueryAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen pos dtype.val))
+        (lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) : IO (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } × Array (GroupedQueryAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen seq dtype.val)) := do
       if h : pos = seq then
         pure (lastHidden, h ▸ caches)
       else
@@ -658,7 +658,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
     }
 
 
-    let rec frames (step : Nat) (hstep : step ≤ maxFrames) (caches : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen (seq + step) dtype.val))
+    let rec frames (step : Nat) (hstep : step ≤ maxFrames) (caches : Array (GroupedQueryAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen (seq + step) dtype.val))
         (lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) (done : Array Bool) (lengths : Array Nat)
         (historyCols : Array (Tensor { shape := #[batch, 1], dtype := .Int64, device := device }))
         : IO (Array Nat) := do

@@ -1,7 +1,7 @@
 import Tyr.IO.Hub
 import Tyr.Model.Qwen3ASR
 import Tyr.Model.Qwen3ASR.StreamModel
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 open torch.qwen3asr
 
@@ -126,8 +126,8 @@ private def transcribeWavStreamed
     (modelDir : String)
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (pre : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (pre : torch.audio.LogMelConfig)
     (hMel : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPath : String)
     (language : Option String)
@@ -138,8 +138,8 @@ private def transcribeWavStreamed
     : IO ASRTranscription := do
   if chunkSec <= 0.0 || hopSec <= 0.0 then
     throw <| IO.userError "stream-chunk-sec and stream-hop-sec must be > 0"
-  let wav16k ← normalizeAudioTo16kFromWav wavPath
-  let maxSamples := PreprocessorConfig.expectedSampleCount pre
+  let wav16k ← torch.audio.normalizeAudioTo16kFromWav wavPath
+  let maxSamples := torch.audio.LogMelConfig.expectedSampleCount pre
   let effectiveDecodeMode ←
     if decodeMode == .fullAccumulation && wav16k.size > maxSamples then do
       let maxSec := maxSamples.toFloat / 16000.0
@@ -217,8 +217,8 @@ def runMain (argv : List String) : IO UInt32 := do
   }
   IO.println s!"Resolved model dir: {modelDir}"
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
-  let tok ← tokenizer.qwen3.loadTokenizer modelDir
-  let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
+  let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
+  let pre ← torch.audio.LogMelConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
     throw (IO.userError s!"preprocessor feature_size {pre.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
   let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")

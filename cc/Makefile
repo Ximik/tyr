@@ -156,7 +156,7 @@ BUILD_FLAGS := $(OUT_DIR)/build-flags.txt
 
 SRCS := \
 	tyr.cpp\
-	tyr_qwen35.cpp\
+	tyr_gated_delta.cpp\
 	tyr_distributed.cpp\
 	tyr_polar.cpp\
 	tyr_media_stub.cpp\

@@ -108,19 +108,19 @@ def testQwen3GreedyCachedEmptyPromptThrows : IO Unit := do
 set_option linter.unusedVariables false in
 example : True := by
   fail_if_success
-    have := qwen.QwenAttention.initKVCache (batch := 1) (num_kv_heads := 1) (head_dim := 4) 0
+    have := GroupedQueryAttention.initKVCache (batch := 1) (num_kv_heads := 1) (head_dim := 4) 0
   trivial
 
 set_option linter.unusedVariables false in
 example (layer : qwen.QwenLayer (device := .CPU) 8 2 1 4 16 .Float32)
     (x : Tensor { shape := #[1, 1, 8], dtype := .Float32, device := .CPU })
     (cos sin : Tensor { shape := #[1, 2], dtype := .Float32, device := .CPU }) : True := by
-  let fresh : qwen.QwenAttention.KVCache 1 1 4 2 0 .Float32 := qwen.QwenAttention.initKVCache 2
+  let fresh : GroupedQueryAttention.KVCache 1 1 4 2 0 .Float32 := GroupedQueryAttention.initKVCache 2
   -- A step on a fresh cache writes slot 0 and attends over it alone.
-  have : _ × qwen.QwenAttention.KVCache 1 1 4 2 1 .Float32 := layer.forwardStep (by decide) x cos sin fresh (by decide)
+  have : _ × GroupedQueryAttention.KVCache 1 1 4 2 1 .Float32 := layer.forwardStep (by decide) x cos sin fresh (by decide)
   -- Writing slot 1 of a fresh cache would attend over the unwritten slot 0.
   fail_if_success
-    have : _ × qwen.QwenAttention.KVCache 1 1 4 2 2 .Float32 := layer.forwardStep (by decide) x cos sin fresh (by decide)
+    have : _ × GroupedQueryAttention.KVCache 1 1 4 2 2 .Float32 := layer.forwardStep (by decide) x cos sin fresh (by decide)
   trivial
 
 @[test]

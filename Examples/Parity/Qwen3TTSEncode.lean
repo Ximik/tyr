@@ -8,7 +8,7 @@
 -/
 import Examples.Parity.Common
 import Tyr.Model.Qwen3TTS
-import Tyr.Model.Qwen3ASR.Frontend
+import Tyr.IO.Audio
 
 namespace Examples.Parity.Qwen3TTSEncode
 
@@ -22,7 +22,7 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let request : Request ← IO.ofExcept (fromJson? json)
   let ⟨dtypes, encoder⟩ ← SpeechTokenizer12HzEncoder.loadFromDir s!"{args.weights}/speech_tokenizer" device
   have : DType.RealFloating dtypes.compute.val := inferInstance
-  let (rate, wave) ← qwen3asr.loadMonoPcm16Wav request.audio
+  let (rate, wave) ← audio.loadMonoPcm16Wav request.audio
   unless rate == 24000 do
     throw <| IO.userError s!"{request.audio} is {rate} Hz; the speech tokenizer reads 24 kHz"
   let ⟨hs⟩ ← if h : 0 < wave.size then pure (PLift.up h) else throw <| IO.userError "empty audio"

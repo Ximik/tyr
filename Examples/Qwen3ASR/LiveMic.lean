@@ -1,5 +1,5 @@
 import Tyr.Model.Qwen3ASR
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 import Tyr.Core.FFI.AppleAudioInput
 
 namespace Examples.Qwen3ASR
@@ -274,8 +274,8 @@ def runMain (argv : List String) : IO UInt32 := do
   }
   IO.println s!"Resolved model dir: {modelDir}"
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
-  let tok ← tokenizer.qwen3.loadTokenizer modelDir
-  let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
+  let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
+  let pre ← torch.audio.LogMelConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
     throw (IO.userError s!"preprocessor feature_size {pre.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
   let some deviceName := args.device? | throw (IO.userError "missing --device <cpu|mps|cuda>")

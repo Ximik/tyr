@@ -7,7 +7,7 @@
 -/
 import Tyr.IO.Hub
 import Tyr.Model.Qwen3ASR.ConfigIO
-import Tyr.Model.Qwen3ASR.PreprocessorConfig
+import Tyr.Lib.Audio.LogMelConfig
 import Tyr.Model.Qwen3ASR.Weights
 
 namespace torch.qwen3asr.hub

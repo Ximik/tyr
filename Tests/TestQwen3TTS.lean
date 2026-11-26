@@ -113,10 +113,10 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
     let x := inputs.castDType dtype
     let full := layer.forward (by decide) x cos sin
     LeanTest.assertEqual full.actualSpec.dtype x.actualSpec.dtype "Full Qwen layer retains model dtype"
-    let fresh : qwen.QwenAttention.KVCache 1 1 4 5 0 dtype := qwen.QwenAttention.initKVCache 5 (dtype := dtype)
+    let fresh : GroupedQueryAttention.KVCache 1 1 4 5 0 dtype := GroupedQueryAttention.initKVCache 5 (dtype := dtype)
     -- Three prompt tokens followed by two decode tokens exercise the Talker cache path.
-    let step : {n : Nat} → qwen.QwenAttention.KVCache 1 1 4 5 n dtype → n < 5 → String →
-        IO (Tensor { shape := #[1, 1, 8], dtype, device := .CPU } × qwen.QwenAttention.KVCache 1 1 4 5 (n + 1) dtype) :=
+    let step : {n : Nat} → GroupedQueryAttention.KVCache 1 1 4 5 n dtype → n < 5 → String →
+        IO (Tensor { shape := #[1, 1, 8], dtype, device := .CPU } × GroupedQueryAttention.KVCache 1 1 4 5 (n + 1) dtype) :=
       fun {n} cache hn label => do
         let (out, next) := layer.forwardStep (by decide) (Tensor.slice x 1 n 1 (_bounds := by simp; omega))
           (Tensor.slice cos 0 n 1 (_bounds := by simp; omega)) (Tensor.slice sin 0 n 1 (_bounds := by simp; omega)) cache hn

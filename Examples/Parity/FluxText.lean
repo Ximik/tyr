@@ -29,7 +29,7 @@ def maxSeqLen : Nat := 512
 def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let request : Request ← IO.ofExcept (fromJson? json)
   let dir := args.weights.toString
-  let tok ← tokenizer.qwen3.loadTokenizer s!"{dir}/tokenizer"
+  let tok ← tokenizer.ByteLevelBPETokenizer.load s!"{dir}/tokenizer"
   let (ownIds, ownMask) := tokenizer.qwen3.encodePrompt tok request.prompt maxSeqLen
   let ids ← IO.ofExcept (Tensor.fromInt64ArrayAs? (request.input_ids.map (·.toInt64)) #[1, maxSeqLen])
   let mask ← IO.ofExcept (Tensor.fromInt64ArrayAs? (request.attention_mask.map (·.toInt64)) #[1, maxSeqLen])
@@ -39,8 +39,8 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
     (ids.to device) (mask.to device)
   pure {
     json := Json.mkObj [
-      ("input_ids", toJson ((tokenizer.qwen3.toInt64Array ownIds).map (·.toInt))),
-      ("attention_mask", toJson ((tokenizer.qwen3.toInt64Array ownMask).map (·.toInt)))]
+      ("input_ids", toJson ((tokenizer.toInt64Array ownIds).map (·.toInt))),
+      ("attention_mask", toJson ((tokenizer.toInt64Array ownMask).map (·.toInt)))]
     tensors := #[("embeddings", Tensor.toTensor embeddings)]
   }
 

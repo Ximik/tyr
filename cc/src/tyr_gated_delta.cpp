@@ -4,12 +4,12 @@
 
 using namespace torch::indexing;
 
-static torch::Tensor qwen35_l2norm(const torch::Tensor& x, int64_t dim = -1, double eps = 1e-6) {
+static torch::Tensor l2norm(const torch::Tensor& x, int64_t dim = -1, double eps = 1e-6) {
   auto inv_norm = torch::rsqrt((x * x).sum(dim, /*keepdim=*/true) + eps);
   return x * inv_norm;
 }
 
-static std::pair<torch::Tensor, torch::Tensor> qwen35_chunk_gated_delta_rule_impl(
+static std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule_impl(
     const torch::Tensor& query_in,
     const torch::Tensor& key_in,
     const torch::Tensor& value_in,
@@ -18,8 +18,8 @@ static std::pair<torch::Tensor, torch::Tensor> qwen35_chunk_gated_delta_rule_imp
     int64_t chunk_size = 64) {
 
   auto initial_dtype = query_in.dtype();
-  auto query_norm = qwen35_l2norm(query_in, -1, 1e-6);
-  auto key_norm = qwen35_l2norm(key_in, -1, 1e-6);
+  auto query_norm = l2norm(query_in, -1, 1e-6);
+  auto key_norm = l2norm(key_in, -1, 1e-6);
 
   auto query = query_norm.transpose(1, 2).contiguous().to(torch::kFloat32);
   auto key = key_norm.transpose(1, 2).contiguous().to(torch::kFloat32);
@@ -118,7 +118,7 @@ static std::pair<torch::Tensor, torch::Tensor> qwen35_chunk_gated_delta_rule_imp
   return {core_attn_out, last_recurrent_state};
 }
 
-static std::pair<torch::Tensor, torch::Tensor> qwen35_recurrent_gated_delta_rule_impl(
+static std::pair<torch::Tensor, torch::Tensor> recurrent_gated_delta_rule_impl(
     const torch::Tensor& query_in,
     const torch::Tensor& key_in,
     const torch::Tensor& value_in,
@@ -127,8 +127,8 @@ static std::pair<torch::Tensor, torch::Tensor> qwen35_recurrent_gated_delta_rule
     const torch::Tensor& initial_state_in) {
 
   auto initial_dtype = query_in.dtype();
-  auto query_norm = qwen35_l2norm(query_in, -1, 1e-6);
-  auto key_norm = qwen35_l2norm(key_in, -1, 1e-6);
+  auto query_norm = l2norm(query_in, -1, 1e-6);
+  auto key_norm = l2norm(key_in, -1, 1e-6);
 
   auto query = query_norm.transpose(1, 2).contiguous().to(torch::kFloat32);
   auto key = key_norm.transpose(1, 2).contiguous().to(torch::kFloat32);
@@ -170,7 +170,7 @@ static std::pair<torch::Tensor, torch::Tensor> qwen35_recurrent_gated_delta_rule
 
 extern "C" {
 
-lean_object* lean_torch_qwen35_chunk_gated_delta_rule(
+lean_object* lean_torch_chunk_gated_delta_rule(
     b_lean_obj_arg query,
     b_lean_obj_arg key,
     b_lean_obj_arg value,
@@ -181,14 +181,14 @@ lean_object* lean_torch_qwen35_chunk_gated_delta_rule(
   auto value_ = borrowTensor(value);
   auto g_ = borrowTensor(g);
   auto beta_ = borrowTensor(beta);
-  auto [out, state] = qwen35_chunk_gated_delta_rule_impl(query_, key_, value_, g_, beta_);
+  auto [out, state] = chunk_gated_delta_rule_impl(query_, key_, value_, g_, beta_);
   lean_object* result = lean_alloc_ctor(0, 2, 0);
   lean_ctor_set(result, 0, giveTensor(out));
   lean_ctor_set(result, 1, giveTensor(state));
   return result;
 }
 
-lean_object* lean_torch_qwen35_recurrent_gated_delta_rule(
+lean_object* lean_torch_recurrent_gated_delta_rule(
     b_lean_obj_arg query,
     b_lean_obj_arg key,
     b_lean_obj_arg value,
@@ -202,7 +202,7 @@ lean_object* lean_torch_qwen35_recurrent_gated_delta_rule(
   auto beta_ = borrowTensor(beta);
   auto initial_state_ = borrowTensor(initial_state);
   auto [out, state] =
-      qwen35_recurrent_gated_delta_rule_impl(query_, key_, value_, g_, beta_, initial_state_);
+      recurrent_gated_delta_rule_impl(query_, key_, value_, g_, beta_, initial_state_);
   lean_object* result = lean_alloc_ctor(0, 2, 0);
   lean_ctor_set(result, 0, giveTensor(out));
   lean_ctor_set(result, 1, giveTensor(state));

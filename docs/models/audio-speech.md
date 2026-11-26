@@ -33,9 +33,8 @@ the returned placement is shared across the model's indexed fields.
 - A **pretrained resolution** step that accepts either a local directory or a
   HuggingFace repo id and downloads/caches through `Tyr.IO.Hub`.
 
-The common audio currency is a 16 kHz mono waveform as `Array Float`. WAV loading,
-resampling, and log-mel features are shared through the Qwen3-ASR frontend
-(`Tyr/Model/Qwen3ASR/Frontend.lean`), reused by SileroVAD, Whisper, and Qwen3TTS.
+The common audio currency is a 16 kHz mono waveform as `Array Float`. WAV loading is in
+`Tyr/IO/Audio.lean`; resampling and log-mel features are in `Tyr/Lib/Audio/`.
 
 ### KittenTTS (`torch.kittentts`)
 
@@ -162,9 +161,9 @@ Configs are layered (`Tyr/Model/Qwen3ASR/Config.lean`): `AudioEncoderConfig`,
 `ThinkerConfig.isForcedAligner` detects aligner checkpoints by `model_type`, and
 `lmHeadOutDim` switches the LM head between vocab size and `classifyNum` accordingly.
 
-The **frontend** (`Frontend.lean`) provides the unified audio input surface plus
-Whisper-style log-mel extraction (`waveformToWhisperFeaturesDynamic`,
-`normalizeAudioTo16kFromWav`, `normalizeAudioInputTo16k`):
+The **frontend** (`Frontend.lean`) provides the unified audio input surface
+(`normalizeAudioInputTo16k`); log-mel features come from
+`audio.logMelFeaturesDynamic` (`Tyr/Lib/Audio/LogMel.lean`):
 
 ```lean
 inductive ASRAudioInput where
@@ -178,8 +177,8 @@ The **offline API** (`Transcribe.lean`) returns
 `ASRTranscription` (`language`, `text`, `timeStamps : Option ForcedAlignResult`) through
 `transcribeWaveform(s)`, `transcribeWav(s)`, `transcribeAudioInput(s)`, and
 `transcribeAudioSource(s)` — both free functions and method-style wrappers on
-`Qwen3ASRForConditionalGeneration`. All take the model, a `tokenizer.qwen3.QwenTokenizer`,
-and a `PreprocessorConfig`, plus optional `forcedAligner`, `context`, `language`,
+`Qwen3ASRForConditionalGeneration`. All take the model, a `tokenizer.ByteLevelBPETokenizer`,
+and a `audio.LogMelConfig`, plus optional `forcedAligner`, `context`, `language`,
 `returnTimeStamps`, `maxNewTokens`, and `eosTokenIds` arguments. Long audio is chunked
 internally (20 min max per chunk, 3 min when timestamps are requested).
 
@@ -195,7 +194,7 @@ inductive StreamingDecodeMode where
 abbrev StreamingDecodeFn := String → Array Float → IO String
 
 def streamingTranscribe
-    (tok : tokenizer.qwen3.QwenTokenizer) (decodeFn : StreamingDecodeFn)
+    (tok : tokenizer.ByteLevelBPETokenizer) (decodeFn : StreamingDecodeFn)
     (pcm16k : Array Float) (state : ASRStreamingState) : IO ASRStreamingState
 ```
 
@@ -273,15 +272,15 @@ structure WhisperBundle where
   device : Device
   dtype : RealFloatingDType
   model : WhisperForConditionalGeneration (device := device) cfg dtype.val
-  tok : tokenizer.qwen3.QwenTokenizer
-  preprocessor : PreprocessorConfig
+  tok : tokenizer.ByteLevelBPETokenizer
+  preprocessor : audio.LogMelConfig
 
 def loadFromPretrainedDir (modelDir : String) : IO WhisperBundle
 
 def transcribeWav {cfg : WhisperConfig} {device : Device} {dtype : DType}
     [DType.RealFloating dtype]
     (model : WhisperForConditionalGeneration (device := device) cfg dtype)
-    (tok : tokenizer.qwen3.QwenTokenizer) (pre : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer) (pre : audio.LogMelConfig)
     (wavPath : String) (language : String := "en")
     (maxNewTokens : UInt64 := 128)      -- 0 = model maximum
     (noTimestamps : Bool := true) (decodeOpts : WhisperDecodeOptions := {})
@@ -352,7 +351,7 @@ open torch torch.qwen3tts
 
 let cfg ← Qwen3TTSConfig.loadFromPretrainedDir modelDir
 let ⟨dtypes, model⟩ ← Qwen3TTSForConditionalGeneration.loadSharded modelDir cfg device
-let tok ← tokenizer.qwen3.loadTokenizer modelDir
+let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
 -- example-local helper: folds text, language id, speaker embedding into talker inputs
 let talkerInputs ← buildTalkerInputsEquivalent cfg model tokenIds languageId thinkMode speakerEmbed
 
@@ -378,8 +377,8 @@ open torch.qwen3asr
 -- offline, with optional forced-alignment timestamps
 let modelDir ← hub.resolvePretrainedDir "Qwen/Qwen3-ASR-0.6B" {}
 let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
-let tok ← tokenizer.qwen3.loadTokenizer modelDir
-let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
+let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
+let pre ← audio.LogMelConfig.loadFromPretrainedDir modelDir
 let ⟨dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg device
 let outs ← model.transcribeWavs tok pre #["MLKDream.wav"]
   (languages := #[some "English"]) (returnTimeStamps := false)

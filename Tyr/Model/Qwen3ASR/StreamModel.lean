@@ -4,7 +4,7 @@ import Tyr.Model.Qwen3ASR.Weights
 import Tyr.Model.Qwen3ASR.Streaming
 import Tyr.Lib.Inference.StreamingConsensus
 import Tyr.Model.SileroVAD.VADProvider
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 namespace torch.qwen3asr
 
@@ -18,8 +18,8 @@ structure StreamModel where
   device : Device
   dtype : RealFloatingDType
   model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg
-  tok : tokenizer.qwen3.QwenTokenizer
-  preprocessor : PreprocessorConfig
+  tok : tokenizer.ByteLevelBPETokenizer
+  preprocessor : audio.LogMelConfig
   /-- The preprocessor produces as many mel bins as the audio encoder consumes; checked on load. -/
   melBinsMatch : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins
   modelDir : String
@@ -64,8 +64,8 @@ def loadFromPretrained
     includePreprocessor := true
   }
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
-  let tok ← tokenizer.qwen3.loadTokenizer modelDir
-  let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
+  let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
+  let preprocessor ← audio.LogMelConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
   let ⟨melBinsMatch⟩ ← if h : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then
       pure (PLift.up h)
     else throw (IO.userError s!"Qwen3-ASR preprocessor feature_size {preprocessor.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
@@ -156,9 +156,9 @@ def pushAudio
   if decodedSteps == 0 then
     pure (s', { didDecode := false, stableAppend := "", unstableText := "", fullText := "", mode := "streaming_step" })
   else
-    let ids := tokenizer.qwen3.encodeText m.tok asrNext.text
+    let ids := tokenizer.ByteLevelBPETokenizer.encodeText m.tok asrNext.text
     let (cs', delta) := Tyr.Text.updateWithSignals
-      s'.textConsensus ids vadSignal.speechActive vadSignal.boundary (tokenizer.qwen3.decodeText m.tok)
+      s'.textConsensus ids vadSignal.speechActive vadSignal.boundary (tokenizer.ByteLevelBPETokenizer.decodeText m.tok)
     let decodedSamples := decodedSteps * asrNext.stepSizeSamples
     let s'' := {
       s' with
@@ -192,9 +192,9 @@ def flush
   if asrNext.chunkId == beforeChunkId then
     pure (s1, { didDecode := false, stableAppend := "", unstableText := "", fullText := "", mode := "streaming_step" })
   else
-    let ids := tokenizer.qwen3.encodeText m.tok asrNext.text
+    let ids := tokenizer.ByteLevelBPETokenizer.encodeText m.tok asrNext.text
     let (cs', delta) := Tyr.Text.updateWithSignals
-      s1.textConsensus ids false true (tokenizer.qwen3.decodeText m.tok)
+      s1.textConsensus ids false true (tokenizer.ByteLevelBPETokenizer.decodeText m.tok)
     let s' := {
       s1 with
       textConsensus := cs'

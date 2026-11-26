@@ -10,6 +10,7 @@
   - Merges: For each merge: left (u32), right (u32), result (u32)
   - Special tokens: For each: length (u16), string (UTF-8), id (u32)
 -/
+import Tyr.Core.Util
 import Tyr.Lib.Tokenizer.Types
 import Tyr.Lib.Tokenizer.SpecialTokens
 
@@ -36,24 +37,6 @@ def writeU16 (n : UInt16) : ByteArray :=
     (n &&& 0xFF).toUInt8,
     ((n >>> 8) &&& 0xFF).toUInt8
   ]
-
-/-- Read a UInt32 from bytes at offset (little-endian) -/
-def readU32 (bytes : ByteArray) (offset : Nat) : Option UInt32 :=
-  if offset + 4 > bytes.size then none
-  else
-    let b0 := bytes[offset]!
-    let b1 := bytes[offset + 1]!
-    let b2 := bytes[offset + 2]!
-    let b3 := bytes[offset + 3]!
-    some (b0.toUInt32 ||| (b1.toUInt32 <<< 8) ||| (b2.toUInt32 <<< 16) ||| (b3.toUInt32 <<< 24))
-
-/-- Read a UInt16 from bytes at offset (little-endian) -/
-def readU16 (bytes : ByteArray) (offset : Nat) : Option UInt16 :=
-  if offset + 2 > bytes.size then none
-  else
-    let b0 := bytes[offset]!
-    let b1 := bytes[offset + 1]!
-    some (b0.toUInt16 ||| (b1.toUInt16 <<< 8))
 
 private def natToU16? (n : Nat) : Option UInt16 :=
   if n <= 65535 then
@@ -122,12 +105,12 @@ def deserialize (bytes : ByteArray) : Option BPETokenizer := do
     if bytes[i]! != magic[i]! then failure
 
   -- Read header
-  let version ← readU32 bytes 8
+  let version ← bytes.readUInt32LE? 8
   if version != formatVersion then failure
 
-  let vocabSize ← readU32 bytes 12
-  let numMerges ← readU32 bytes 16
-  let numSpecial ← readU32 bytes 20
+  let vocabSize ← bytes.readUInt32LE? 12
+  let numMerges ← bytes.readUInt32LE? 16
+  let numSpecial ← bytes.readUInt32LE? 20
 
   let mut offset := 24
 
@@ -135,7 +118,7 @@ def deserialize (bytes : ByteArray) : Option BPETokenizer := do
   let mut idToBytes := Array.mkEmpty vocabSize.toNat
   let mut bytesToId : Std.HashMap ByteArray UInt32 := {}
   for i in [:vocabSize.toNat] do
-    let len ← readU16 bytes offset
+    let len ← bytes.readUInt16LE? offset
     offset := offset + 2
     if offset + len.toNat > bytes.size then failure
     let tokenBytes := bytes.extract offset (offset + len.toNat)
@@ -148,9 +131,9 @@ def deserialize (bytes : ByteArray) : Option BPETokenizer := do
   let mut mergeLookup : Std.HashMap (UInt32 × UInt32) UInt32 := {}
   let mut mergePriority : Std.HashMap (UInt32 × UInt32) Nat := {}
   for idx in [:numMerges.toNat] do
-    let left ← readU32 bytes offset
-    let right ← readU32 bytes (offset + 4)
-    let result ← readU32 bytes (offset + 8)
+    let left ← bytes.readUInt32LE? offset
+    let right ← bytes.readUInt32LE? (offset + 4)
+    let result ← bytes.readUInt32LE? (offset + 8)
     offset := offset + 12
     let rule := { left := left, right := right, result := result : MergeRule }
     merges := merges.push rule
@@ -162,13 +145,13 @@ def deserialize (bytes : ByteArray) : Option BPETokenizer := do
   let mut specialTokens : Std.HashMap String UInt32 := {}
   let mut idToSpecial : Std.HashMap UInt32 String := {}
   for _ in [:numSpecial.toNat] do
-    let len ← readU16 bytes offset
+    let len ← bytes.readUInt16LE? offset
     offset := offset + 2
     if offset + len.toNat > bytes.size then failure
     let strBytes := bytes.extract offset (offset + len.toNat)
     let str ← String.fromUTF8? strBytes
     offset := offset + len.toNat
-    let id ← readU32 bytes offset
+    let id ← bytes.readUInt32LE? offset
     offset := offset + 4
     specialTokens := specialTokens.insert str id
     idToSpecial := idToSpecial.insert id str

@@ -345,11 +345,11 @@ setup/result errors without leaks, and fatal callback errors in separate process
 | `tyr_distributed.cpp` | `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/Core/FFI/Distributed.lean` |
 | `tyr_polar.cpp` | `lean_torch_xxt`, `ba_plus_cAA`, `newton_schulz_step`, `polar_express`, `muon_orthogonalize`, `cautious_update` | manifold/optimizer modules |
 | `tyr_parquet.cpp` | `lean_parquet_*` Arrow/Parquet readers | `Tyr/Core/FFI/Parquet.lean` |
-| `tyr_qwen35.cpp` | `lean_torch_qwen35_{chunk,recurrent}_gated_delta_rule` linear attention | `Tyr/Model/Qwen35/Model.lean` |
+| `tyr_gated_delta.cpp` | `lean_torch_{chunk,recurrent}_gated_delta_rule` linear attention | `Tyr/Core/FFI/GatedDelta.lean` |
 | `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/Core/FFI/AppleAudio*.lean` |
 | `tyr_media_stub.cpp` | non-Apple error stubs for the media entry points | same |
 
-Only `tyr_qwen35.cpp` includes `cc/include/tyr_tensor.h`; the other units
+Only `tyr_gated_delta.cpp` includes `cc/include/tyr_tensor.h`; the other units
 forward-declare the three helpers themselves.
 
 ### Build orchestration in `lakefile.lean`

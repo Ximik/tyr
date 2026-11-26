@@ -1,4 +1,4 @@
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 namespace tokenizer.qwen35
 
@@ -7,12 +7,12 @@ Qwen3.5 uses the same HuggingFace `tokenizer.json` model format as Qwen3 in the
 current checkpoints we support, so reuse the full tokenizer loader/codec and
 specialize only the chat template surface here.
 -/
-abbrev QwenTokenizer := tokenizer.qwen3.QwenTokenizer
+abbrev QwenTokenizer := tokenizer.ByteLevelBPETokenizer
 
-abbrev loadTokenizer := tokenizer.qwen3.loadTokenizer
-abbrev encodeText := tokenizer.qwen3.encodeText
-abbrev decodeText := tokenizer.qwen3.decodeText
-abbrev decodeOne := tokenizer.qwen3.decodeOne
+abbrev loadTokenizer := tokenizer.ByteLevelBPETokenizer.load
+abbrev encodeText := tokenizer.ByteLevelBPETokenizer.encodeText
+abbrev decodeText := tokenizer.ByteLevelBPETokenizer.decodeText
+abbrev decodeOne := tokenizer.ByteLevelBPETokenizer.decodeOne
 
 /-- Qwen3.5 generation prompt for a single user turn with `enable_thinking=false`,
     which is the default branch in the HF tokenizer template when no explicit

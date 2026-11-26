@@ -11,11 +11,12 @@ import Examples.Parity.Common
 import Tyr.Core.Typed.Neural
 import Tyr.Model.Whisper.ConfigIO
 import Tyr.Model.Whisper.Weights
-import Tyr.Model.Qwen3ASR.Frontend
+import Tyr.Lib.Audio.LogMel
+import Tyr.Lib.Audio.Waveform
 
 namespace Examples.Parity.Whisper
 
-open Lean torch torch.whisper torch.whisper.WhisperForConditionalGeneration torch.qwen3asr
+open Lean torch torch.whisper torch.whisper.WhisperForConditionalGeneration
 
 structure Request where
   dtype : String
@@ -69,7 +70,7 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let request : Request ← IO.ofExcept (fromJson? json)
   let weights := args.weights.toString
   let cfg ← WhisperConfig.loadFromPretrainedDir weights {}
-  let pre ← PreprocessorConfig.loadFromPretrainedDir weights (requiredSamplingRate := some 16000) {
+  let pre ← audio.LogMelConfig.loadFromPretrainedDir weights (requiredSamplingRate := some 16000) {
     featureSize := cfg.numMelBins
     featureSizePos := cfg.numMelBinsPos
     hopLength := 160
@@ -88,8 +89,8 @@ def probe (args : Args) (device : Device) (json : Json) : IO Output := do
   let support ← dtype.val.acquireConstantSupport device
   let _ := support.down
 
-  let features ← waveformToWhisperFeatures pre (← normalizeAudioTo16kFromWav request.audio)
-  let frames := PreprocessorConfig.expectedFrames pre
+  let features ← audio.logMelFeatures pre (← audio.normalizeAudioTo16kFromWav request.audio)
+  let frames := audio.LogMelConfig.expectedFrames pre
   let mel : Tensor { dtype := .Float32, device := device, shape := #[1, cfg.numMelBins, frames] } :=
     (Tensor.reshape features.inputFeatures #[1, cfg.numMelBins, frames] (by simp [hMel, frames])).to device
   let encoder ← model.encode (frames := frames) mel features.framesPos

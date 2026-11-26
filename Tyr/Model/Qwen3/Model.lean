@@ -81,7 +81,7 @@ def forwardEmbeds {batch seq : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) := none)
     : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 } :=
-  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.half_head_dim cfg.rope_theta device
+  let (cos, sin) := Tensor.rotaryFreqs seq cfg.half_head_dim cfg.rope_theta device
   let hidden :=
     match attnMask with
     | some mask =>
@@ -109,7 +109,7 @@ def forwardWithHiddenStates {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) := none)
     : CausalLMOutput (device := device) cfg batch seq :=
-  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.half_head_dim cfg.rope_theta device
+  let (cos, sin) := Tensor.rotaryFreqs seq cfg.half_head_dim cfg.rope_theta device
   let hiddenStates :=
     match attnMask with
     | some mask => m.model.forwardWithHiddenStatesMasked cfg inputIds cos sin mask
@@ -121,7 +121,7 @@ def forwardWithHiddenStates {batch seq : Nat}
 
 /-- One-layer KV cache type for cached decoding. -/
 abbrev LayerKVCache (cfg : Config) (batch cap len : Nat) :=
-  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap len
+  GroupedQueryAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap len
 
 private def initLayerKVCaches {batch : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
@@ -130,7 +130,7 @@ private def initLayerKVCaches {batch : Nat}
     (h : 0 < maxLen := by omega)
     : Array (LayerKVCache (device := device) cfg batch maxLen 0) :=
   m.model.layers.toArray.map (fun _ =>
-    qwen.QwenAttention.initKVCache
+    GroupedQueryAttention.initKVCache
       maxLen
       (batch := batch)
       (num_kv_heads := cfg.num_key_value_heads)
@@ -289,7 +289,7 @@ def generateGreedy {batch seq : Nat}
   let cacheDevice := inputsEmbeds.device
   let cacheMaxLen : Nat := seq + maxNewTokens
   let eosVector := eosVectorOnDevice (batch := batch) eosTokenIds cacheDevice
-  let (cosAll, sinAll) := qwen.computeFreqsOnDevice cacheMaxLen cfg.half_head_dim cfg.rope_theta cacheDevice
+  let (cosAll, sinAll) := Tensor.rotaryFreqs cacheMaxLen cfg.half_head_dim cfg.rope_theta cacheDevice
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
   let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.slice inputsEmbeds 1 0 1
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 caches0 (Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
@@ -332,7 +332,7 @@ def forcedLogits {batch seq steps : Nat}
   let inputsEmbeds := m.embedTokens inputIds
   let cacheDevice := inputsEmbeds.device
   let cacheMaxLen : Nat := seq + steps
-  let (cosAll, sinAll) := qwen.computeFreqsOnDevice cacheMaxLen cfg.half_head_dim cfg.rope_theta cacheDevice
+  let (cosAll, sinAll) := Tensor.rotaryFreqs cacheMaxLen cfg.half_head_dim cfg.rope_theta cacheDevice
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := by omega)
   let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.slice inputsEmbeds 1 0 1
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 caches0 (by omega)

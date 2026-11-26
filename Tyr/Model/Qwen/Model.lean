@@ -13,7 +13,7 @@ import Tyr.Core.TensorStruct.Derive
 import Tyr.Lib.Module.RMSNorm
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.Layer
-import Tyr.Model.Qwen.RoPE
+import Tyr.Lib.RoPE
 
 namespace torch.qwen
 

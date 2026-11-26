@@ -56,7 +56,7 @@ open torch
 
 variable {device : Device} {dtype : DType}
 open torch.Model
-open torch.laguna torch.qwen35
+open torch.laguna
 
 private def check (cond : Bool) (msg : String) : IO Unit := do
   if cond then

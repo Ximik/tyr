@@ -1,7 +1,7 @@
 /-
   Tyr/Model/Qwen.lean
 
-  Qwen3 transformer building blocks (config, RoPE, attention, MLP, layers,
+  Qwen3 transformer building blocks (config, MLP, layers,
   full model, text embedder, weight loading).
 
   This is the shared substrate for the Qwen3 and Qwen2.5-Omni causal LMs
@@ -12,8 +12,6 @@
 
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.ConfigIO
-import Tyr.Model.Qwen.RoPE
-import Tyr.Model.Qwen.Attention
 import Tyr.Model.Qwen.MLP
 import Tyr.Model.Qwen.Layer
 import Tyr.Model.Qwen.Model

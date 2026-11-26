@@ -21,7 +21,7 @@ The reuse structure matters more than the table suggests:
 
 - `torch.qwen` (`Tyr/Model/Qwen/`) is the base layer: config, GQA attention with KV cache, SwiGLU MLP, pre-norm layer, and the `Qwen3Model` backbone. Its header still says "for Flux text encoding"; it is also the substrate for Qwen3 and Qwen2.5-Omni.
 - `torch.qwen3` wraps `qwen.Qwen3Model` with an LM head and KV-cached greedy generation. `torch.qwen25omni` is just 3B/7B config defaults plus HF name-prefix-aware (`thinker.`/`language_model.`) weight loading over `qwen3.Qwen3ForCausalLM` (`abbrev` at `Tyr/Model/Qwen25Omni/Weights.lean`).
-- `torch.qwen35` is an independent, much larger implementation (own config, norms, MoE, hybrid linear/full attention) but reuses `qwen.QwenAttention.KVCache` (aliased at `Tyr/Model/Qwen35/Model.lean`). `torch.qwen36` has no `Model.lean` at all — it is `abbrev`s/`export`s over `qwen35` with Qwen3.6-specific defaults (`Tyr/Model/Qwen35/Qwen36/Pretrained.lean`).
+- `torch.qwen35` is an independent, much larger implementation (own config, norms, MoE, hybrid linear/full attention) but reuses `GroupedQueryAttention.KVCache` (aliased at `Tyr/Model/Qwen35/Model.lean`). `torch.qwen36` has no `Model.lean` at all — it is `abbrev`s/`export`s over `qwen35` with Qwen3.6-specific defaults (`Tyr/Model/Qwen35/Qwen36/Pretrained.lean`).
 - `torch.gemma4` mirrors the qwen35 file layout (Config/Model/Weights/ConfigIO/Pretrained/VL*/Multimodal/Media).
 
 ### The per-family idiom
@@ -74,7 +74,7 @@ def applyFinishedEos (tokens : Tensor { shape := #[n], dtype := .Int64, device :
 
 ### KV caches
 
-The shared incremental cache is `qwen.QwenAttention.KVCache` (`Tyr/Model/Qwen/Attention.lean`):
+The shared incremental cache is `GroupedQueryAttention.KVCache` (`Tyr/Lib/Attention.lean`):
 
 ```lean
 variable {device : Device}
@@ -93,7 +93,7 @@ stable as the sequence grows. Decode restores the capacity shape with checked
 reshape adapters, writes K/V with indexed slice-scatter, and attends over the
 filled prefix. No scalar shape is used as a stand-in for an unknown shape.
 
-Two families extend it: Qwen3.5's `HybridCache` (`Qwen35/Model.lean`) adds per-layer depthwise-conv states `[batch, convDim, kernel]` and recurrent states `[batch, vHeads, kDim, vDim]` for the gated-delta linear-attention layers; Gemma 4's `Gemma4Cache` (`Gemma4/Model.lean`) is one KV cache per layer. `QwenAttention.forwardStep` attends over the cache with libtorch scaled-dot-product attention.
+Two families extend it: Qwen3.5's `HybridCache` (`Qwen35/Model.lean`) adds per-layer depthwise-conv states `[batch, convDim, kernel]` and recurrent states `[batch, vHeads, kDim, vDim]` for the gated-delta linear-attention layers; Gemma 4's `Gemma4Cache` (`Gemma4/Model.lean`) is one KV cache per layer. `GroupedQueryAttention.forwardStep` attends over the cache with libtorch scaled-dot-product attention.
 
 Laguna generation uses `LagunaCacheSession`, an inference-only cache with private
 storage and serialized IO updates. Full-attention layers reserve `maxLen`
@@ -128,7 +128,7 @@ forks, functional snapshots, and FP32/BF16 parity.
 
 ### Qwen base layer (`torch.qwen`)
 
-`Tyr/Model/Qwen/` contains the shared transformer: `QwenConfig` (defaults are Qwen3-4B; the Flux text encoder's comes from its `text_encoder/config.json`), `QwenAttention` (GQA with optional per-head Q/K RMSNorm), `QwenMLP` (SwiGLU), `QwenLayer`, and `Qwen3Model cfg` (embedding + `Array QwenLayer` + final `RMSNorm`). `QwenFluxEmbedder` extracts hidden states from selected layers (default `#[8, 17, 26]`) and concatenates them into Flux text embeddings; `loadQwenFluxEmbedder` loads it from a checkpoint file or a directory of shards.
+`Tyr/Model/Qwen/` contains the shared transformer: `QwenConfig` (defaults are Qwen3-4B; the Flux text encoder's comes from its `text_encoder/config.json`), `GroupedQueryAttention` (GQA with optional per-head Q/K RMSNorm), `QwenMLP` (SwiGLU), `QwenLayer`, and `Qwen3Model cfg` (embedding + `Array QwenLayer` + final `RMSNorm`). `QwenFluxEmbedder` extracts hidden states from selected layers (default `#[8, 17, 26]`) and concatenates them into Flux text embeddings; `loadQwenFluxEmbedder` loads it from a checkpoint file or a directory of shards.
 
 `forwardEmbeds` instead accepts Float32 embeddings shaped
 `#[batch, seq, cfg.hidden_size]`; both forwards accept an optional Bool mask.
@@ -153,9 +153,9 @@ Presets: `Config.qwen35_0_8B`, `Config.qwen35_9B`, `Config.qwen35_35B_A3B`, `Con
 
 ### FFI-backed kernels
 
-Three `@[extern]` opaque kernels sit inside this component (declared `private`, so you cannot call them directly — they run inside the layer forwards):
+Native kernels behind the layer forwards:
 
-- `chunkGatedDeltaRule` / `recurrentGatedDeltaRule` — Qwen3.5 gated delta rule, `Qwen35/Model.lean` → `cc/src/tyr_qwen35.cpp`.
+- `Tensor.chunkGatedDeltaRule` / `Tensor.recurrentGatedDeltaRule` — gated delta rule, `Tyr/Core/Typed/GatedDelta.lean` → `cc/src/tyr_gated_delta.cpp`.
 - `routedTextExpertsForward` — Gemma 4 fused MoE expert forward, `Gemma4/Model.lean` → `cc/src/tyr.cpp`.
 
 ### Model utils (`torch.Model`)

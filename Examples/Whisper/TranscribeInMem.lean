@@ -5,7 +5,6 @@
 import Tyr.Model.Whisper
 
 open torch.whisper
-open torch.qwen3asr
 
 def main (argv : List String) : IO UInt32 := do
   let deviceName :: rest := argv
@@ -18,7 +17,7 @@ def main (argv : List String) : IO UInt32 := do
   let bundle ← loadFromPretrainedDir modelDir device
 
   IO.println s!"Loading WAV from {wavPath}..."
-  let wav16k ← normalizeAudioTo16kFromWav wavPath
+  let wav16k ← torch.audio.normalizeAudioTo16kFromWav wavPath
   IO.println s!"  {wav16k.size} samples ({wav16k.size.toFloat / 16000.0}s)"
 
   IO.println "Transcribing via transcribeWaveform16k..."

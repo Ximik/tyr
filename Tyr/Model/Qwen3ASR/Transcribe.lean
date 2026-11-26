@@ -9,11 +9,13 @@
 import Tyr.Model.Qwen3ASR.Config
 import Tyr.Model.Qwen3ASR.Model
 import Tyr.Model.Qwen3ASR.Frontend
+import Tyr.Lib.Audio.LogMel
+import Tyr.Lib.Audio.Waveform
 import Tyr.Model.Qwen3ASR.Processor
 import Tyr.Model.Qwen3ASR.ForcedAligner
 import Tyr.Model.Qwen3ASR.Streaming
 import Tyr.Model.Qwen3ASR.Pretrained
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 namespace torch.qwen3asr
 
@@ -33,8 +35,8 @@ structure Qwen3ForcedAligner where
   device : Device
   dtype : RealFloatingDType
   model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg
-  tok : tokenizer.qwen3.QwenTokenizer
-  preprocessor : PreprocessorConfig
+  tok : tokenizer.ByteLevelBPETokenizer
+  preprocessor : audio.LogMelConfig
   /-- The preprocessor produces as many mel bins as the audio encoder consumes; checked on load. -/
   melBinsMatch : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins
 
@@ -158,8 +160,8 @@ private def mergeChunkTexts (parts : Array String) : String := Id.run do
 /-- Preprocessor compatibility check for reusing computed frontend features
     between ASR decode and standalone forced-aligner timestamp pass. -/
 private def isFrontendReuseCompatible
-    (base : PreprocessorConfig)
-    (align : PreprocessorConfig)
+    (base : audio.LogMelConfig)
+    (align : audio.LogMelConfig)
     : Bool :=
   base.featureSize == align.featureSize &&
   base.samplingRate == align.samplingRate &&
@@ -189,7 +191,7 @@ private def validateForcedLanguage
 
 private def preparePromptInputIds
     {cfg : Qwen3ASRConfig}
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     (prompt : String)
     (audioLen : Nat)
     : IO (Sigma (fun seq => Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 })) := do
@@ -205,7 +207,7 @@ private def preparePromptInputIds
   pure ⟨seq, inputIds⟩
 
 private def decodeGeneratedText
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     {seq : Nat}
     (outSeq : Nat)
     (outIds : Tensor { device := device, shape := #[1, outSeq], dtype := .Int64 })
@@ -218,10 +220,10 @@ private def decodeGeneratedText
     let flat : Tensor { device := device, shape := #[newSeq], dtype := .Int64 } := Tensor.reshape newOnly #[newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let ids := idsU64.map (fun x => x.toUInt32)
-    pure (tokenizer.qwen3.decodeText tok ids)
+    pure (tokenizer.ByteLevelBPETokenizer.decodeText tok ids)
 
 private def decodeGeneratedTextsBatch
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     {batch seq : Nat}
     (outSeq : Nat)
     (outIds : Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })
@@ -241,7 +243,7 @@ private def decodeGeneratedTextsBatch
       let start := b * rowWidth
       let stop := start + rowWidth
       let rowIds := (idsU64.extract start stop).map (fun x => x.toUInt32)
-      out := out.push (tokenizer.qwen3.decodeText tok rowIds)
+      out := out.push (tokenizer.ByteLevelBPETokenizer.decodeText tok rowIds)
     pure out
 
 private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : Nat}
@@ -256,11 +258,11 @@ private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : Nat}
 private def alignSingleWithModel
     {alignCfg : Qwen3ASRConfig}
     (alignModel : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) alignCfg)
-    (alignTok : tokenizer.qwen3.QwenTokenizer)
+    (alignTok : tokenizer.ByteLevelBPETokenizer)
     (text : String)
     (language : String)
     {melBins frames : Nat} {frontendDevice : Device}
-    (frontendOut : WhisperFrontendOutput (device := frontendDevice) melBins frames)
+    (frontendOut : audio.LogMelFeatures (device := frontendDevice) melBins frames)
     (hMel : melBins = alignCfg.thinkerConfig.audioConfig.numMelBins)
     (audioLen : Nat)
     : IO (Option ForcedAlignResult) := do
@@ -298,9 +300,9 @@ private def alignSingleWithForcedAligner
     (text : String)
     (language : String)
     : IO (Option ForcedAlignResult) := do
-  let preCfg : PreprocessorConfig := { aligner.preprocessor with returnAttentionMask := true }
+  let preCfg : audio.LogMelConfig := { aligner.preprocessor with returnAttentionMask := true }
   let dev := modelDevice aligner.model
-  let ⟨frames, frontendOut⟩ ← waveformToWhisperFeaturesDynamic
+  let ⟨frames, frontendOut⟩ ← audio.logMelFeaturesDynamic
     preCfg
     audio16k
     (minSeconds := minAsrInputSeconds)
@@ -312,15 +314,15 @@ private def alignSingleWithForcedAligner
 private def maybeAlignTimestamps
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     {melBins frames : Nat}
-    (preprocessor : PreprocessorConfig)
+    (preprocessor : audio.LogMelConfig)
     (hMel : melBins = cfg.thinkerConfig.audioConfig.numMelBins)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (text : String)
     (language : String)
     (audio16k : Array Float)
-    (frontendOut : WhisperFrontendOutput (device := device) melBins frames)
+    (frontendOut : audio.LogMelFeatures (device := device) melBins frames)
     (audioLen : Nat)
     (returnTimeStamps : Bool)
     : IO (Option ForcedAlignResult) := do
@@ -346,13 +348,13 @@ private def maybeAlignTimestamps
 private def transcribeWithFrontend
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
+    (tok : tokenizer.ByteLevelBPETokenizer)
     {melBins frames : Nat}
-    (preprocessor : PreprocessorConfig)
+    (preprocessor : audio.LogMelConfig)
     (hMel : melBins = cfg.thinkerConfig.audioConfig.numMelBins)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (audio16k : Array Float)
-    (frontendOut : WhisperFrontendOutput (device := device) melBins frames)
+    (frontendOut : audio.LogMelFeatures (device := device) melBins frames)
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
@@ -391,8 +393,8 @@ private def transcribeWithFrontend
 def transcribeWaveform
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio16k : Array Float)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -414,7 +416,7 @@ def transcribeWaveform
 
   for (chunkWav, offsetSec) in chunks do
     let frontendPack ←
-      waveformToWhisperFeaturesDynamic
+      audio.logMelFeaturesDynamic
         preprocessor
         chunkWav
         (minSeconds := minAsrInputSeconds)
@@ -500,8 +502,8 @@ private def addRowToBuckets
 private def tryTranscribeWaveformsBatchedChunk
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios16k : Array (Array Float))
     (contexts : Array String)
@@ -534,7 +536,7 @@ private def tryTranscribeWaveformsBatchedChunk
     let forceLanguage ← validateForcedLanguage model.supportLanguages (languages[i]!)
     let prompt := buildTextPrompt (contexts[i]!) forceLanguage
     let frontendPack ←
-      waveformToWhisperFeaturesDynamic
+      audio.logMelFeaturesDynamic
         preprocessor
         chunkWav
         (minSeconds := minAsrInputSeconds)
@@ -610,8 +612,8 @@ private def tryTranscribeWaveformsBatchedChunk
 def transcribeWaveforms
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios16k : Array (Array Float))
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -670,8 +672,8 @@ def transcribeWaveforms
 def transcribeWav
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPath : String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -681,7 +683,7 @@ def transcribeWav
     (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ASRTranscription := do
-  let wav16k ← normalizeAudioTo16kFromWav wavPath
+  let wav16k ← audio.normalizeAudioTo16kFromWav wavPath
   transcribeWaveform
     model tok preprocessor hMel wav16k forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
 
@@ -690,8 +692,8 @@ def transcribeWav
 def transcribeAudioInput
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio : ASRAudioInput)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -710,8 +712,8 @@ def transcribeAudioInput
 def transcribeAudioSource
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (source : String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -737,8 +739,8 @@ def transcribeAudioSource
 def transcribeWavs
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPaths : Array String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -752,7 +754,7 @@ def transcribeWavs
     : IO (Array ASRTranscription) := do
   let mut audios16k : Array (Array Float) := Array.mkEmpty wavPaths.size
   for p in wavPaths do
-    audios16k := audios16k.push (← normalizeAudioTo16kFromWav p)
+    audios16k := audios16k.push (← audio.normalizeAudioTo16kFromWav p)
   transcribeWaveforms
     model
     tok
@@ -772,8 +774,8 @@ def transcribeWavs
 def transcribeAudioInputs
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios : Array ASRAudioInput)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -806,8 +808,8 @@ def transcribeAudioInputs
 def transcribeAudioSources
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (sources : Array String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -850,8 +852,8 @@ def loadFromPretrained
   if !ThinkerConfig.isForcedAligner cfg.thinkerConfig then
     throw <| IO.userError
       s!"Requested aligner source is not a forced-aligner checkpoint (model_type={cfg.thinkerConfig.modelType})"
-  let tok ← tokenizer.qwen3.loadTokenizer modelDir
-  let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
+  let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
+  let preprocessor ← audio.LogMelConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
   let ⟨melBinsMatch⟩ ← if h : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then
       pure (PLift.up h)
     else throw (IO.userError s!"Qwen3 forced-aligner preprocessor feature_size {preprocessor.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
@@ -876,8 +878,8 @@ def alignWaveform
   if trimmed.isEmpty then
     pure { items := #[] }
   else
-    let preCfg : PreprocessorConfig := { aligner.preprocessor with returnAttentionMask := true }
-    let ⟨frames, frontendOut⟩ ← waveformToWhisperFeaturesDynamic
+    let preCfg : audio.LogMelConfig := { aligner.preprocessor with returnAttentionMask := true }
+    let ⟨frames, frontendOut⟩ ← audio.logMelFeaturesDynamic
       preCfg
       audio16k
       (minSeconds := minAsrInputSeconds)
@@ -974,8 +976,8 @@ namespace Qwen3ASRForConditionalGeneration
 /-- Method-style offline ASR for one waveform. -/
 def transcribeWaveform
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio16k : Array Float)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -991,8 +993,8 @@ def transcribeWaveform
 /-- Method-style offline ASR for multiple waveforms. -/
 def transcribeWaveforms
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios16k : Array (Array Float))
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -1010,8 +1012,8 @@ def transcribeWaveforms
 /-- Method-style offline ASR from one WAV path. -/
 def transcribeWav
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPath : String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -1027,8 +1029,8 @@ def transcribeWav
 /-- Method-style offline ASR from one unified audio input. -/
 def transcribeAudioInput
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio : ASRAudioInput)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -1044,8 +1046,8 @@ def transcribeAudioInput
 /-- Method-style offline ASR from string source with auto-detection. -/
 def transcribeAudioSource
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (source : String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -1061,8 +1063,8 @@ def transcribeAudioSource
 /-- Method-style offline ASR from WAV paths. -/
 def transcribeWavs
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPaths : Array String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -1080,8 +1082,8 @@ def transcribeWavs
 /-- Method-style offline ASR from unified audio inputs. -/
 def transcribeAudioInputs
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios : Array ASRAudioInput)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -1099,8 +1101,8 @@ def transcribeAudioInputs
 /-- Method-style offline ASR from string sources with auto-detection. -/
 def transcribeAudioSources
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (tok : tokenizer.qwen3.QwenTokenizer)
-    (preprocessor : PreprocessorConfig)
+    (tok : tokenizer.ByteLevelBPETokenizer)
+    (preprocessor : audio.LogMelConfig)
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (sources : Array String)
     (forcedAligner : Option Qwen3ForcedAligner := none)

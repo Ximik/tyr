@@ -13,7 +13,7 @@ import Tyr.Lib.Module.Core
 import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Qwen.Model
 import Tyr.Model.Qwen.Layer
-import Tyr.Model.Qwen.RoPE
+import Tyr.Lib.RoPE
 import Tyr.Model.Qwen3ASR.Config
 import Tyr.Model.Qwen3ASR.AudioEncoder
 import Tyr.Model.Qwen3ASR.ForcedAligner
@@ -171,7 +171,7 @@ def forwardEmbeds {batch seq : Nat}
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, ThinkerLmVocabSize cfg] } :=
   let (cos, sin) :=
-    qwen.computeFreqsOnDevice
+    Tensor.rotaryFreqs
       seq
       cfg.textConfig.halfHeadDim
       cfg.textConfig.ropeTheta
@@ -195,7 +195,7 @@ private def forwardEmbedsMaskedWithPositionRows {batch seq : Nat}
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, ThinkerLmVocabSize cfg] }) := do
   let half := cfg.textConfig.halfHeadDim
   let (baseCos, baseSin) :=
-    qwen.computeFreqsOnDevice
+    Tensor.rotaryFreqs
       seq
       cfg.textConfig.halfHeadDim
       cfg.textConfig.ropeTheta
@@ -386,7 +386,7 @@ def ropeDeltas {batch seq : Nat}
   pure ((← IO.ofExcept (Tensor.fromInt64ArrayAs? deltaVals #[batch, 1])).to device)
 
 abbrev LayerKVCache (cfg : ThinkerConfig) (batch cap len : Nat) (dtype : DType := .Float32) :=
-  qwen.QwenAttention.KVCache (device := device) batch cfg.textConfig.numKeyValueHeads cfg.textConfig.headDim cap len dtype
+  GroupedQueryAttention.KVCache (device := device) batch cfg.textConfig.numKeyValueHeads cfg.textConfig.headDim cap len dtype
 
 private def initLayerKVCaches {batch : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
@@ -396,7 +396,7 @@ private def initLayerKVCaches {batch : Nat}
     (h : 0 < maxLen := by omega)
     : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen 0) :=
   m.textModel.layers.toArray.map (fun _ =>
-    qwen.QwenAttention.initKVCache
+    GroupedQueryAttention.initKVCache
       maxLen
       (batch := batch)
       (num_kv_heads := cfg.textConfig.numKeyValueHeads)
@@ -524,7 +524,7 @@ private def buildStreamingPromptCacheFromEmbeds {seq : Nat}
     : IO (PromptCacheFor (device := device) cfg dtype seq maxNewTokens) := do
   let maxLen : Nat := seq + promptCacheReserve maxNewTokens
   let cacheDevice := inputsEmbeds.device
-  let (cosAll, sinAll) := qwen.computeFreqsOnDevice maxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
+  let (cosAll, sinAll) := Tensor.rotaryFreqs maxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
   let support ← dtype.acquireConstantSupport cacheDevice
   let _ := support.down
   let caches0 := initLayerKVCaches m maxLen cacheDevice (h := by omega)
@@ -755,7 +755,7 @@ def generateGreedy {batch seq frames : Nat}
   let cacheDevice := inputsEmbeds.device
   let cacheMaxLen : Nat := seq + maxNewTokens
   let eosVector := eosVectorOnDevice (batch := batch) eosTokenIds cacheDevice
-  let (cosAll, sinAll) := qwen.computeFreqsOnDevice cacheMaxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
+  let (cosAll, sinAll) := Tensor.rotaryFreqs cacheMaxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
   let support ← dtype.acquireConstantSupport cacheDevice
   let _ := support.down
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
@@ -803,7 +803,7 @@ def forcedLogits {batch seq frames steps : Nat}
   let inputsEmbeds ← buildInputsEmbeds m inputIds inputFeatures featureAttentionMask
   let cacheDevice := inputsEmbeds.device
   let cacheMaxLen : Nat := seq + steps
-  let (cosAll, sinAll) := qwen.computeFreqsOnDevice cacheMaxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
+  let (cosAll, sinAll) := Tensor.rotaryFreqs cacheMaxLen cfg.textConfig.halfHeadDim cfg.textConfig.ropeTheta cacheDevice
   let support ← dtype.acquireConstantSupport cacheDevice
   let _ := support.down
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := by omega)

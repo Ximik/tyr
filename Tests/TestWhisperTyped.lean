@@ -1,7 +1,7 @@
 import Tyr.Model.Whisper
 import Tyr.IO.Checkpoint
 import LeanTest
-import Tyr.Model.Qwen.Tokenizer
+import Tyr.Lib.Tokenizer.ByteLevelBPE
 
 open torch torch.whisper
 namespace Tests.WhisperTyped
@@ -145,11 +145,11 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
     weight := zerosFor #[8], bias := (Tensor.ones #[8]) }
   let projection := Tensor.sliceScatter (zerosFor #[16, 8]) 0 0 ((Tensor.ones #[1, 8]))
   let model := { model with model := { model.model with decoderLayerNorm := norm }, projOut := projection }
-  let tok : tokenizer.qwen3.QwenTokenizer := {
+  let tok : tokenizer.ByteLevelBPETokenizer := {
     vocabSize := 16, idToToken := Array.replicate 16 "a", tokenToId := {}, charToId := {},
     merges := #[], mergeLookup := {}, mergePriority := {}, specialTokens := {},
     idToSpecial := {}, specialList := #[], unkToken := none, padToken := 0, nfc := false }
-  let pre : qwen3asr.PreprocessorConfig := {
+  let pre : audio.LogMelConfig := {
     featureSize := 4, hopLength := 64, nFft := 64,
     nSamples := 2048, nbMaxFrames := 32, chunkLength := 0 }
   let waveform := Array.ofFn (n := 1024) fun i => 0.1 * Float.sin (i.val.toFloat * 0.2)

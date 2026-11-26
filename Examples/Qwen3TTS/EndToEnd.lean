@@ -11,7 +11,7 @@ import Tyr.Core.Torch
 import Tyr.Model.Qwen3TTS
 import Examples.Qwen3TTS.SpeechTokenizerBridge
 import Tyr.Lib.Tokenizer
-import Tyr.Model.Qwen35.TypedOps
+import Tyr.Core.Typed.Neural
 import Tyr.Model.Qwen.Tokenizer
 
 namespace Examples.Qwen3TTS
@@ -558,7 +558,7 @@ def runEndToEnd (args : Args) : IO Unit := do
 
   let ⟨dtypes, model⟩ ← Qwen3TTSForConditionalGeneration.loadSharded modelDir cfg targetDevice
 
-  let tok ← tokenizer.qwen3.loadTokenizer modelDir
+  let tok ← tokenizer.ByteLevelBPETokenizer.load modelDir
   let baseText :=
     match args.styleText with
     | some style =>
@@ -570,7 +570,7 @@ def runEndToEnd (args : Args) : IO Unit := do
     | none =>
         args.text
   let assistantText := tokenizer.qwen3.ttsAssistantText baseText
-  let rawTokenIds := (tokenizer.qwen3.encodeText tok assistantText).map (fun t => t.toUInt64)
+  let rawTokenIds := (tokenizer.ByteLevelBPETokenizer.encodeText tok assistantText).map (fun t => t.toUInt64)
   let tokenIds :=
     if rawTokenIds.size > args.maxTextLen then
       rawTokenIds.extract 0 args.maxTextLen
