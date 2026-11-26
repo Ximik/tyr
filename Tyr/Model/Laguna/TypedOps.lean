@@ -1,5 +1,5 @@
 import Tyr.Model.Qwen35.TypedOps
-import Tyr.FFI.Laguna
+import Tyr.Core.FFI.Laguna
 
 namespace torch.laguna
 

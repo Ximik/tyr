@@ -5,6 +5,7 @@
 -/
 import Tyr.Model.Qwen35.ConfigIO
 import Tyr.Model.Qwen35.VLConfig
+import Tyr.Lib.Tokenizer.ConfigJson
 
 namespace torch.qwen35
 

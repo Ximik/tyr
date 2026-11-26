@@ -1,6 +1,7 @@
 import LeanTest
-import Tyr.Tokenizer
-import Tyr.Data.Task
+import Tyr.Lib.Tokenizer
+import Tyr.Lib.Data.Task
+import Tyr.Model.Qwen.Tokenizer
 
 open tokenizer
 open torch
@@ -41,11 +42,11 @@ def testEncodeWithSpecialsLongestMatch : IO Unit := do
 @[test]
 def testFindBestMergeUsesPriorityMap : IO Unit := do
   let base := initBaseTokenizer #[]
-  let a : TokenId := 97
-  let b : TokenId := 98
-  let c : TokenId := 99
-  let bcId : TokenId := base.vocabSize.toUInt32
-  let abId : TokenId := (base.vocabSize + 1).toUInt32
+  let a : UInt32 := 97
+  let b : UInt32 := 98
+  let c : UInt32 := 99
+  let bcId : UInt32 := base.vocabSize.toUInt32
+  let abId : UInt32 := (base.vocabSize + 1).toUInt32
   let ruleBC : MergeRule := { left := b, right := c, result := bcId }
   let ruleAB : MergeRule := { left := a, right := b, result := abId }
 
@@ -53,10 +54,10 @@ def testFindBestMergeUsesPriorityMap : IO Unit := do
   let byteAB := ByteArray.mk #[(97 : UInt8), (98 : UInt8)]
   let idToBytes := (base.idToBytes.push byteBC).push byteAB
   let bytesToId := (base.bytesToId.insert byteBC bcId).insert byteAB abId
-  let mergeLookup : Std.HashMap (TokenId × TokenId) TokenId :=
-    (({} : Std.HashMap (TokenId × TokenId) TokenId).insert (b, c) bcId).insert (a, b) abId
-  let mergePriority : Std.HashMap (TokenId × TokenId) Nat :=
-    (({} : Std.HashMap (TokenId × TokenId) Nat).insert (b, c) 0).insert (a, b) 1
+  let mergeLookup : Std.HashMap (UInt32 × UInt32) UInt32 :=
+    (({} : Std.HashMap (UInt32 × UInt32) UInt32).insert (b, c) bcId).insert (a, b) abId
+  let mergePriority : Std.HashMap (UInt32 × UInt32) Nat :=
+    (({} : Std.HashMap (UInt32 × UInt32) Nat).insert (b, c) 0).insert (a, b) 1
 
   let tok : BPETokenizer := {
     base with

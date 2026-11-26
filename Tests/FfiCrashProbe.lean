@@ -8,7 +8,7 @@ Exercise Tyr's two fatal failure paths. Selected by the first argument:
 - `admission-ok`: the matching claim is admitted and the process exits normally.
 The failing modes must abort on CPU and need no accelerator.
 -/
-import Tyr.Typed
+import Tyr.Core.Typed
 
 open torch
 

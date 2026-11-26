@@ -18,8 +18,8 @@
   - Evaluation (categorical and generative)
   - Reward computation for RL
 -/
-import Tyr.Data.Task
-import Tyr.Data.TaskClass
+import Tyr.Lib.Data.Task
+import Tyr.Lib.Data.TaskClass
 import Lean.Data.Json
 
 namespace torch.Tasks.LLM

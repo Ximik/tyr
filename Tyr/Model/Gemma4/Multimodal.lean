@@ -10,9 +10,9 @@
   image tower and projector. Tyr currently preprocesses images one at a time
   and concatenates their soft tokens, instead of batching padded patch tensors.
 -/
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Gemma4.Model
 import Tyr.Model.Gemma4.VLConfig
 
@@ -92,7 +92,7 @@ private def apply2dRotaryEmb {nHead quarter : Nat}
 
 private def replaceTokenId {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (fromId toId : tokenizer.TokenId)
+    (fromId toId : UInt32)
     : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } :=
   let mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool } := Tensor.eqScalar inputIds (Int64.ofNat fromId.toNat)
   let repl : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } := (Tensor.fullInt #[batch, seq] (Int64.ofNat toId.toNat)).to inputIds.device
@@ -363,7 +363,7 @@ def repeatFeaturesForBatch {batch tokens : Nat}
 private def scatterFeaturesIntoToken {batch seq hidden featTokens : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype })
-    (tokenId : tokenizer.TokenId)
+    (tokenId : UInt32)
     (features : Tensor { device := device, shape := #[featTokens, hidden], dtype := projectorDType })
     : IO (Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype }) := do
   let tokenMask2d : Tensor { device := device, shape := #[batch, seq], dtype := .Bool } := Tensor.eqScalar inputIds (Int64.ofNat tokenId.toNat)
@@ -495,7 +495,7 @@ def generate {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     (imageFeatures : Option (ImageFeatures (dtype := projectorDType) (device := device) cfg) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let (inputsEmbeds, perLayerInputs) ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures
@@ -531,7 +531,7 @@ def generateStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     (imageFeatures : Option (ImageFeatures (dtype := projectorDType) (device := device) cfg) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let (inputsEmbeds, perLayerInputs) ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures

@@ -16,7 +16,7 @@ boundary itself.
 ### The tensor contract
 
 The native carrier is opaque. Public tensors index it with a specification
-(`Tyr.FFI.Basic.Types` and `Tyr.FFI.Basic`):
+(`Tyr.Core.FFI.Basic.Types` and `Tyr.Core.FFI.Basic`):
 
 ```lean
 abbrev Shape := Array UInt64
@@ -114,7 +114,7 @@ versus borrowed arguments: `lean_obj_arg` and `b_lean_obj_arg` are both
 
 ### Generated FFI header
 
-Every `@[extern]` of `Tyr` lives under `Tyr/FFI/`, the `TyrFFI` library,
+Every `@[extern]` of `Tyr` lives under `Tyr/Core/FFI/`, the `TyrFFI` library,
 together with the types they use. It is not precompiled, so it builds before
 `libTyrC`. The `libtyr` target runs `GenerateFfiHeader` over it, writing
 `cc/src/generated/tyr_ffi.h` from Lean's compiled extern declarations, and
@@ -138,7 +138,7 @@ to compile instead of silently mapping the wrong dtype. `DType` has only
 nullary constructors, so it crosses the ABI as its `uint8_t` tag in both
 directions: `RawTensor.dtype` reads a tag, and casts and conversions send one.
 Dtype names exist only in Lean. SafeTensors headers are parsed and written by
-`Tyr.SafeTensors.File`, with names and element widths from
+`Tyr.IO.SafeTensors.File`, with names and element widths from
 `DType.safeTensorFormat?`; native code only reads and writes tensor bytes, and
 checks each byte count against LibTorch's element size.
 
@@ -225,7 +225,7 @@ The Lean regressions cover returned-value use, metadata checks, and effect order
 
 Native result carriers must match the Lean declaration on every path.
 `scripts/check_ffi_recovery.py` inventories recoverable declarations in
-`Tyr/FFI/`, except `OwnedKV` and the Apple audio bindings. It requires every native implementation, including
+`Tyr/Core/FFI/`, except `OwnedKV` and the Apple audio bindings. It requires every native implementation, including
 inactive platform branches, to enter the common exception guard before doing
 C++ work. The CPU tooling job runs this check alongside ABI and runtime
 regressions; reviewed fixed platform-unavailable stubs are checked separately.
@@ -261,7 +261,7 @@ extraction. Equal-rate audio resampling retains the borrowed input
 array before returning it, preserving ownership of its boxed Float values.
 The resampler computes its output length with checked integer arithmetic before
 narrowing it or allocating output storage, and its native body returns C++ failures through
-`IO.Error`. The runtime-service exports in `Tyr.Torch` use the same exception
+`IO.Error`. The runtime-service exports in `Tyr.Core.Torch` use the same exception
 guard. `scripts/test_native_torch_recovery.sh` exercises the
 resampler size failures, borrowed arrays, and runtime error carriers.
 
@@ -341,12 +341,12 @@ setup/result errors without leaks, and fatal callback errors in separate process
 
 | File | Exports | Bound from |
 |---|---|---|
-| `tyr.cpp` | `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.FFI.RawTensor` and its adapter submodules |
-| `tyr_distributed.cpp` | `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/FFI/Distributed.lean` |
+| `tyr.cpp` | `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.Core.FFI.RawTensor` and its adapter submodules |
+| `tyr_distributed.cpp` | `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/Core/FFI/Distributed.lean` |
 | `tyr_polar.cpp` | `lean_torch_xxt`, `ba_plus_cAA`, `newton_schulz_step`, `polar_express`, `muon_orthogonalize`, `cautious_update` | manifold/optimizer modules |
-| `tyr_parquet.cpp` | `lean_parquet_*` Arrow/Parquet readers | `Tyr/FFI/Parquet.lean` |
+| `tyr_parquet.cpp` | `lean_parquet_*` Arrow/Parquet readers | `Tyr/Core/FFI/Parquet.lean` |
 | `tyr_qwen35.cpp` | `lean_torch_qwen35_{chunk,recurrent}_gated_delta_rule` linear attention | `Tyr/Model/Qwen35/Model.lean` |
-| `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/FFI/AppleAudio*.lean` |
+| `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/Core/FFI/AppleAudio*.lean` |
 | `tyr_media_stub.cpp` | non-Apple error stubs for the media entry points | same |
 
 Only `tyr_qwen35.cpp` includes `cc/include/tyr_tensor.h`; the other units
@@ -488,7 +488,7 @@ C++ side, what you touch when adding a binding (`cc/src/tyr.cpp`):
 | `mkIoUserError` / `mkC10IoError` :234-244 | wrap errors as `IO.Error` results |
 | `lean_torch_get_live_tensors` :307 | leak gauge, bound as `torch.get_live_tensors` |
 
-Lean side (`Tyr.Torch`):
+Lean side (`Tyr.Core.Torch`):
 
 ```lean
 @[extern "lean_torch_get_live_tensors"]
@@ -509,9 +509,9 @@ This example uses indexed operations; native handles remain inside the adapters.
 The checkpoint function checks stored shape and dtype before returning.
 
 ```lean
-import Tyr.Torch
-import Tyr.Typed.Neural
-import Tyr.SafeTensors.Schema
+import Tyr.Core.Torch
+import Tyr.Core.Typed.Neural
+import Tyr.IO.SafeTensors.Schema
 open torch
 
 def nativeExample : IO Unit := do

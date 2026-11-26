@@ -1,0 +1,605 @@
+import Tyr.Core.Torch
+import Tyr.Lib.Distributed
+import Tyr.Lib.Train.RunLedger
+import Tyr.IO.Log
+import Lean.Data.Json.Basic
+import Lean.Data.Json.Parser
+import Lean.Data.Json.Printer
+import Lean.Data.Json.FromToJson
+
+/-!
+# Tyr.Lib.Train.Pipeline
+
+`Tyr.Lib.Train.Pipeline` provides multi-stage training/evaluation orchestration utilities.
+It models sequential stages, background task coordination, checkpoint/resume behavior,
+and report generation in a typed Lean API.
+
+## Major Components
+
+- Stage lifecycle/status tracking (`StageStatus`, `StageInfo`).
+- Retry policy/backoff configuration (`RetryPolicy`).
+- Background task handles and await helpers.
+- Markdown report accumulation/output (`Report`, `ReportSection`).
+- Pipeline checkpoint persistence for resume flows.
+
+## Scope
+
+This module focuses on orchestration and observability of long-running workflows.
+Core model math/optimizer logic should remain in model/optim modules and be invoked here.
+-/
+
+namespace torch.Pipeline
+
+open torch
+open Lean (Json)
+open torch.Train.RunLedger
+
+/-! ## Retry Policy -/
+
+/-- Retry configuration for transient failures -/
+structure RetryPolicy where
+  /-- Maximum retry attempts -/
+  maxAttempts : Nat := 3
+  /-- Initial delay in milliseconds -/
+  initialDelayMs : Nat := 1000
+  /-- Exponential backoff multiplier -/
+  backoffMultiplier : Float := 2.0
+  /-- Maximum delay cap in milliseconds -/
+  maxDelayMs : Nat := 60000
+  deriving Repr, Lean.ToJson, Lean.FromJson
+
+/-- Calculate delay for a given attempt using exponential backoff -/
+def RetryPolicy.delayForAttempt (policy : RetryPolicy) (attempt : Nat) : Nat :=
+  let delay := policy.initialDelayMs.toFloat * (policy.backoffMultiplier ^ attempt.toFloat)
+  min policy.maxDelayMs delay.toUInt64.toNat
+
+/-! ## Pipeline Stage Tracking -/
+
+/-- Stage status for checkpointing and resume -/
+inductive StageStatus where
+  | pending
+  | running
+  | completed
+  | failed (error : String)
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- Information about a pipeline stage -/
+structure StageInfo where
+  /-- Stage name/identifier -/
+  name : String
+  /-- Current status -/
+  status : StageStatus
+  /-- Start timestamp (ms since epoch) -/
+  startTime : Option Nat := none
+  /-- End timestamp -/
+  endTime : Option Nat := none
+  /-- Metrics collected during this stage -/
+  metrics : List (String × String) := []
+  /-- Number of retry attempts made -/
+  retryCount : Nat := 0
+  deriving Repr, Lean.ToJson, Lean.FromJson
+
+/-- Get stage duration in milliseconds -/
+def StageInfo.durationMs (info : StageInfo) : Option Nat :=
+  match info.startTime, info.endTime with
+  | some start, some end_ => some (end_ - start)
+  | _, _ => none
+
+/-- Format duration as human-readable string -/
+def formatDuration (ms : Nat) : String :=
+  let seconds := ms / 1000
+  let minutes := seconds / 60
+  let hours := minutes / 60
+  if hours > 0 then
+    s!"{hours}h{minutes % 60}m{seconds % 60}s"
+  else if minutes > 0 then
+    s!"{minutes}m{seconds % 60}s"
+  else
+    s!"{seconds}s"
+
+/-! ## Background Task Management -/
+
+/-- Handle for a background task -/
+structure BackgroundTask (α : Type) where
+  /-- Description for logging -/
+  description : String
+  /-- IO action to get result (blocks until complete) -/
+  await : IO α
+
+/-- Spawn a background task. The action starts running immediately on a
+    separate thread (`IO.asTask`); the wait is performed lazily by `await`. -/
+def spawnBackground (description : String) (action : IO α) : IO (BackgroundTask α) := do
+  let task ← IO.asTask action
+  return {
+    description := description
+    await := do IO.ofExcept (← IO.wait task)
+  }
+
+/-- Await a background task -/
+def BackgroundTask.get (task : BackgroundTask α) : IO α :=
+  task.await
+
+/-! ## Report Generation -/
+
+/-- Report section types -/
+inductive ReportSection where
+  | header (content : String)
+  | stage (name : String) (content : String)
+  | metrics (name : String) (values : List (String × String))
+  | summary (content : String)
+  deriving Repr
+
+/-- Report accumulator -/
+structure Report where
+  /-- Base directory for report files -/
+  baseDir : String
+  /-- Sections in order -/
+  sections : Array ReportSection := #[]
+  /-- Start timestamp -/
+  startTime : Nat
+
+/-- Create a new report -/
+def Report.create (baseDir : String) : IO Report := do
+  let startTime ← IO.monoMsNow
+  return { baseDir, startTime := startTime }
+
+/-- Log a stage section to the report -/
+def Report.logStage (report : Report) (stageName : String) (content : String) : Report :=
+  { report with sections := report.sections.push (.stage stageName content) }
+
+/-- Log metrics to the report -/
+def Report.logMetrics (report : Report) (name : String) (values : List (String × String)) : Report :=
+  { report with sections := report.sections.push (.metrics name values) }
+
+/-- Format a single metric value -/
+def formatMetric (key : String) (value : String) : String :=
+  s!"- {key}: {value}"
+
+/-- Generate markdown for a report section -/
+def ReportSection.toMarkdown : ReportSection → String
+  | .header content => s!"# Training Report\n\n{content}\n"
+  | .stage name content => s!"## {name}\n\n{content}\n"
+  | .metrics name values =>
+    let metricLines := values.map (fun (k, v) => formatMetric k v)
+    s!"### {name}\n\n{String.intercalate "\n" metricLines}\n"
+  | .summary content => s!"## Summary\n\n{content}\n"
+
+/-- Generate full markdown report -/
+def Report.toMarkdown (report : Report) : IO String := do
+  let endTime ← IO.monoMsNow
+  let duration := formatDuration (endTime - report.startTime)
+
+  let mut content := ""
+  for sect in report.sections do
+    content := content ++ sect.toMarkdown ++ "\n"
+
+  content := content ++ s!"\n---\nTotal time: {duration}\n"
+  return content
+
+/-- Write report to file -/
+def Report.write (report : Report) (filename : String := "report.md") : IO Unit := do
+  let content ← report.toMarkdown
+  let path := s!"{report.baseDir}/{filename}"
+  IO.FS.writeFile ⟨path⟩ content
+
+/-! ## Checkpoint Persistence -/
+
+/-- Checkpoint file structure for pipeline resume -/
+structure PipelineCheckpoint where
+  /-- Stage information for resume -/
+  stages : Array StageInfo
+  /-- Timestamp of checkpoint -/
+  timestamp : Nat
+  /-- Pipeline run identifier -/
+  runId : String
+  /-- `repr config` captured at save time to prevent cross-config stage skipping. -/
+  configRepr : String := ""
+  deriving Repr, Lean.ToJson, Lean.FromJson
+
+/-- Path for checkpoint file -/
+def checkpointPath (baseDir : String) : String :=
+  s!"{baseDir}/.pipeline_checkpoint.json"
+
+/-- Current distributed rank, or 0 when not initialized. -/
+def currentDistributedRank : IO Nat := do
+  let isDistributed ← dist.isInitialized
+  if isDistributed then
+    let (rank, _) ← dist.getRankAndWorldSize
+    pure rank
+  else
+    pure 0
+
+/-- Rank-scoped artifact filename under a checkpoint or run directory. -/
+def rankArtifactFile (basePath stem ext : String) (rank : Nat) : System.FilePath :=
+  ⟨s!"{basePath}/{stem}_rank{rank}.{ext}"⟩
+
+/-- Write a JSON payload to disk. -/
+def writeJsonPayload [Lean.ToJson α] (path : System.FilePath) (payload : α) : IO Unit := do
+  IO.FS.writeFile path (Lean.toJson payload).pretty
+
+/-- Read a typed JSON payload from disk. -/
+def readJsonPayload [Lean.FromJson α] (path : System.FilePath) : IO α := do
+  let content ← IO.FS.readFile path
+  match Json.parse content with
+  | .error err =>
+    throw <| IO.userError s!"Failed to parse JSON {path}: {err}"
+  | .ok json =>
+    match (Lean.fromJson? json : Except String α) with
+    | .error err =>
+      throw <| IO.userError s!"Invalid JSON payload in {path}: {err}"
+    | .ok payload =>
+      pure payload
+
+/-- Get `LOCAL_RANK` from the environment, defaulting to 0. -/
+def getLocalRankFromEnv : IO Nat := do
+  let envVar ← IO.getEnv "LOCAL_RANK"
+  match envVar with
+  | some r => pure r.toNat!
+  | none => pure 0
+
+/-- Acquire `kind` for this process. In a distributed run each process owns the
+CUDA device at its local rank, so `cuda` takes that ordinal and an explicit
+nonzero ordinal is rejected. -/
+def acquireTrainingDevice (kind : DeviceKind) (localRank : Nat) (isDistributed : Bool) :
+    IO Device :=
+  match kind, isDistributed with
+  | .CUDA 0, true => Device.cuda localRank
+  | .CUDA n, true =>
+    throw (IO.userError s!"device cuda:{n}: a distributed run assigns each process the CUDA device at its local rank")
+  | kind, _ => Device.acquire kind
+
+/-- Save checkpoint to disk -/
+def saveCheckpoint (baseDir : String) (stages : Array StageInfo) (runId : String) (configRepr : String := "") : IO Unit := do
+  let timestamp ← IO.monoMsNow
+  let checkpoint : PipelineCheckpoint := { stages, timestamp, runId, configRepr }
+  let path := checkpointPath baseDir
+  IO.FS.writeFile ⟨path⟩ (Lean.toJson checkpoint).pretty
+
+/-- Load checkpoint from disk -/
+def loadCheckpoint (baseDir : String) : IO (Option PipelineCheckpoint) := do
+  let path := checkpointPath baseDir
+  if ← System.FilePath.pathExists ⟨path⟩ then
+    let content ← IO.FS.readFile ⟨path⟩
+    match Json.parse content >>= Lean.fromJson? with
+    | .ok checkpoint => return some checkpoint
+    | .error _ => return none
+  else
+    return none
+
+/-- Clear checkpoint file -/
+def clearCheckpoint (baseDir : String) : IO Unit := do
+  let path := checkpointPath baseDir
+  if ← System.FilePath.pathExists ⟨path⟩ then
+    IO.FS.removeFile ⟨path⟩
+
+/-! ## Pipeline State -/
+
+/-- Pipeline configuration -/
+structure PipelineConfig where
+  /-- Base directory for artifacts -/
+  baseDir : String := "~/.cache/tyr"
+  /-- Whether to enable wandb logging -/
+  wandbEnabled : Bool := false
+  /-- Wandb run name -/
+  wandbRun : String := "dummy"
+  /-- Number of GPUs -/
+  numGpus : Nat := 1
+  /-- Resume from checkpoint if available -/
+  resumeFromCheckpoint : Bool := true
+  /-- Default retry policy for stages -/
+  retryPolicy : RetryPolicy := {}
+  /-- Checkpoint after each stage -/
+  checkpointAfterStage : Bool := true
+  /-- Fail fast: stop on first error -/
+  failFast : Bool := true
+  /-- Run identifier for this pipeline execution -/
+  runId : String := ""
+  deriving Repr, Lean.ToJson, Lean.FromJson
+
+/-- Pipeline execution state -/
+structure PipelineState where
+  /-- Configuration -/
+  config : PipelineConfig
+  /-- Stages and their status -/
+  stages : Array StageInfo := #[]
+  /-- Current stage index -/
+  currentStage : Nat := 0
+  /-- Report accumulator -/
+  report : Report
+  /-- Distributed rank -/
+  rank : Nat := 0
+  /-- World size -/
+  worldSize : Nat := 1
+  /-- Logging handlers -/
+  logHandlers : Log.Handlers := {}
+
+/-- Check if this is the master rank -/
+def PipelineState.isMaster (state : PipelineState) : Bool :=
+  state.rank == 0
+
+/-! ## Pipeline Monad -/
+
+/-- Pipeline monad for sequencing stages -/
+abbrev PipelineM := StateT PipelineState IO
+
+/-- Log a message (master only) -/
+def log (msg : String) : PipelineM Unit := do
+  let state ← get
+  if state.isMaster then
+    state.logHandlers.onInfo msg
+
+/-- Log a stage start -/
+def logStageStart (name : String) : PipelineM Unit := do
+  let state ← get
+  let timestamp ← IO.monoMsNow
+  if state.isMaster then
+    state.logHandlers.onInfo s!"[{formatDuration (timestamp - state.report.startTime)}] Starting stage: {name}"
+
+/-- Log a stage end -/
+def logStageEnd (name : String) (durationMs : Nat) : PipelineM Unit := do
+  let state ← get
+  if state.isMaster then
+    state.logHandlers.onInfo s!"[+{formatDuration durationMs}] Completed stage: {name}"
+
+/-! ## Stage Execution -/
+
+/-- Log a stage failure -/
+def logStageFailed (name : String) (error : String) : PipelineM Unit := do
+  let state ← get
+  if state.isMaster then
+    state.logHandlers.onError s!"[FAILED] Stage '{name}': {error}"
+
+/-- Define and execute a pipeline stage with error handling. -/
+private def runStage (name : String) (action : PipelineM Unit) (propagateFailure : Bool)
+    : PipelineM Unit := do
+  let mut state ← get
+  let config := state.config
+
+  -- Check if should skip (resume support)
+  let existingStage := state.stages.find? (·.name == name)
+  match existingStage with
+  | some info =>
+    if info.status == .completed then
+      log s!"[SKIP] Already completed: {name}"
+      return ()
+    else if let .failed err := info.status then
+      log s!"[RESUME] Retrying previously failed stage: {name} (was: {err})"
+  | none => pure ()
+
+  -- Record stage start
+  let startTime ← IO.monoMsNow
+  let stageInfo : StageInfo := {
+    name := name
+    status := .running
+    startTime := some startTime
+  }
+  state := { state with stages := state.stages.push stageInfo }
+  set state
+
+  logStageStart name
+
+  -- Execute stage action with exception handling
+  try
+    action
+
+    -- Record stage completion
+    let endTime ← IO.monoMsNow
+    let durationMs := endTime - startTime
+    state ← get
+    let stages := state.stages.map fun info =>
+      if info.name == name then
+        { info with status := .completed, endTime := some endTime }
+      else info
+    let report := state.report.logStage name s!"Duration: {formatDuration durationMs}"
+    set { state with stages := stages, report := report }
+
+    -- Checkpoint on success
+    if config.checkpointAfterStage then
+      state ← get
+      let baseDir := config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
+      Pipeline.saveCheckpoint baseDir state.stages config.runId s!"{repr config}"
+
+    logStageEnd name durationMs
+    return ()
+
+  catch e =>
+    -- Record failure
+    let endTime ← IO.monoMsNow
+    state ← get
+    let errorMsg := toString e
+    let stages := state.stages.map fun info =>
+      if info.name == name then
+        { info with status := .failed errorMsg, endTime := some endTime }
+      else info
+    let report := state.report.logStage name s!"FAILED: {errorMsg}"
+    set { state with stages := stages, report := report }
+
+    -- Checkpoint failure state
+    if config.checkpointAfterStage then
+      state ← get
+      let baseDir := config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
+      Pipeline.saveCheckpoint baseDir state.stages config.runId s!"{repr config}"
+
+    logStageFailed name errorMsg
+
+    if propagateFailure then
+      throw e
+    else
+      return ()
+
+/-- Define and execute a pipeline stage with error handling. -/
+def stage (name : String) (action : PipelineM Unit) : PipelineM Unit := do
+  let config := (← get).config
+  runStage name action config.failFast
+
+/-- Spawn a background task within the pipeline -/
+def background (description : String) (action : IO α) : PipelineM (BackgroundTask α) := do
+  log s!"Spawning background task: {description}"
+  spawnBackground description action
+
+/-- Await a background task -/
+def await (task : BackgroundTask α) : PipelineM α := do
+  log s!"Waiting for: {task.description}"
+  task.get
+
+/-! ## Distributed Failure Coordination -/
+
+/-- Record metrics for the current stage -/
+def recordMetrics (metrics : List (String × String)) : PipelineM Unit := do
+  let state ← get
+  if let some last := state.stages.back? then
+    let lastIdx := state.stages.size - 1
+    let stages := state.stages.modify lastIdx fun info =>
+      { info with metrics := info.metrics ++ metrics }
+    let stageName := last.name
+    let report := state.report.logMetrics stageName metrics
+    set { state with stages := stages, report := report }
+    if state.isMaster then
+      let baseDir := state.config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
+      let artifacts := RunArtifacts.ofBaseDir baseDir
+      appendMetricEvent artifacts {
+        scope := s!"stage/{stageName}"
+        metrics := metrics.map (fun (k, v) => metricStr k v)
+      }
+
+/-! ## Pipeline Initialization and Cleanup -/
+
+/-- Initialize pipeline state with explicit log handlers. -/
+def initPipelineWithHandlers (config : PipelineConfig) (logHandlers : Log.Handlers := {}) : IO PipelineState := do
+  -- Check distributed status
+  let isDistributed ← dist.isInitialized
+  let (rank, worldSize) ← if isDistributed then
+      dist.getRankAndWorldSize
+    else
+      pure (0, 1)
+
+  -- Create base directory
+  let baseDir := config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
+  IO.FS.createDirAll ⟨baseDir⟩
+
+  -- Create report
+  let report ← Report.create baseDir
+
+  -- Generate run ID if not provided
+  let runId ← if config.runId.isEmpty then do
+    let ts ← IO.monoMsNow
+    pure s!"run_{ts}"
+  else
+    pure config.runId
+
+  if rank == 0 then
+    let artifacts := RunArtifacts.ofBaseDir baseDir
+    prepare artifacts { config with runId := runId } .resume
+
+  -- Try to load checkpoint for resume
+  let resumedStages ← if config.resumeFromCheckpoint then
+    match ← loadCheckpoint baseDir with
+    | some checkpoint =>
+      let currentConfigRepr := s!"{repr config}"
+      if checkpoint.configRepr.isEmpty || checkpoint.configRepr == currentConfigRepr then
+        if rank == 0 then
+          logHandlers.onInfo s!"[RESUME] Loading checkpoint from {checkpointPath baseDir}"
+          logHandlers.onInfo s!"[RESUME] Found {checkpoint.stages.size} stages"
+        pure checkpoint.stages
+      else
+        throw <| IO.userError
+          s!"[RESUME] Refusing to resume from {checkpointPath baseDir}: saved pipeline config does not match current config. Use matching config or disable resumeFromCheckpoint."
+    | none =>
+      pure #[]
+  else
+    pure #[]
+
+  if rank == 0 then
+    logHandlers.onInfo "╔════════════════════════════════════════╗"
+    logHandlers.onInfo "║         Tyr Training Pipeline          ║"
+    logHandlers.onInfo "╚════════════════════════════════════════╝"
+    logHandlers.onInfo s!"Base directory: {baseDir}"
+    logHandlers.onInfo s!"World size: {worldSize}"
+    logHandlers.onInfo s!"Run ID: {runId}"
+    if resumedStages.size > 0 then
+      let completed := resumedStages.filter (·.status == .completed)
+      logHandlers.onInfo s!"[RESUME] {completed.size}/{resumedStages.size} stages already completed"
+
+  return {
+    config := { config with runId := runId }
+    report := report
+    rank := rank
+    worldSize := worldSize
+    logHandlers := logHandlers
+    stages := resumedStages
+  }
+
+/-- Initialize pipeline state with silent logging. -/
+def initPipeline (config : PipelineConfig) : IO PipelineState :=
+  initPipelineWithHandlers config
+
+/-- Finalize pipeline and generate report. -/
+def finalizePipeline (state : PipelineState) : IO Unit := do
+  if state.isMaster then
+    -- Generate summary
+    let completedStages := state.stages.filter (·.status == .completed)
+    let failedStages := state.stages.filter fun s =>
+      match s.status with | .failed _ => true | _ => false
+    let totalDuration := completedStages.foldl (fun acc info =>
+      acc + info.durationMs.getD 0) 0
+
+    state.logHandlers.onInfo ""
+    if failedStages.size > 0 then
+      state.logHandlers.onInfo "╔════════════════════════════════════════╗"
+      state.logHandlers.onInfo "║         Pipeline Failed                ║"
+      state.logHandlers.onInfo "╚════════════════════════════════════════╝"
+      for s in failedStages do
+        match s.status with
+        | .failed err => state.logHandlers.onError s!"  - {s.name}: {err}"
+        | _ => pure ()
+    else
+      state.logHandlers.onInfo "╔════════════════════════════════════════╗"
+      state.logHandlers.onInfo "║           Pipeline Complete            ║"
+      state.logHandlers.onInfo "╚════════════════════════════════════════╝"
+
+    state.logHandlers.onInfo s!"Completed stages: {completedStages.size}/{state.stages.size}"
+    if failedStages.size > 0 then
+      state.logHandlers.onInfo s!"Failed stages: {failedStages.size}"
+    state.logHandlers.onInfo s!"Total duration: {formatDuration totalDuration}"
+
+    -- Write report
+    state.report.write
+
+    -- Clear checkpoint on successful completion
+    if failedStages.size == 0 && state.config.checkpointAfterStage then
+      let baseDir := state.config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
+      clearCheckpoint baseDir
+
+/-- Run a pipeline action with explicit log handlers. -/
+def runPipelineWithHandlers (config : PipelineConfig) (logHandlers : Log.Handlers := {})
+    (action : PipelineM α) : IO α := do
+  let initialState ← initPipelineWithHandlers config logHandlers
+  let (result, finalState) ← action.run initialState
+  finalizePipeline finalState
+  return result
+
+/-! ## Distributed Execution Helpers -/
+
+/-- Run with torchrun-style distributed setup and explicit log handlers. -/
+def withDistributedWithHandlers (config : PipelineConfig) (logHandlers : Log.Handlers := {})
+    (action : PipelineM α) : IO α := do
+  -- Initialize distributed if env vars are set
+  let worldSize := (← IO.getEnv "WORLD_SIZE").bind (·.toNat?) |>.getD 1
+  let rank := (← IO.getEnv "RANK").bind (·.toNat?) |>.getD 0
+  let localRank := (← IO.getEnv "LOCAL_RANK").bind (·.toNat?) |>.getD rank
+  let masterAddr := (← IO.getEnv "MASTER_ADDR").getD "localhost"
+  let masterPort := (← IO.getEnv "MASTER_PORT").bind (·.toNat?) |>.getD 29500
+
+  if worldSize > 1 then
+    if ← cuda_is_available then
+      dist.setCudaDevice localRank
+    dist.initProcessGroup "nccl" masterAddr masterPort rank worldSize
+
+  let result ← runPipelineWithHandlers config logHandlers action
+
+  if worldSize > 1 then
+    dist.destroyProcessGroup
+
+  return result
+
+end torch.Pipeline

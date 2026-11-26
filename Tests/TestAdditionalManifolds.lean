@@ -1,17 +1,17 @@
 import LeanTest
-import Tyr.Manifolds.Sphere
-import Tyr.Manifolds.Oblique
-import Tyr.Manifolds.Positive
-import Tyr.Manifolds.PoincareBall
-import Tyr.Manifolds.PositiveDefinite
-import Tyr.Manifolds.PSD
-import Tyr.Manifolds.FixedRank
+import Tyr.Lib.Optim.Manifolds.Sphere
+import Tyr.Lib.Optim.Manifolds.Oblique
+import Tyr.Lib.Optim.Manifolds.Positive
+import Tyr.Lib.Optim.Manifolds.PoincareBall
+import Tyr.Lib.Optim.Manifolds.PositiveDefinite
+import Tyr.Lib.Optim.Manifolds.PSD
+import Tyr.Lib.Optim.Manifolds.FixedRank
 
 namespace Tests.AdditionalManifolds
 
 open LeanTest
 open torch
-open Tyr.Manifolds
+open Tyr.Lib.Optim.Manifolds
 
 @[test]
 def testSphereProjectionKeepsUnitNorm : IO Unit := do

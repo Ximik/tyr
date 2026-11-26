@@ -8,7 +8,7 @@
   - Modded-nanogpt training schedules
   - Simple sequential loading for character-level data (Shakespeare)
 -/
-import Tyr.DataLoader
+import Tyr.Lib.Data.Loader
 import Examples.GPT.GPT
 
 namespace torch.DataLoader

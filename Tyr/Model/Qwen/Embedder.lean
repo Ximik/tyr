@@ -6,9 +6,9 @@
 
   Fully typed: token ids are Int64, hidden states Float32.
 -/
-import Tyr.Torch
-import Tyr.Typed
-import Tyr.Typed.Neural
+import Tyr.Core.Torch
+import Tyr.Core.Typed
+import Tyr.Core.Typed.Neural
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.Model
 import Tyr.Model.Qwen.RoPE

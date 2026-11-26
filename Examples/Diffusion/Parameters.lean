@@ -1,7 +1,7 @@
-import Tyr.Torch
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Module.Derive
+import Tyr.Core.Torch
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.Derive
 
 /-! Parameter and rotary types owned by the discrete diffusion model.
 

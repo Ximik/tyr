@@ -17,14 +17,14 @@
   For distributed training (multi-GPU):
     scripts/nanochat/run_train_torchrun.sh
 -/
-import Tyr.Torch
-import Tyr.Distributed
-import Tyr.Pipeline
+import Tyr.Core.Torch
+import Tyr.Lib.Distributed
+import Tyr.Lib.Train.Pipeline
 import Examples.NanoChat.ModdedGPT
-import Tyr.DataLoader
+import Tyr.Lib.Data.Loader
 import Examples.NanoChat.ModdedTrain
-import Tyr.Optim.NorMuon
-import Tyr.Optim.DistAdam
+import Tyr.Lib.Optim.NorMuon
+import Tyr.Lib.Optim.DistAdam
 
 open torch
 open torch.moddedGpt

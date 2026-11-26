@@ -3,8 +3,8 @@
 
   Configuration for Whisper encoder-decoder ASR in Tyr.
 -/
-import Tyr.FFI.Basic
-import Tyr.Tokenizer.Types
+import Tyr.Core.FFI.Basic
+import Tyr.Lib.Tokenizer.Types
 
 namespace torch.whisper
 
@@ -23,10 +23,10 @@ structure WhisperConfig where
   /-- `"gelu"` or `"relu"`; checked when the config is built. -/
   activationFunction : String := "gelu"
   layerNormEps : Float := 1e-5
-  eosTokenId : tokenizer.TokenId := 50257
-  decoderStartTokenId : tokenizer.TokenId := 50258
-  suppressTokens : Array tokenizer.TokenId := #[]
-  beginSuppressTokens : Array tokenizer.TokenId := #[]
+  eosTokenId : UInt32 := 50257
+  decoderStartTokenId : UInt32 := 50258
+  suppressTokens : Array UInt32 := #[]
+  beginSuppressTokens : Array UInt32 := #[]
   /-- The encoder convolves over a nonzero number of mel bins; checked when the config is built. -/
   numMelBinsPos : 0 < numMelBins := by decide
   /-- Attention splits `dModel` into equal heads; checked when the config is built. -/

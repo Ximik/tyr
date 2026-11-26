@@ -13,16 +13,16 @@
 
   Based on modded-nanogpt's training loop.
 -/
-import Tyr.Torch
-import Tyr.TensorStruct
-import Tyr.Distributed
+import Tyr.Core.Torch
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Distributed
 import Examples.NanoChat.ModdedGPT
-import Tyr.DataLoader
-import Tyr.Checkpoint
+import Tyr.Lib.Data.Loader
+import Tyr.IO.Checkpoint
 import Examples.GPT.GPTDataLoader
-import Tyr.Optim
-import Tyr.Optim.NorMuon
-import Tyr.Optim.DistAdam
+import Tyr.Lib.Optim
+import Tyr.Lib.Optim.NorMuon
+import Tyr.Lib.Optim.DistAdam
 
 namespace torch.ModdedTrain
 

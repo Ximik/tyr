@@ -1,10 +1,10 @@
 /-
   Tests/TestPipeline.lean
 
-  Tests for Pipeline orchestration (Tyr/Pipeline.lean).
+  Tests for Pipeline orchestration (Tyr/Lib/Train/Pipeline.lean).
 -/
 import Tests.Assertions
-import Tyr.Pipeline
+import Tyr.Lib.Train.Pipeline
 import LeanTest
 
 namespace Tests.Pipeline

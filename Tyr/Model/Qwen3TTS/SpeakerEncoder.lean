@@ -8,13 +8,13 @@
   - Attentive statistics pooling
   - Final 1x1 projection to speaker embedding
 -/
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 import Tyr.Model.Qwen3TTS.DTypes
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Qwen3TTS.Config
-import Tyr.Model.Utils
+import Tyr.Lib.Module.Init
 
 namespace torch.qwen3tts
 

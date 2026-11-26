@@ -1,5 +1,5 @@
 import Tyr
-import Tyr.Checkpoint
+import Tyr.IO.Checkpoint
 import Examples.GPT.GPT
 import Examples.GPT.Train
 import LeanTest

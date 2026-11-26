@@ -45,8 +45,8 @@
   Build: lake build Tests.RunLagunaModel
   Run:   lake exe LagunaModelTest
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct.Cast
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct.Cast
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.Rope
 import Tyr.Model.Laguna.MoE

@@ -1,6 +1,6 @@
 import LeanTest
-import Tyr.Typed.Neural
-import Tyr.Train.ChatSFT
+import Tyr.Core.Typed.Neural
+import Tyr.Lib.Train.ChatSFT
 
 open torch
 

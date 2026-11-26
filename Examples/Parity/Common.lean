@@ -7,8 +7,8 @@
   JSON request, and writes `result.json` and, when it has tensors,
   `tensors.safetensors` into the output directory.
 -/
-import Tyr.Torch
-import Tyr.SafeTensors.File
+import Tyr.Core.Torch
+import Tyr.IO.SafeTensors.File
 
 namespace Examples.Parity
 

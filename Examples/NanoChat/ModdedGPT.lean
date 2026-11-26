@@ -15,10 +15,10 @@
 
   Architecture: 11 layers, 6 heads, 128 head_dim, 768 model_dim
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Module.Derive
-import Tyr.TensorStruct.DeriveCast
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Core.TensorStruct.DeriveCast
 
 namespace torch.moddedGpt
 

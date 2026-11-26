@@ -86,10 +86,10 @@ end Qwen35VisionConfig
 structure Qwen35VLConfig where
   text_config : Config := Config.qwen35_0_8B
   vision_config : Qwen35VisionConfig := Qwen35VisionConfig.qwen35_0_8B
-  image_token_id : tokenizer.TokenId := 248056
-  video_token_id : tokenizer.TokenId := 248057
-  vision_start_token_id : tokenizer.TokenId := 248053
-  vision_end_token_id : tokenizer.TokenId := 248054
+  image_token_id : UInt32 := 248056
+  video_token_id : UInt32 := 248057
+  vision_start_token_id : UInt32 := 248053
+  vision_end_token_id : UInt32 := 248054
   tie_word_embeddings : Bool := false
   /-- Vision features replace placeholder embeddings one-for-one; checked when the config is built. -/
   visionMatchesText : vision_config.out_hidden_size = text_config.hidden_size := by decide

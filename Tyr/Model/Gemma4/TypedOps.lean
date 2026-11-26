@@ -1,5 +1,5 @@
 import Tyr.Model.Qwen35.TypedOps
-import Tyr.FFI.Gemma4
+import Tyr.Core.FFI.Gemma4
 
 namespace torch.gemma4
 

@@ -5,9 +5,9 @@
   Loads converted SafeTensors checkpoints produced from upstream PyTorch
   checkpoints so single-utterance synthesis can use real weights.
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Log
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.IO.Log
 import Tyr.Model.KittenTTS.Checkpoint
 import Tyr.Model.KittenTTS.Model
 

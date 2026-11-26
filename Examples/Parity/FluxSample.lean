@@ -17,7 +17,7 @@ import Tyr.Model.Qwen3.ConfigIO
 import Tyr.Model.Flux
 import Tyr.Model.Flux.Weights
 import Tyr.Model.VAE
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 
 namespace Examples.Parity.FluxSample
 

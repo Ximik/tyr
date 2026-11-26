@@ -2,11 +2,11 @@
 
 ## Purpose & when to use
 
-`Tyr/Optim/` is Tyr's optimizer stack: an Optax-style core of composable
+`Tyr/Lib/Optim/` is Tyr's optimizer stack: an Optax-style core of composable
 `GradientTransformation`s (`adamw`, `sgd`, `chain`, `scale_by_schedule`), learning-rate
 schedules, the nanochat/modded-nanogpt-derived first-order optimizers (NorMuon with Polar
 Express orthogonalization, DistAdam, DualOptimizer), and experimental Riemannian
-optimizers (ManifoldMuon, RiemannianSGD, RiemannianTreeSGD). `Tyr/Manifolds/` provides the
+optimizers (ManifoldMuon, RiemannianSGD, RiemannianTreeSGD). `Tyr/Lib/Optim/Manifolds/` provides the
 differential-geometry layer those Riemannian pieces build on: a `DifferentiableManifold`
 typeclass plus a dozen concrete manifold families over shape-typed tensors. Use the Optax
 core for ordinary training over `TensorStruct` parameter trees; reach for the manifold
@@ -15,15 +15,15 @@ definiteness).
 
 ## Architecture & main abstractions
 
-The optimizer files under `Tyr/Optim/` declare `namespace torch.Optim.*` (e.g.
-`torch.Optim.NorMuon`), while the manifold files under `Tyr/Manifolds/` all declare
-`namespace Tyr.Manifolds`. `Tyr/Optim.lean` is the Optax-style core; `Tyr/Manifolds.lean` is an
+The optimizer files under `Tyr/Lib/Optim/` declare `namespace torch.Optim.*` (e.g.
+`torch.Optim.NorMuon`), while the manifold files under `Tyr/Lib/Optim/Manifolds/` all declare
+`namespace Tyr.Lib.Optim.Manifolds`. `Tyr/Lib/Optim.lean` is the Optax-style core; `Tyr/Lib/Optim/Manifolds.lean` is an
 umbrella import for the whole geometry layer.
 
-### The Optax-style core (`Tyr/Optim.lean`, namespace `torch.Optim`)
+### The Optax-style core (`Tyr/Lib/Optim.lean`, namespace `torch.Optim`)
 
 An optimizer is an explicit state transition over a tensor structure
-(`Tyr/Optim.lean`):
+(`Tyr/Lib/Optim.lean`):
 
 ```lean
 structure GradientTransformation (α : Type) (S : Type) where
@@ -34,13 +34,13 @@ structure GradientTransformation (α : Type) (S : Type) where
 ```
 
 `update` returns *transformed gradients*, not new parameters — that is what makes
-transformations composable via `chain` (`Tyr/Optim.lean`). State types (`Unit` for stateless transforms,
+transformations composable via `chain` (`Tyr/Lib/Optim.lean`). State types (`Unit` for stateless transforms,
 `ScaleByAdamState α`, `TraceState α`, pairs `S1 × S2` from `chain`, `ScaleByScheduleState`) all have
 `TensorStruct` instances, so optimizer state can be mapped and
 checkpointed with the same machinery as model parameters (see
 [tensorstruct.md](core/tensorstruct.md)).
 
-Built-in pieces (`Tyr/Optim.lean`):
+Built-in pieces (`Tyr/Lib/Optim.lean`):
 
 - Primitives: `scale`, `scale_by_adam`, `add_decayed_weights`, `trace`.
 - Composed optimizers: `adamw` = `scale_by_adam → add_decayed_weights → scale(-lr)`
@@ -51,10 +51,10 @@ Built-in pieces (`Tyr/Optim.lean`):
   schedule-aware variants `adamw_schedule`, `sgd_schedule`, `sgd_momentum_schedule`.
 
 Gradient clipping is not implemented in the core — the section is an explicit TODO
-(`Tyr/Optim.lean`); only `RiemannianTreeSGD` carries a private `clipScale`, and
+(`Tyr/Lib/Optim.lean`); only `RiemannianTreeSGD` carries a private `clipScale`, and
 training loops clip inline (e.g. `clipGPTGrads` in `Examples/GPT/Train.lean`).
 
-### Schedules (`Tyr/Optim/Scheduler.lean`, namespace `torch.Optim.Scheduler`)
+### Schedules (`Tyr/Lib/Optim/Scheduler.lean`, namespace `torch.Optim.Scheduler`)
 
 Schedules are bare functions `Nat → Float`, so they compose without any framework support.
 Constructors: `constant`, `cosine_decay`, `linear_decay`, `step_decay`, `one_cycle`,
@@ -63,10 +63,10 @@ Constructors: `constant`, `cosine_decay`, `linear_decay`, `step_decay`, `one_cyc
 `add`, `clamp` (`Scheduler.lean`), plus weight-decay schedules
 `linear_weight_decay` / `cosine_weight_decay`.
 
-### The manifold layer (`Tyr/Manifolds/Basic.lean`, namespace `Tyr.Manifolds`)
+### The manifold layer (`Tyr/Lib/Optim/Manifolds/Basic.lean`, namespace `Tyr.Lib.Optim.Manifolds`)
 
 The central abstraction is a point-dependent bundle typeclass
-(`Tyr/Manifolds/Basic.lean`):
+(`Tyr/Lib/Optim/Manifolds/Basic.lean`):
 
 ```lean
 class DifferentiableManifold (M : Type) where
@@ -99,7 +99,7 @@ Three ways in:
 `abbrev Differentiable := DifferentiableManifold` (`Basic.lean`) is a
 backward-compatibility alias.
 
-Concrete families (all in `Tyr.Manifolds`, one file each under `Tyr/Manifolds/`):
+Concrete families (all in `Tyr.Lib.Optim.Manifolds`, one file each under `Tyr/Lib/Optim/Manifolds/`):
 
 | Type | Constraint | Retraction / exp |
 |---|---|---|
@@ -119,7 +119,7 @@ Concrete families (all in `Tyr.Manifolds`, one file each under `Tyr/Manifolds/`)
 Grassmann also ships geometry extras: `principalAngles`, `distance` (chordal, despite the
 geodesic docstring), and a `log` map (`Grassmann.lean`).
 
-### Steepest descent beyond the metric (`Tyr/Manifolds/Optimizer.lean`)
+### Steepest descent beyond the metric (`Tyr/Lib/Optim/Manifolds/Optimizer.lean`)
 
 `DualMapGeometry` (`Optimizer.lean`) is the hook for Finsler-style steepest descent
 where the update direction is *not* the Riemannian `sharp`:
@@ -136,20 +136,20 @@ User-facing entry points: `DualMapGeometry.dualMapStep x g lr : M` and
 `Stiefel`, `Orthogonal`, `Grassmann` (spectral/nuclear norms, tangent-projected and
 Frobenius-normalized dual map), `Hyperbolic` (Minkowski metric + L2 normalization).
 
-`EmbeddedManifold` (`Tyr/Manifolds/Embedded.lean`) exposes an ambient representation
+`EmbeddedManifold` (`Tyr/Lib/Optim/Manifolds/Embedded.lean`) exposes an ambient representation
 (`Ambient`, `toAmbient`, `projectAmbientTangent`) plus `retractAmbientStep`; instances for
 `Tensor σ`, `Stiefel`, `Orthogonal`, `Grassmann`, `Hyperbolic`. Downstream consumers build on
 `DualMapGeometry` rather than this class: `DualOptimizer`'s generic manifold path and
-`Tyr.Modular.Manifold`'s `MatrixManifoldCarrier` both call `DualMapGeometry.dualMapStep`.
+`Tyr.Lib.Optim.Modular.Manifold`'s `MatrixManifoldCarrier` both call `DualMapGeometry.dualMapStep`.
 
 ### First-order optimizers: PolarExpress, NorMuon, DistAdam
 
-`PolarExpress` (`Tyr/Optim/PolarExpress.lean`) is a thin wrapper over the `Tyr.Distributed`
+`PolarExpress` (`Tyr/Lib/Optim/PolarExpress.lean`) is a thin wrapper over the `Tyr.Lib.Distributed`
 FFI kernels: `apply G cfg` → `dist.polarExpress` (Newton–Schulz matrix-sign approximation)
 and `muonOrthogonalize G (numIters := 5)`, which orthogonalizes along the short dimension.
 Both run in `IO`.
 
-`NorMuon` (`Tyr/Optim/NorMuon.lean`) is the Muon-family optimizer for weight matrices. The
+`NorMuon` (`Tyr/Lib/Optim/NorMuon.lean`) is the Muon-family optimizer for weight matrices. The
 per-parameter idiom, shared with the other first-order optimizers:
 
 ```lean
@@ -167,7 +167,7 @@ all-gather over homogeneous `Array (Tensor σ)` groups). `ParamLabel` classifies
 (`attn`, `mlp`, `embed`, `lmHead`, `scalars`, …), and `getMomentum` implements
 nanochat's 0.85→base momentum warmup.
 
-`DistAdam` (`Tyr/Optim/DistAdam.lean`) is AdamW for embeddings, heads, and scalars:
+`DistAdam` (`Tyr/Lib/Optim/DistAdam.lean`) is AdamW for embeddings, heads, and scalars:
 `ParamState s` holds `expAvg`/`expAvgSq`/`step`, `stepSingle` is textbook bias-corrected
 Adam with decoupled weight decay (`DistAdam.lean`), and `stepDistributed`
 (`DistAdam.lean`) reduce-scatters gradients and all-gathers updated shards when the
@@ -175,7 +175,7 @@ first dimension shards evenly, otherwise falls back to all-reduce + local step.
 
 ### DualOptimizer: the matrix/embedding split
 
-`DualOptimizer` (`Tyr/Optim/DualOptimizer.lean`) wires the nanochat strategy: matrix
+`DualOptimizer` (`Tyr/Lib/Optim/DualOptimizer.lean`) wires the nanochat strategy: matrix
 parameters go to a Muon-family backend, embeddings/LM head/scalars to AdamW. The
 top-level `Config` (`DualOptimizer.lean`) carries per-group LRs (`matrixLr`,
 `embeddingLr`, `lmHeadLr`, `scalarLr`), Muon hyperparameters, scheduled momentum/weight
@@ -206,7 +206,7 @@ and the closure bundle `MatrixBackendOps m n` (`matrixBackendOps`) cover batched
 
 ### ManifoldMuon: Stiefel-constrained Muon
 
-`ManifoldMuon` (`Tyr/Optim/ManifoldMuon.lean`, marked experimental in its header) keeps
+`ManifoldMuon` (`Tyr/Lib/Optim/ManifoldMuon.lean`, marked experimental in its header) keeps
 matrix parameters on the Stiefel manifold. `stepSingle` (`ManifoldMuon.lean`, with
 `stepSingleWithDiagnostics` at ): Nesterov blend, then solve for a
 tangent-constrained matrix-sign direction — dual ascent on `Λ` or a damped fixed point,
@@ -217,14 +217,14 @@ chosen by `SolverKind := dualAscent | fixedPoint`, with `msign` via Polar Expres
 
 ### Whole-model Riemannian steps
 
-`RiemannianSGD` (`Tyr/Optim/RiemannianSGD.lean`) works over
-`Tyr.Modular.RiemannianModule` instances with low-rank `MetricFactor` pullbacks:
+`RiemannianSGD` (`Tyr/Lib/Optim/RiemannianSGD.lean`) works over
+`Tyr.Lib.Optim.Modular.RiemannianModule` instances with low-rank `MetricFactor` pullbacks:
 `stepWithFactor` for an explicit output metric, `stepMSE` for half-squared-error with
 identity output metric, and `stepSequentialMSE`/`stepSequentialWithFactor` for two-layer
 `Sequential M₁ M₂` compositions. Each returns a `StepResult` with updated params,
 prediction, input factor/cotangent, per-layer diagnostics, and loss.
 
-`RiemannianTreeSGD` (`Tyr/Optim/RiemannianTreeSGD.lean`) lifts the same idea to arbitrary
+`RiemannianTreeSGD` (`Tyr/Lib/Optim/RiemannianTreeSGD.lean`) lifts the same idea to arbitrary
 `[TensorStruct Params]` models. `TreeMetricFactor Params rank` stores `rank` parameter-tree
 rows (VJPs of output cotangents) with a size proof; the regularized metric system is solved
 by Woodbury (`TreeMetricFactor.solveWoodbury`) and applied with `Optim.apply_updates`.
@@ -250,7 +250,7 @@ gradient/update/residual norms and an inner condition estimate.
 
 ## Key APIs
 
-Optim core (`torch.Optim`, `Tyr/Optim.lean`):
+Optim core (`torch.Optim`, `Tyr/Lib/Optim.lean`):
 
 | Name | Signature (abridged) |
 |---|---|
@@ -264,7 +264,7 @@ Optim core (`torch.Optim`, `Tyr/Optim.lean`):
 
 Schedules (`torch.Optim.Scheduler`): constructors and combinators as listed above.
 
-Manifolds (`Tyr.Manifolds`): `DifferentiableManifold.gradientStep`, `DualMapGeometry.dualMapStep`,
+Manifolds (`Tyr.Lib.Optim.Manifolds`): `DifferentiableManifold.gradientStep`, `DualMapGeometry.dualMapStep`,
 `dualMapStepWithDiagnostics`, `EmbeddedManifold.retractAmbientStep`; per-family
 `random`/`project` constructors (`Stiefel.random n p`, `Orthogonal.random n`,
 `Grassmann.random n p`, `Sphere.random n`, `Hyperbolic.random n`, …) and tangent
@@ -291,7 +291,7 @@ First-order / split optimizers (`torch.Optim.*`):
 ### Indexed NorMuon state
 
 ```lean
-import Tyr.Optim.NorMuon
+import Tyr.Lib.Optim.NorMuon
 open torch
 
 def matrixOptimizerStep {σ : StaticSpec}
@@ -359,7 +359,7 @@ let (W1, st1) ← DualOptimizer.stepMatrixSingle W gW st0 cfg 0 1.0 1.0
 Reconstructed example (from `Tests/TestManifoldMuon.lean`):
 
 ```lean
-open Tyr.Manifolds
+open Tyr.Lib.Optim.Manifolds
 let mut q ← Orthogonal.random 16
 for _ in [:numSteps] do
   let gRaw ← randn #[16, 16] false
@@ -389,7 +389,7 @@ pure (step.params, step.loss, step.diagnostics)
 - `RiemannianTreeSGD.stepCrossEntropy` is exact but scales with `batch*seq*vocab` VJPs;
   use `stepCrossEntropySampledFisher` outside tiny test shapes.
 - `PoincareBall`'s instance uses identity `sharp`/`flat` and a Euclidean-add retraction
-  (`Tyr/Manifolds/PoincareBall.lean`) — the ball constraint, not Poincaré geometry.
+  (`Tyr/Lib/Optim/Manifolds/PoincareBall.lean`) — the ball constraint, not Poincaré geometry.
 - `DualOptimizer.stepMatrixSingle` throws `IO.userError` when the `MatrixParamState`
   constructor does not match the configured backend (e.g. a config change mid-run) instead
   of silently re-initializing; rebuild state explicitly with `initMatrixParamState cfg`.
@@ -410,4 +410,4 @@ pure (step.params, step.loss, step.diagnostics)
 ---
 
 This is a guide, not an exhaustive reference. Full per-symbol documentation for
-`torch.Optim.*` and `Tyr.Manifolds.*` is generated by doc-gen4 (see `docbuild/`).
+`torch.Optim.*` and `Tyr.Lib.Optim.Manifolds.*` is generated by doc-gen4 (see `docbuild/`).

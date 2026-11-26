@@ -5,9 +5,9 @@
   Covers the public Gemma 4 family checkpoints routed through the text
   submodel of the official multimodal repos.
 -/
-import Tyr.FFI.Basic
-import Tyr.TensorStruct
-import Tyr.Tokenizer.Types
+import Tyr.Core.FFI.Basic
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Tokenizer.Types
 
 namespace torch.gemma4
 
@@ -99,8 +99,8 @@ structure Gemma4Config where
   /-- `none` disables the final `cap * tanh (logits / cap)`. -/
   final_logit_softcapping : Option Float := some 30.0
 
-  pad_token_id : Option tokenizer.TokenId := some 0
-  eos_token_id : Array tokenizer.TokenId := #[1]
+  pad_token_id : Option UInt32 := some 0
+  eos_token_id : Array UInt32 := #[1]
 
   /-- Query heads are whole multiples of the sliding-layer K/V heads; checked when the config is built. -/
   slidingKVHeadsDivide : num_key_value_heads ∣ num_attention_heads := by decide

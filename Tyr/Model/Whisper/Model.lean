@@ -4,10 +4,10 @@
   Native Whisper encoder-decoder model in Tyr.
 -/
 import Tyr.Model.Whisper.TypedOps
-import Tyr.TensorStruct
-import Tyr.Module.LayerNorm
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.LayerNorm
 import Tyr.Model.Whisper.Config
-import Tyr.Model.Utils
+import Tyr.Lib.Module.Init
 
 namespace torch.whisper
 

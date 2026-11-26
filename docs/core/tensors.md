@@ -1,17 +1,17 @@
 # Indexed tensors and the native boundary
 
-Use `Tyr.Typed` for tensor operations and `Tyr.Typed.Neural` for additional
+Use `Tyr.Core.Typed` for tensor operations and `Tyr.Core.Typed.Neural` for additional
 neural, storage, and data adapters. The public type is `torch.Tensor σ`, where
-`σ : StaticSpec` records shape, dtype, and concrete device. `Tyr.Torch` supplies
+`σ : StaticSpec` records shape, dtype, and concrete device. `Tyr.Core.Torch` supplies
 runtime services such as device discovery, CUDA streams/events, and RNG seeding.
 Inference uses explicitly detached tensors rather than ambient gradient-mode scopes.
 
 ## Tensor specifications
 
 ```lean
-import Tyr.Typed
-import Tyr.Typed.Neural
-import Tyr.Torch
+import Tyr.Core.Typed
+import Tyr.Core.Typed.Neural
+import Tyr.Core.Torch
 open torch
 
 abbrev Activations := Tensor { shape := #[32, 128], dtype := .Float32, device := .CPU }
@@ -36,7 +36,7 @@ inspect native metadata. Runtime-selected devices can appear directly in
 result types, or be packaged as `Sigma fun device => Tensor { shape := shape,
 dtype := dtype, device := device }` when the caller does not select placement.
 
-`RawTensor` is the native handle used by adapters in `Tyr/FFI/`. It is not the model-facing tensor type. `Tensor.ofRaw!` checks a
+`RawTensor` is the native handle used by adapters in `Tyr/Core/FFI/`. It is not the model-facing tensor type. `Tensor.ofRaw!` checks a
 native result's shape, dtype, and placement against `σ` and aborts on a mismatch.
 There is no public unchecked raw constructor or implicit raw coercion. Native
 adapters use explicit `.raw` access and validate returned handles. Static
@@ -146,8 +146,8 @@ CPU storage; accelerator, view, autograd, and externally backed storage take the
 copying path.
 
 ```lean
-import Tyr.Typed
-import Tyr.Typed.Neural
+import Tyr.Core.Typed
+import Tyr.Core.Typed.Neural
 open torch
 
 def classifierStep {batch inDim classes : UInt64}
@@ -166,14 +166,14 @@ system and [tensor structures](tensorstruct.md) for parameter-tree traversal.
 
 ## Neural operations and persistence
 
-`Tyr.Typed.Neural` includes attention/GQA, checked native flash-attention dispatch,
+`Tyr.Core.Typed.Neural` includes attention/GQA, checked native flash-attention dispatch,
 rotary embeddings, spectral/audio helpers, and file adapters. Linear algebra and
 norm operations are available under `Tensor`, rather than separate legacy
 functional namespaces.
 
 `Tensor.saveTensor` writes a tensor. `Tensor.loadTensorExact σ path` requires the
 stored shape to match and validates dtype and placement. SafeTensors loaders in
-`Tyr.SafeTensors` validate stored metadata and can generate indexed parameter
+`Tyr.IO.SafeTensors` validate stored metadata and can generate indexed parameter
 structures; see [serialization](../serialization.md).
 
 ## Verification

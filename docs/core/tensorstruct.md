@@ -22,13 +22,13 @@ many different shapes and dtypes, but `map` cannot silently change a leaf's
 specification. `mapM` supports effectful operations such as checked loading.
 `zipWith` combines corresponding leaves, and `fold` summarizes them.
 
-The indexed tensor instance is defined in `Tyr.TensorStruct`. Import
-`Tyr.Module.Derive` to use the deriving handler, or import the `Tyr` umbrella.
+The indexed tensor instance is defined in `Tyr.Core.TensorStruct`. Import
+`Tyr.Core.TensorStruct.Derive` to use the deriving handler, or import the `Tyr` umbrella.
 
 ## Deriving parameter trees
 
 ```lean
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct.Derive
 open torch
 
 structure LinearParameters (inDim outDim : UInt64) where
@@ -105,13 +105,13 @@ each leaf keeps its shape, and container lengths and `Static`/`Frozen` roles are
 preserved. Dtype and device changes happen together in one native conversion.
 Validation and native conversion errors report the affected field or index.
 
-Import `Tyr.TensorStruct.Cast` for supported leaf and container conversions.
+Import `Tyr.Core.TensorStruct.Cast` for supported leaf and container conversions.
 `deriving TensorStruct` and `deriving Model` automatically provide casts between
 parameterizations of the same record. Each corresponding field must have a
 `TensorTreeCast` instance; ordinary `map` and `mapM` still preserve every leaf's
 complete specification. Conversion happens only when `castTo` is explicitly called.
 
-For different record types, import `Tyr.TensorStruct.DeriveCast` and declare
+For different record types, import `Tyr.Core.TensorStruct.DeriveCast` and declare
 `derive_tensor_tree_cast SourceType => TargetType`. This matches fields by name
 and order without allocating a destination template. See the
 [complete record example](typed.md#models-differentiation-and-persistence).
@@ -127,7 +127,7 @@ values require a manual cast instance.
 loads exact stored shapes. Stored tensor-count, dtype, and shape mismatches are
 errors. The caller can choose whether loaded tensors become trainable parameters.
 
-Schema and flattening support lives in `Tyr.TensorStruct.Schema`. See
+Schema and flattening support lives in `Tyr.Core.TensorStruct.Schema`. See
 [serialization](../serialization.md).
 
 ## Related guides

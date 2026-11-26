@@ -1,0 +1,166 @@
+import Tyr.Core.FFI.Basic.Types
+import Tyr.Core.FFI.Basic.PosNat
+import Tyr.Core.FFI.ConstantSupport.Types
+
+/-!
+# Tyr.Core.FFI.Basic
+
+`Tyr.Core.FFI.Basic` defines Tyr's foundational tensor-level types and pure shape logic.
+It is the lowest-level shared layer used across runtime bindings, model code, and utilities.
+
+## Major Components
+
+- Core types (in `Tyr.Core.FFI.Basic.Types`): `Shape`, `DType`, `Device`, the native
+  `RawTensor` carrier and `StaticSpec`,
+  with DType parsing and pure shape-transform utilities — no native functions,
+  so the GPU code generator can use them without linking `libTyrC`.
+- Tensor metadata extraction hooks (`runtimeShape`, dtype/device introspection,
+  stats/values), implemented in `libTyrC` (this module).
+- The indexed `Tensor`, checked raw construction, and a trusted fresh zero
+  factory. An opaque carrier prevents structural construction and reindexing,
+  while GPU code generation continues to import only `Basic.Types`.
+
+## Scope
+
+This module is intentionally kernel-agnostic.
+Typed numerical operations live in `Tyr.Core.Typed.Ops`; native adapters live in
+`Tyr.Core.FFI.RawTensor`. Public numerical APIs use indexed `Tensor` values.
+-/
+
+namespace torch
+
+namespace RawTensor
+
+@[extern "lean_torch_zeros"] opaque zeros (shape : Shape) (requiresGrad : Bool := false)
+    (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : RawTensor
+
+@[extern "lean_torch_cast_dtype"] opaque castDType (t : @& RawTensor)
+    (dtype : DType) : RawTensor
+
+-- Preserve the existing C ABI's shape argument without exposing a shape-indexed
+-- raw type. Metadata queries inspect the native tensor, never this argument.
+@[extern "lean_torch_to_string"] private opaque toStringImpl
+    (t : @& RawTensor) : String
+
+def toString (t : RawTensor) : String := toStringImpl t
+
+instance : ToString RawTensor := ⟨RawTensor.toString⟩
+instance : Repr RawTensor where
+  reprPrec t _ := RawTensor.toString t
+
+@[extern "lean_torch_get_shape"] private opaque runtimeShapeImpl
+    (t : @& RawTensor) : Shape
+@[extern "lean_torch_get_dtype_enum"] private opaque dtypeImpl
+    (t : @& RawTensor) : DType
+@[extern "lean_torch_get_device_enum"] private opaque deviceImpl
+    (t : @& RawTensor) : Device
+@[extern "lean_torch_get_device"] private opaque deviceStrImpl
+    (t : @& RawTensor) : String
+@[extern "lean_torch_get_values"] private opaque getValuesImpl
+    (t : @& RawTensor) (maxElements : @& Nat) : FloatArray
+@[extern "lean_torch_get_stats"] private opaque statsImpl
+    (t : @& RawTensor) : String
+
+/-- Native metadata, independent of any static tensor specification. -/
+def runtimeShape (t : RawTensor) : Shape := runtimeShapeImpl t
+def dtype (t : RawTensor) : DType := dtypeImpl t
+def device (t : RawTensor) : Device := deviceImpl t
+def deviceStr (t : RawTensor) : String := deviceStrImpl t
+def getValues (t : RawTensor) (maxElements : Nat := 1000) : FloatArray :=
+  getValuesImpl t maxElements
+def stats (t : RawTensor) : String := statsImpl t
+
+end RawTensor
+
+/-- Stop execution when a trusted native operation violates its result
+contract. This never manufactures a fallback value. -/
+@[extern "lean_torch_native_invariant_failure"]
+opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : α :=
+  Classical.choice inferInstance
+
+-- Keep the representation opaque even to constructor/cases/unfold tactics.
+-- The body establishes nonemptiness without adding an axiom; it does not make
+-- different specification indices definitionally equal in the kernel.
+private opaque TensorCarrier (_σ : StaticSpec) : NonemptyType :=
+  ⟨RawTensor, inferInstance⟩
+
+/-- Tensor indexed by a static specification. Safe code admits native handles
+through `Tensor.ofRaw!`; the carrier has no constructor or structural recursor.
+At runtime it is the native handle itself, with no additional allocation. -/
+def Tensor (σ : StaticSpec) : Type := (TensorCarrier σ).type
+
+instance {σ : StaticSpec} : Nonempty (Tensor σ) := (TensorCarrier σ).property
+
+namespace Tensor
+
+-- These casts implement the native representation, not kernel proofs. They are
+-- unsafe so even discovering their private names cannot provide an unchecked
+-- constructor to safe Lean code. Public opaque declarations have safe logical
+-- bodies and use these implementations only during execution.
+private unsafe def rawImpl {σ : StaticSpec} (tensor : Tensor σ) : RawTensor :=
+  unsafeCast tensor
+
+/-- Explicitly expose the native handle, which carries no static claims. -/
+@[implemented_by rawImpl]
+opaque raw {σ : StaticSpec} (tensor : Tensor σ) : RawTensor :=
+  Classical.choice inferInstance
+
+private def renderDevice (device : Device) : String :=
+  match device.kind with
+  | .CPU => "CPU"
+  | .MPS => "MPS"
+  | .CUDA index => s!"CUDA:{index}"
+
+private def checkSpec (σ : StaticSpec) (raw : RawTensor) : Except String Unit := do
+  if raw.runtimeShape != σ.shape then
+    throw s!"Expected shape {reprStr σ.shape}, got {reprStr raw.runtimeShape}"
+  if raw.dtype != σ.dtype then
+    throw s!"Expected dtype {σ.dtype}, got {raw.dtype}"
+  if raw.device != σ.device then
+    throw s!"Expected device {renderDevice σ.device}, got {renderDevice raw.device}"
+
+private unsafe def ofRawImpl {σ : StaticSpec} (raw : RawTensor) (operation : @& Lean.Name) :
+    Tensor σ :=
+  match checkSpec σ raw with
+  | .ok () => unsafeCast raw
+  | .error message => nativeInvariantFailure s!"{operation}: {message}"
+
+@[implemented_by ofRawImpl]
+private opaque ofRawCore {σ : StaticSpec} (raw : RawTensor) (operation : @& Lean.Name) : Tensor σ :=
+  Classical.choice inferInstance
+
+/-- The raw-to-indexed boundary for native results. Shape, dtype and placement
+are compared with `σ`; a result that contradicts its type is a binding bug and
+aborts naming `operation`, by default the calling declaration. -/
+@[inline] def ofRaw! {σ : StaticSpec} (raw : RawTensor) (operation : Lean.Name := by exact decl_name%) :
+    Tensor σ :=
+  ofRawCore raw operation
+
+private unsafe def zerosForImpl (σ : StaticSpec)
+    [DType.ConstantSupported σ.dtype σ.device] : Tensor σ :=
+  let raw := RawTensor.zeros σ.shape false σ.device
+  let raw := RawTensor.castDType raw σ.dtype
+  unsafeCast raw
+
+/-- Trusted native allocation boundary for a supported constant specification.
+The placement has already been acquired, and the capability establishes support
+for the requested dtype. Allocation failures follow the runtime failure policy.
+This boundary accepts a specification, never an unchecked foreign handle. -/
+@[implemented_by zerosForImpl]
+opaque zerosFor (σ : StaticSpec) [DType.ConstantSupported σ.dtype σ.device] :
+    Tensor σ := Classical.choice inferInstance
+
+/-- Package placement as an existential index without weakening its identity. -/
+def packDevice {σ : StaticSpec} (tensor : Tensor σ) :
+    Sigma fun device : Device => Tensor { σ with device } :=
+  ⟨σ.device, tensor⟩
+
+instance {σ : StaticSpec} : ToString (Tensor σ) where
+  toString t := RawTensor.toString t.raw
+
+instance {σ : StaticSpec} : Repr (Tensor σ) where
+  reprPrec t _ := RawTensor.toString t.raw
+
+end Tensor
+
+end torch

@@ -1,5 +1,5 @@
-import Tyr.SafeTensors.Schema
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Schema
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen35
 import LeanTest
 

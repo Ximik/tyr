@@ -2,11 +2,11 @@
   Checkpoint System for Diffusion Model Training
 
   Provides save/load functionality for diffusion model parameters and optimizer state.
-  Follows the same pattern as Tyr/Checkpoint.lean for GPT models.
+  Follows the same pattern as Tyr/IO/Checkpoint.lean for GPT models.
 -/
 import Examples.Diffusion.Diffusion
-import Tyr.TensorStruct
-import Tyr.Optim
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Optim
 
 namespace torch.diffusion.checkpoint
 

@@ -6,33 +6,33 @@ Lean typechecking and records shape, dtype, and concrete device. The underlying
 
 ## Imports and implementation layers
 
-`import Tyr.Typed` provides specifications, tensor constructors, core operations,
-and typed layer helpers. Add `import Tyr.Typed.Neural` for additional neural,
+`import Tyr.Core.Typed` provides specifications, tensor constructors, core operations,
+and typed layer helpers. Add `import Tyr.Core.Typed.Neural` for additional neural,
 data, and persistence operations. `import Tyr` aggregates the library.
 
 | Module | Responsibility |
 | --- | --- |
-| `Tyr.FFI.Basic.Types` | Raw carrier, specifications, dtype/device types, pure shape helpers |
-| `Tyr.FFI.Basic` | Indexed carrier, checked raw admission, native metadata, native zero factory |
-| `Tyr.FFI.ConstantSupport.Types` | Erased constant-construction capability for an exact dtype and device |
-| `Tyr.FFI.ConstantSupport` | Runtime acquisition of dtype/device constant support |
-| `Tyr.Typed.DType` | Partial dtype promotion and accumulation rules |
-| `Tyr.Typed.Promotion` | Erased proof classes for successful dtype promotion |
-| `Tyr.Typed.Spec` | Shape and result-spec algebra |
-| `Tyr.Typed.Device` | Static placement eligibility, native-device checks, and tensor contracts |
-| `Tyr.Typed.Tensor` | Checked constructors, validation, existential packaging |
-| `Tyr.Typed.Ops` | Arithmetic, shape transforms, reductions, autograd, host arrays |
-| `Tyr.Typed.Neural` | Neural, data, storage, and dynamic-shape adapters |
-| `Tyr.TensorStruct.Cast` | Convert a tensor tree to the specifications in a destination type |
-| `Tyr.TensorStruct.DeriveCast` | Derive field-wise casts between explicitly selected record types |
-| `Tyr/FFI/` | Native declarations without static guarantees |
+| `Tyr.Core.FFI.Basic.Types` | Raw carrier, specifications, dtype/device types, pure shape helpers |
+| `Tyr.Core.FFI.Basic` | Indexed carrier, checked raw admission, native metadata, native zero factory |
+| `Tyr.Core.FFI.ConstantSupport.Types` | Erased constant-construction capability for an exact dtype and device |
+| `Tyr.Core.FFI.ConstantSupport` | Runtime acquisition of dtype/device constant support |
+| `Tyr.Core.Typed.DType` | Partial dtype promotion and accumulation rules |
+| `Tyr.Core.Typed.Promotion` | Erased proof classes for successful dtype promotion |
+| `Tyr.Core.Typed.Spec` | Shape and result-spec algebra |
+| `Tyr.Core.Typed.Device` | Static placement eligibility, native-device checks, and tensor contracts |
+| `Tyr.Core.Typed.Tensor` | Checked constructors, validation, existential packaging |
+| `Tyr.Core.Typed.Ops` | Arithmetic, shape transforms, reductions, autograd, host arrays |
+| `Tyr.Core.Typed.Neural` | Neural, data, storage, and dynamic-shape adapters |
+| `Tyr.Core.TensorStruct.Cast` | Convert a tensor tree to the specifications in a destination type |
+| `Tyr.Core.TensorStruct.DeriveCast` | Derive field-wise casts between explicitly selected record types |
+| `Tyr/Core/FFI/` | Native declarations without static guarantees |
 
 ## Concrete placement and dtype claims
 
 Every `StaticSpec` names an actual device. Dtype may remain dynamic:
 
 ```lean
-import Tyr.Typed
+import Tyr.Core.Typed
 open torch
 
 abbrev RuntimeDType := SomeDTypeTensor #[2, 3] .CPU
@@ -91,7 +91,7 @@ cannot authorize construction. `zerosFor`, `onesFor`, and `eyeFor` require
 pairs; a runtime-selected pair obtains the same erased evidence at setup:
 
 ```lean
-import Tyr.Typed
+import Tyr.Core.Typed
 open torch
 
 def inspectConstants (dtype : DType) (device : Device) : IO Unit := do
@@ -129,7 +129,7 @@ Section parameters become implicit record parameters when tensor fields use them
 The deriving handlers retain those parameters:
 
 ```lean
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct.Derive
 open torch
 
 variable {device : Device}
@@ -185,7 +185,7 @@ PyTorch defines the pair. Typed arithmetic carries this result as an erased
 dtypes. Generic forward functions carry the constraint explicitly:
 
 ```lean
-import Tyr.Typed
+import Tyr.Core.Typed
 open torch
 
 -- Tensor.add has this same shape/dtype/device signature.
@@ -274,8 +274,8 @@ device; a size-one vector and an accelerator scalar do not get that exception.
 The result follows the non-CPU operand when this exception applies.
 
 ```lean
-import Tyr.Typed
-import Tyr.Torch
+import Tyr.Core.Typed
+import Tyr.Core.Torch
 open torch
 
 def addHostScalar {device : Device} (scalar : Tensor ⟨#[], .Float32, .CPU⟩)
@@ -385,7 +385,7 @@ reproducibility across devices or backend algorithms.
 ## Boundary validation
 
 ```lean
-import Tyr.Typed
+import Tyr.Core.Typed
 open torch
 
 def admitRaw (raw : RawTensor) : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU } :=
@@ -423,8 +423,8 @@ A shape may depend on a Lean runtime value and still occur in a dependent result
 type. If the native computation determines it, package it existentially:
 
 ```lean
-import Tyr.Typed
-import Tyr.Typed.Neural
+import Tyr.Core.Typed
+import Tyr.Core.Typed.Neural
 open torch
 
 def matchingPositions (tokens : Tensor { shape := #[4], dtype := .Int64, device := .CPU }) :=
@@ -456,7 +456,7 @@ placement in the destination Lean type. For example, a model can request BF16
 weights and retain Int64 indices:
 
 ```lean
-import Tyr.TensorStruct.DeriveCast
+import Tyr.Core.TensorStruct.DeriveCast
 open torch
 
 structure StoredWeights where

@@ -1,7 +1,7 @@
 import Tests.Assertions
-import Tyr.TensorStruct.Schema
-import Tyr.Checkpoint
-import Tyr.Typed.Neural
+import Tyr.Core.TensorStruct.Schema
+import Tyr.IO.Checkpoint
+import Tyr.Core.Typed.Neural
 import Tyr.Model.KittenTTS.TypedOps
 import LeanTest
 

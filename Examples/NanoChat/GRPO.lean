@@ -1,4 +1,4 @@
-import Tyr.RL.GRPO
+import Tyr.Lib.Train.GRPO
 
 /-!
 # Examples.NanoChat.GRPO

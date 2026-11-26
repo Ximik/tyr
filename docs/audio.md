@@ -2,7 +2,7 @@
 
 Two small support layers sit behind the voice demos:
 
-- `Tyr/FFI/AppleAudioInput.lean`, `Tyr/FFI/AppleAudioOutput.lean` — microphone
+- `Tyr/Core/FFI/AppleAudioInput.lean`, `Tyr/Core/FFI/AppleAudioOutput.lean` — microphone
   capture and speaker feedback on macOS (AudioToolbox/AudioQueue).
 - `Tyr/Inference/` — a shape-indexed KV cache for autoregressive decode loops.
 
@@ -22,8 +22,8 @@ AudioQueue, a sample FIFO, lifecycle mutexes) lives in C++:
 
 | Lean module | C++ backing | Off macOS |
 | --- | --- | --- |
-| `Tyr/FFI/AppleAudioInput.lean` | `cc/src/apple_audio_input.mm` | `start` raises `IO.userError`; `read`/`readBuffer` return empty, `stop` is a no-op |
-| `Tyr/FFI/AppleAudioOutput.lean` | `cc/src/apple_audio_output.mm` | silent no-ops |
+| `Tyr/Core/FFI/AppleAudioInput.lean` | `cc/src/apple_audio_input.mm` | `start` raises `IO.userError`; `read`/`readBuffer` return empty, `stop` is a no-op |
+| `Tyr/Core/FFI/AppleAudioOutput.lean` | `cc/src/apple_audio_output.mm` | silent no-ops |
 
 `AudioToolbox` is linked into `libTyrC` by `cc/Makefile`, so no extra build
 flags are needed on macOS.
@@ -43,7 +43,7 @@ frontend.
 
 ### Inference: a preallocated, shape-indexed KV cache
 
-`Tyr/Inference/KVCache.lean` provides a key/value cache for transformer decode
+`Tyr/Lib/Inference/KVCache.lean` provides a key/value cache for transformer decode
 loops. Each layer owns preallocated K and V buffers of shape
 `[batch, numKvHeads, maxSeqLen, headDim]`; a decode step writes the new token's
 K/V at position `cache.currentLen` (in place, via
@@ -51,8 +51,8 @@ K/V at position `cache.currentLen` (in place, via
 layer to the valid prefix, and runs attention through
 `Tensor.attentionGQAQKV` (libtorch scaled-dot-product attention).
 
-One namespace quirk: the module is named `Tyr.Inference.KVCache` but declares
-`namespace torch.Generator.KVCache` (`Tyr/Inference/KVCache.lean`), a
+One namespace quirk: the module is named `Tyr.Lib.Inference.KVCache` but declares
+`namespace torch.Generator.KVCache` (`Tyr/Lib/Inference/KVCache.lean`), a
 leftover from its NanoChat origin. Call sites write
 `torch.Generator.KVCache.Cache`, or `open torch.Generator` and use
 `KVCache.Cache`.
@@ -64,7 +64,7 @@ that step has been processed. `Cache.currentLen` reads `seqLens[0]` and assumes
 uniform lengths across the batch.
 
 Both cache structures have `TensorStruct` instances
-(`Tyr/Inference/KVCache.lean`), so generic traversals (`map`, `mapM`,
+(`Tyr/Lib/Inference/KVCache.lean`), so generic traversals (`map`, `mapM`,
 `zipWith`, `fold`) preserve each leaf specification. Device conversion requires
 a destination type and `TensorTreeCast` instance; dtype conversion uses the
 checked cast APIs. See
@@ -72,7 +72,7 @@ checked cast APIs. See
 
 ## Key APIs
 
-### `Tyr.Audio.AppleInput` (`Tyr/FFI/AppleAudioInput.lean`)
+### `Tyr.Audio.AppleInput` (`Tyr/Core/FFI/AppleAudioInput.lean`)
 
 ```lean
 opaque start (sampleRate : UInt64 := 16000) (channels : UInt64 := 1)
@@ -96,7 +96,7 @@ opaque rms (xs : @& Array Float) : IO Float
   supported on macOS"`); `read`/`readBuffer` just return empty results, so a
   capture loop that never checks for `start` failure would spin silently.
 
-### `Tyr.Audio.AppleOutput` (`Tyr/FFI/AppleAudioOutput.lean`)
+### `Tyr.Audio.AppleOutput` (`Tyr/Core/FFI/AppleAudioOutput.lean`)
 
 ```lean
 opaque beep (freqHz : Float) (durationMs : UInt64 := 120)
@@ -114,9 +114,9 @@ off macOS they are silent no-ops, so UX cues simply vanish on Linux.
 `beepAsync` plays on a detached thread and holds the output mutex for the whole
 tone — do not mix it with synchronous `beep` in the same run unless you know
 the async tone has finished (hazard documented at
-`Tyr/FFI/AppleAudioOutput.lean`).
+`Tyr/Core/FFI/AppleAudioOutput.lean`).
 
-### `torch.Generator.KVCache` (`Tyr/Inference/KVCache.lean`)
+### `torch.Generator.KVCache` (`Tyr/Lib/Inference/KVCache.lean`)
 
 `LayerCache batch maxSeqLen numKvHeads headDim dtype device` stores indexed key
 and value tensors of shape `#[batch, numKvHeads, maxSeqLen, headDim]`.
@@ -158,8 +158,8 @@ boundary. `appendSamples`, `keepLast` and `rms` are small `FloatArray` folds
 defined in that file:
 
 ```lean
-import Tyr.FFI.AppleAudioInput
-import Tyr.FFI.AppleAudioOutput
+import Tyr.Core.FFI.AppleAudioInput
+import Tyr.Core.FFI.AppleAudioOutput
 
 /-- Record 16 kHz mono audio until 1.5 s of trailing silence. -/
 def recordUntilSilence : IO (Array Float) := do
@@ -199,7 +199,7 @@ both the success and `catch` branches — see
 One indexed BF16 decode step with GQA:
 
 ```lean
-import Tyr.Inference.KVCache
+import Tyr.Lib.Inference.KVCache
 open torch torch.Generator
 
 def decodeStep {batch maxLen kvHeads : UInt64}

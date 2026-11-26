@@ -1,7 +1,7 @@
 import LeanTest
 import Tests.Devices
-import Tyr.Typed.Ops
-import Tyr.Modular.RiemannianModule
+import Tyr.Core.Typed.Ops
+import Tyr.Lib.Optim.Modular.RiemannianModule
 
 open torch
 
@@ -32,17 +32,17 @@ example {device : Device} (model : Linear 2 3 .Float32 device)
     Tensor ⟨#[1, 3], .Float32, device⟩ := model.forward2d input
 
 example (device : Device) :
-    Tyr.Modular.MatrixManifoldCarrier (fun m n => Tyr.Manifolds.Stiefel m n .Float32 device) device :=
+    Tyr.Lib.Optim.Modular.MatrixManifoldCarrier (fun m n => Tyr.Lib.Optim.Manifolds.Stiefel m n .Float32 device) device :=
   inferInstance
 
 example (device : Device) :
-    Tyr.Modular.RiemannianModule (Linear 2 3 .Float32 device) 2 3 device :=
+    Tyr.Lib.Optim.Modular.RiemannianModule (Linear 2 3 .Float32 device) 2 3 device :=
   inferInstance
 
 example {device : Device}
-    (lin : Tyr.Modular.LocalLinearization (device := device) 2 6 3) :
+    (lin : Tyr.Lib.Optim.Modular.LocalLinearization (device := device) 2 6 3) :
     Tensor ⟨#[3, 2], .Float32, device⟩ :=
-  Tyr.Modular.LocalLinearization.materializeA lin
+  Tyr.Lib.Optim.Modular.LocalLinearization.materializeA lin
 
 -- Equality evidence recovered at runtime permits a shared-device operation.
 private def addPacked (x y : Sigma fun device => Tensor ⟨#[2], .Float32, device⟩) :

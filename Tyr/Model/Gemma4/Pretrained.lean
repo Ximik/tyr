@@ -5,7 +5,7 @@
   - local model directory, or
   - HuggingFace repo id (download to local cache on demand).
 -/
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.Gemma4.ConfigIO
 import Tyr.Model.Gemma4.Weights
 

@@ -44,11 +44,10 @@
   header of each listed shard once per directory, so each per-tensor load
   below is a hash lookup plus one file read.
 -/
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Model.Utils
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Laguna.Model
-import Tyr.Util
+import Tyr.Core.Util
 
 namespace torch.laguna
 

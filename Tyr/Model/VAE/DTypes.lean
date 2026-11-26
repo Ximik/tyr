@@ -1,5 +1,5 @@
-import Tyr.Typed.Promotion
-import Tyr.Typed.Tensor
+import Tyr.Core.Typed.Promotion
+import Tyr.Core.Typed.Tensor
 
 namespace torch.vae
 

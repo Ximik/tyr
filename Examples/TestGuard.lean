@@ -1,7 +1,7 @@
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Widget  -- This enables deriving ToModuleDisplay
-import Tyr.Module.Linear
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Lib.Widget.Module
+import Tyr.Lib.Module.Linear
 
 
 open torch

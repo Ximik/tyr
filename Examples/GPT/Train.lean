@@ -1,11 +1,11 @@
 /-
   Training Infrastructure for GPT
 -/
-import Tyr.Torch
-import Tyr.TensorStruct
-import Tyr.Optim
+import Tyr.Core.Torch
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Optim
 import Examples.GPT.GPT
-import Tyr.Util
+import Tyr.Core.Util
 
 namespace torch.train
 

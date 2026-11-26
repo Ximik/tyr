@@ -5,9 +5,9 @@
   Single-head spatial attention.
 -/
 import Tyr.Model.VAE.TypedOps
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.VAE.ResnetBlock
 
 namespace torch.vae

@@ -165,7 +165,7 @@ FFI header, is covered in [ffi-and-build.md](ffi-and-build.md).
 Reconstructed example (from `Tests/TestSafeTensorsRecord.lean`):
 
 ```lean
-import Tyr.SafeTensors
+import Tyr.IO.SafeTensors
 import LeanTest
 
 open torch
@@ -204,10 +204,10 @@ model configs and pretrained-weight loading (Qwen3/3.5/3.6, Qwen2.5-Omni,
 KittenTTS, Qwen3TTS, Qwen3ASR, SileroVAD), the SafeTensors type
 provider, checkpoints, manifolds/optimizers, and NanoChat tokenizer/tasks.
 
-No test file imports these modules directly (verified by grep): `Tyr.FFI.AppleAudioInput`, `Tyr.FFI.AppleAudioOutput`,
-`Tyr.Hub`, `Tyr.RL`, `Tyr.Widget`, `Tyr.Log`, `Tyr.Text`,
-`Tyr.Inference`. Coverage is thin (one or two files) for `Tyr.Distributed`,
-`Tyr.Sharding`, and `Tyr.Data`. Multi-process collective behavior is only
+No test file imports these modules directly (verified by grep): `Tyr.Core.FFI.AppleAudioInput`, `Tyr.Core.FFI.AppleAudioOutput`,
+`Tyr.IO.Hub`, `Tyr.RL`, `Tyr.Lib.Widget`, `Tyr.IO.Log`, `Tyr.Text`,
+`Tyr.Inference`. Coverage is thin (one or two files) for `Tyr.Lib.Distributed`,
+`Tyr.Lib.Distributed.Sharding`, and `Tyr.Lib.Data`. Multi-process collective behavior is only
 smoke-tested through the FFI surface in `Tests/TestModdedGPT.lean`.
 
 Caveats to be aware of when extending the suite:

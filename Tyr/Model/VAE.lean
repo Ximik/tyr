@@ -10,7 +10,7 @@ import Tyr.Model.VAE.AttnBlock
 import Tyr.Model.VAE.Upsample
 import Tyr.Model.VAE.Decoder
 import Tyr.Model.VAE.Weights
-import Tyr.Log
+import Tyr.IO.Log
 import Tyr.Model.VAE.DTypes
 import Tyr.Model.VAE.ConfigIO
 

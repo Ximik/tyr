@@ -16,8 +16,8 @@
   - Common prefix/suffix detection for efficient batching
   - Distributed evaluation support
 -/
-import Tyr.Typed.Neural
-import Tyr.Distributed
+import Tyr.Core.Typed.Neural
+import Tyr.Lib.Distributed
 
 namespace torch.Eval.CORE
 

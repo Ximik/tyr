@@ -1,6 +1,6 @@
 import Tyr.Model.Qwen3ASR
-import Tyr.Tokenizer.Qwen3
-import Tyr.FFI.AppleAudioInput
+import Tyr.Model.Qwen.Tokenizer
+import Tyr.Core.FFI.AppleAudioInput
 
 namespace Examples.Qwen3ASR
 

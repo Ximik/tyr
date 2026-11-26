@@ -10,8 +10,8 @@ import Tyr.Model.Qwen3ASR.Config
 import Tyr.Model.Qwen3ASR.Model
 import Tyr.Model.Qwen3ASR.Frontend
 import Tyr.Model.Qwen3ASR.Processor
-import Tyr.Tokenizer.Qwen3
-import Tyr.Util
+import Tyr.Model.Qwen.Tokenizer
+import Tyr.Core.Util
 
 namespace torch.qwen3asr
 
@@ -797,7 +797,7 @@ def decodeStreamingChunkWithModelStateCached
     (audio16k : Array Float)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (String × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) := do
   if audio16k.isEmpty then
     pure ("", cache)
@@ -1095,7 +1095,7 @@ def decodeStreamingChunkWithModelCached
     (audio16k : Array Float)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (String × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) := do
   let stateCache : StreamingDecodeCache (device := device) (dtype := dtype) cfg := { promptCache := prefixCache }
   let (text, cache') ←
@@ -1122,7 +1122,7 @@ def decodeStreamingChunkWithModel
     (prompt : String)
     (audio16k : Array Float)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO String := do
   let out ← decodeStreamingChunkWithModelCached
     model
@@ -1146,7 +1146,7 @@ def streamingTranscribeWithModelStateCached
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) := do
   let cacheRef ← IO.mkRef cache
   let basePrompt := state.promptRaw
@@ -1182,7 +1182,7 @@ def streamingTranscribeWithModelCached
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) := do
   let stateCache : StreamingDecodeCache (device := device) (dtype := dtype) cfg := { promptCache := prefixCache }
   let (next, cache') ←
@@ -1207,7 +1207,7 @@ def streamingTranscribeWithModel
     (pcm16k : Array Float)
     (state : ASRStreamingState)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ASRStreamingState := do
   let (next, _cache) ←
     streamingTranscribeWithModelCached
@@ -1231,7 +1231,7 @@ def finishStreamingTranscribeWithModelStateCached
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) := do
   let cacheRef ← IO.mkRef cache
   let basePrompt := state.promptRaw
@@ -1266,7 +1266,7 @@ def finishStreamingTranscribeWithModelCached
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) := do
   let stateCache : StreamingDecodeCache (device := device) (dtype := dtype) cfg := { promptCache := prefixCache }
   let (next, cache') ←
@@ -1289,7 +1289,7 @@ def finishStreamingTranscribeWithModel
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (state : ASRStreamingState)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ASRStreamingState := do
   let (next, _cache) ←
     finishStreamingTranscribeWithModelCached
@@ -1329,7 +1329,7 @@ def streamingTranscribeStateCached
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) :=
   streamingTranscribeWithModelStateCached
     m
@@ -1351,7 +1351,7 @@ def streamingTranscribeCached
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) :=
   streamingTranscribeWithModelCached
     m
@@ -1372,7 +1372,7 @@ def streamingTranscribe
     (pcm16k : Array Float)
     (state : ASRStreamingState)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ASRStreamingState :=
   streamingTranscribeWithModel m tok preprocessor hMel pcm16k state maxNewTokens eosTokenIds
 
@@ -1385,7 +1385,7 @@ def finishStreamingTranscribeStateCached
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) :=
   finishStreamingTranscribeWithModelStateCached
     m
@@ -1405,7 +1405,7 @@ def finishStreamingTranscribeCached
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) :=
   finishStreamingTranscribeWithModelCached
     m
@@ -1424,7 +1424,7 @@ def finishStreamingTranscribe
     (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (state : ASRStreamingState)
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array tokenizer.TokenId := defaultEosTokenIds)
+    (eosTokenIds : Array UInt32 := defaultEosTokenIds)
     : IO ASRStreamingState :=
   finishStreamingTranscribeWithModel m tok preprocessor hMel state maxNewTokens eosTokenIds
 

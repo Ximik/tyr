@@ -13,13 +13,13 @@
   Note: this implementation currently targets the released 12Hz config
   (16 quantizers, 1024 latent dim, 2x convnext upsample, 4 decoder blocks).
 -/
-import Tyr.Typed.Neural
-import Tyr.SafeTensors.Source
+import Tyr.Core.Typed.Neural
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.SpeechTokenizerDTypes
-import Tyr.TensorStruct
-import Tyr.Module.RMSNorm
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.RMSNorm
 import Tyr.Model.Qwen.RoPE
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
 
 namespace torch.qwen3tts
 

@@ -10,14 +10,14 @@
   - Cached and uncached generation
 -/
 import Tyr.Model.Qwen35.TypedOps
-import Tyr.TensorStruct
-import Tyr.TensorStruct.Indexed
-import Tyr.Module.Core
-import Tyr.Module.Derive
+import Tyr.Core.TensorStruct
+import Tyr.Core.TensorStruct.Indexed
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
 import Tyr.Model.Qwen.Attention
 import Tyr.Model.Qwen35.Config
-import Tyr.Model.Utils
-import Tyr.Model.Generation
+import Tyr.Lib.Module.Init
+import Tyr.Lib.Inference.Generation
 
 namespace torch.qwen35
 
@@ -1139,7 +1139,7 @@ private partial def decodeLoopCached {batch maxLen : Nat}
     (cosAll : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sinAll : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (strategy : SamplingStrategy)
-    (eosTokenIds : Array tokenizer.TokenId)
+    (eosTokenIds : Array UInt32)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
     (remaining : Nat)
     {curSeq : Nat}
@@ -1188,7 +1188,7 @@ private partial def decodeLoopUncached {batch : Nat}
     (cfg : Config)
     (m : Qwen35ForCausalLM (dtype := dtype) (device := device) cfg)
     (strategy : SamplingStrategy)
-    (eosTokenIds : Array tokenizer.TokenId)
+    (eosTokenIds : Array UInt32)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
     (remaining : Nat)
     {curSeq : Nat}
@@ -1233,7 +1233,7 @@ private partial def decodeLoopUncachedEmbeds {batch : Nat}
     (cfg : Config)
     (m : Qwen35ForCausalLM (dtype := dtype) (device := device) cfg)
     (strategy : SamplingStrategy)
-    (eosTokenIds : Array tokenizer.TokenId)
+    (eosTokenIds : Array UInt32)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
     (remaining : Nat)
     {curSeq : Nat}
@@ -1302,7 +1302,7 @@ private def generateFromEmbedsCore {batch seq : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     (onStep : Option (StreamCallback (device := device) batch) := none)
     (rotary : Option (RotaryTables (device := device) cfg (seq + maxNewTokens)) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
@@ -1340,7 +1340,7 @@ def generateFromEmbeds {batch seq : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     (rotary : Option (RotaryTables (device := device) cfg (seq + maxNewTokens)) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none rotary
@@ -1354,7 +1354,7 @@ def generateFromEmbedsStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     (rotary : Option (RotaryTables (device := device) cfg (seq + maxNewTokens)) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep) rotary
@@ -1366,7 +1366,7 @@ def generate {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let inputsEmbeds := m.embedTokens inputIds
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none
@@ -1379,7 +1379,7 @@ def generateStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let inputsEmbeds := m.embedTokens inputIds
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep)
@@ -1391,7 +1391,7 @@ def generateUncached {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let finished0 : Tensor { device := device, shape := #[batch], dtype := .Bool } := falseMaskTyped (n := batch) inputIds.device
   decodeLoopUncached cfg m strategy eosTokenIds finished0 maxNewTokens inputIds
@@ -1455,7 +1455,7 @@ def generateGreedy {batch seq : Nat}
     (m : Qwen35ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
-    (eosTokenIds : Array tokenizer.TokenId := #[])
+    (eosTokenIds : Array UInt32 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generate cfg m inputIds maxNewTokens .greedy eosTokenIds
 

@@ -3,12 +3,11 @@
 
   Pretrained weight loading for Lean Qwen3-ASR port.
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Module.RMSNorm
-import Tyr.Model.Utils
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
+import Tyr.Lib.Module.RMSNorm
 import Tyr.Model.Qwen3ASR.Model
 
 namespace torch.qwen3asr

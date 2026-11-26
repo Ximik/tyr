@@ -1,7 +1,7 @@
 import Tests.Assertions
 import LeanTest
-import Tyr.Tokenizer.TokenBytes
-import Tyr.TensorStruct.Cast
+import Tyr.Lib.Tokenizer.TokenBytes
+import Tyr.Core.TensorStruct.Cast
 
 namespace Tests.TokenBytesRecovery
 

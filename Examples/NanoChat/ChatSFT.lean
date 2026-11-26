@@ -1,4 +1,4 @@
-import Tyr.Train.ChatSFT
+import Tyr.Lib.Train.ChatSFT
 
 /-!
 # Examples.NanoChat.ChatSFT

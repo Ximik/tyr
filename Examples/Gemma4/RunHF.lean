@@ -4,7 +4,7 @@
   Text and image-conditioned generation demo for Gemma 4 models resolved by
   local path or HuggingFace repo id.
 -/
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.Gemma4.Config
 import Tyr.Model.Gemma4.ConfigIO
 import Tyr.Model.Gemma4.Model
@@ -14,7 +14,7 @@ import Tyr.Model.Gemma4.VLConfigIO
 import Tyr.Model.Gemma4.Media
 import Tyr.Model.Gemma4.Multimodal
 import Tyr.Model.Gemma4.VLWeights
-import Tyr.Tokenizer.Gemma4
+import Tyr.Model.Gemma4.Tokenizer
 import Examples.ModelRunner
 
 open torch
@@ -133,7 +133,7 @@ private def encodePromptToIdsMultimodal
   let prompt' ← injectImageExpansions prompt softTokenCounts
   pure (encodePromptToIds tok enableThinking prompt')
 
-private def eosStopTokenIds (tok : tokenizer.gemma4.GemmaTokenizer) (cfg : Config) : Array tokenizer.TokenId :=
+private def eosStopTokenIds (tok : tokenizer.gemma4.GemmaTokenizer) (cfg : Config) : Array UInt32 :=
   if cfg.eos_token_id.isEmpty then tok.eosToken.toArray else cfg.eos_token_id
 
 private def movePatchGridTo {cfg : VLConfig} {sourceDevice : Device} (device : Device) (x : ImagePatchGrid (device := sourceDevice) cfg) : ImagePatchGrid (device := device) cfg :=

@@ -1,6 +1,6 @@
 import Tyr.Model.Qwen3TTS.DTypes
-import Tyr.Typed.Ops
-import Tyr.SafeTensors.Source
+import Tyr.Core.Typed.Ops
+import Tyr.IO.SafeTensors.Source
 
 namespace torch.qwen3tts
 

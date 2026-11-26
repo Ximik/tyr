@@ -11,9 +11,9 @@
   then thinking on where the family has both).
 -/
 import Examples.Parity.Common
-import Tyr.Tokenizer.Qwen36
-import Tyr.Tokenizer.Gemma4
-import Tyr.Tokenizer.Laguna
+import Tyr.Model.Qwen35.Qwen36.Tokenizer
+import Tyr.Model.Gemma4.Tokenizer
+import Tyr.Model.Laguna.Tokenizer
 
 namespace Examples.Parity.Tokenizer
 
@@ -28,8 +28,8 @@ structure Request where
 
 /-- One family's encode, decode and chat templates. -/
 structure Codec where
-  encode : String → Array TokenId
-  decode : Array TokenId → String
+  encode : String → Array UInt32
+  decode : Array UInt32 → String
   chat : String → Array String
 
 def codec (family dir : String) : IO Codec := do

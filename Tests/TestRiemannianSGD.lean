@@ -1,14 +1,14 @@
 import LeanTest
 import Tests.Assertions
-import Tyr.Module.Linear
-import Tyr.Modular.RiemannianModule
-import Tyr.Optim.RiemannianSGD
+import Tyr.Lib.Module.Linear
+import Tyr.Lib.Optim.Modular.RiemannianModule
+import Tyr.Lib.Optim.RiemannianSGD
 
 namespace Tests.RiemannianSGD
 
 open LeanTest
 open torch
-open Tyr.Modular
+open Tyr.Lib.Optim.Modular
 
 @[test]
 def testTreePullbackAfterOutputCotangentReleasesGraph : IO Unit := do
@@ -42,7 +42,7 @@ def testLinearRiemannianMSEStepProducesFiniteDiagnostics : IO Unit := do
 
 @[test]
 def testManifoldLinearRiemannianStepPreservesStiefelConstraint : IO Unit := do
-  let layer ← ManifoldLinear.init (M := Tyr.Manifolds.Stiefel) 4 6 false
+  let layer ← ManifoldLinear.init (M := Tyr.Lib.Optim.Manifolds.Stiefel) 4 6 false
   let x ← Tensor.randn #[4]
   let target ← Tensor.randn #[6]
   let result ← torch.Optim.RiemannianSGD.stepMSE layer x target 0.02

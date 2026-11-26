@@ -1,7 +1,7 @@
 import LeanTest
 import Tests.Assertions
-import Tyr.Typed.Neural
-import Tyr.Torch
+import Tyr.Core.Typed.Neural
+import Tyr.Core.Torch
 
 namespace Tests.AttentionEffects
 

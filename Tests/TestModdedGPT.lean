@@ -12,15 +12,15 @@
   6. Training step tests
 -/
 import Tests.Assertions
-import Tyr.Typed.Neural
-import Tyr.Distributed
-import Tyr.Sharding
+import Tyr.Core.Typed.Neural
+import Tyr.Lib.Distributed
+import Tyr.Lib.Distributed.Sharding
 import Examples.NanoChat.ModdedGPT
-import Tyr.DataLoader
+import Tyr.Lib.Data.Loader
 import Examples.NanoChat.ModdedTrain
-import Tyr.Optim.PolarExpress
-import Tyr.Optim.NorMuon
-import Tyr.Optim.DistAdam
+import Tyr.Lib.Optim.PolarExpress
+import Tyr.Lib.Optim.NorMuon
+import Tyr.Lib.Optim.DistAdam
 import LeanTest
 
 open torch

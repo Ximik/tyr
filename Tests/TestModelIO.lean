@@ -4,8 +4,8 @@
   Tests for Model Parameter serialization and structure traversal using TensorStruct.
 -/
 import Tests.Assertions
-import Tyr.Typed.Neural
-import Tyr.Checkpoint
+import Tyr.Core.Typed.Neural
+import Tyr.IO.Checkpoint
 import Examples.NanoChat.ModdedGPT
 import LeanTest
 

@@ -1,5 +1,5 @@
 import LeanTest
-import Tyr.Widget
+import Tyr.Lib.Widget
 
 namespace Tests.WidgetTyped
 

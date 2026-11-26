@@ -7,13 +7,13 @@
   - transformer encoder stack
   - output projection to thinker hidden space
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
-import Tyr.Module.LayerNorm
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Lib.Module.LayerNorm
 import Tyr.Model.Qwen3ASR.Config
-import Tyr.Model.Utils
+import Tyr.Lib.Module.Init
 
 namespace torch.qwen3asr
 

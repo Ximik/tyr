@@ -1,6 +1,7 @@
 import Tyr.Model.Whisper
-import Tyr.Checkpoint
+import Tyr.IO.Checkpoint
 import LeanTest
+import Tyr.Model.Qwen.Tokenizer
 
 open torch torch.whisper
 namespace Tests.WhisperTyped

@@ -1,5 +1,5 @@
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
 
 namespace torch.gpt
 

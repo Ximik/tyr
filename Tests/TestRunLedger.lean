@@ -1,4 +1,4 @@
-import Tyr.Train.RunLedger
+import Tyr.Lib.Train.RunLedger
 import LeanTest
 import Lean.Data.Json.Basic
 import Lean.Data.Json.Parser

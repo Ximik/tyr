@@ -1,4 +1,4 @@
-import Tyr.Typed.DType
+import Tyr.Core.Typed.DType
 import Std.Data.HashSet
 
 open torch

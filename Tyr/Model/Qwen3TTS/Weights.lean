@@ -5,12 +5,11 @@
   Loads talker and code-predictor weights from HuggingFace-style sharded
   SafeTensors directories so generation can use real checkpoint tensors.
 -/
-import Tyr.Typed.Neural
-import Tyr.TensorStruct
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Module.RMSNorm
-import Tyr.Model.Utils
+import Tyr.Core.Typed.Neural
+import Tyr.Core.TensorStruct
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
+import Tyr.Lib.Module.RMSNorm
 import Tyr.Model.Qwen3TTS.Model
 
 namespace torch.qwen3tts

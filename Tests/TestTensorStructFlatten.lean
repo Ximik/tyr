@@ -1,5 +1,5 @@
-import Tyr.Module.Derive
-import Tyr.Typed.Ops
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Core.Typed.Ops
 import LeanTest
 
 namespace Tests.TensorStructFlatten

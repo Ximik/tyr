@@ -9,16 +9,16 @@
   Note: This is a Lean-native port that preserves the architecture shape
   and interfaces, while using Tyr's existing transformer primitives.
 -/
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 import Tyr.Model.Qwen3TTS.DTypes
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
-import Tyr.Module.RMSNorm
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Lib.Module.RMSNorm
 import Tyr.Model.Qwen.Layer
 import Tyr.Model.Qwen.RoPE
 import Tyr.Model.Qwen3TTS.Config
-import Tyr.Model.Utils
+import Tyr.Lib.Module.Init
 
 namespace torch.qwen3tts
 
@@ -300,7 +300,7 @@ private def applySampling {batch vocab : Nat}
 private def applySuppressTail {batch vocab : Nat}
     (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
     (suppressTail : Nat)
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device } :=
   if suppressTail == 0 then
     logits
@@ -322,7 +322,7 @@ private def applySuppressTail {batch vocab : Nat}
 
 private def applySuppressEos {batch vocab : Nat}
     (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
-    (eosTokenId : tokenizer.TokenId)
+    (eosTokenId : UInt32)
     : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device } :=
   let idx0 : Tensor { shape := #[vocab], dtype := .Int64, device := .CPU } := Tensor.arange vocab
   let idx : Tensor { shape := #[vocab], dtype := .Int64, device := device } := idx0.to logits.device

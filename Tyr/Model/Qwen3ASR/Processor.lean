@@ -8,7 +8,7 @@
   - chunk-index utilities
 -/
 import Tyr.Model.Qwen3ASR.Config
-import Tyr.Tokenizer.Qwen3
+import Tyr.Model.Qwen.Tokenizer
 
 namespace torch.qwen3asr
 

@@ -4,10 +4,9 @@
   Pretrained weight loading for native Whisper model in Tyr.
 -/
 import Tyr.Model.Whisper.TypedOps
-import Tyr.TensorStruct
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Model.Utils
+import Tyr.Core.TensorStruct
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Whisper.Model
 
 namespace torch.whisper

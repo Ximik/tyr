@@ -1,4 +1,4 @@
-import Tyr.Typed.Tensor
+import Tyr.Core.Typed.Tensor
 
 namespace torch.qwen3tts
 

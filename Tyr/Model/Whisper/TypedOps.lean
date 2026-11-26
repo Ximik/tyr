@@ -1,5 +1,5 @@
-import Tyr.Model.Utils
-import Tyr.Module.LayerNorm
+import Tyr.Lib.Module.Init
+import Tyr.Lib.Module.LayerNorm
 
 namespace torch.whisper
 

@@ -1,10 +1,10 @@
 import Tests.Devices
 import LeanTest
-import Tyr.Typed
-import Tyr.Typed.Neural
-import Tyr.Torch
-import Tyr.SafeTensors.Schema
-import Tyr.SafeTensors.Source
+import Tyr.Core.Typed
+import Tyr.Core.Typed.Neural
+import Tyr.Core.Torch
+import Tyr.IO.SafeTensors.Schema
+import Tyr.IO.SafeTensors.Source
 
 open torch
 

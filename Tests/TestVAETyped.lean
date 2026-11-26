@@ -1,4 +1,4 @@
-import Tyr.Torch
+import Tyr.Core.Torch
 import Tests.Assertions
 import Tyr.Model.VAE
 import LeanTest

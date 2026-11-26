@@ -9,7 +9,7 @@
   `[batch, steps, vocab]`).
 -/
 import Examples.Parity.Common
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 
 namespace Examples.Parity.LM
 

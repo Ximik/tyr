@@ -1,8 +1,8 @@
 import LeanTest
-import Tyr.Modular.Budget
+import Tyr.Lib.Optim.Modular.Budget
 
 open LeanTest
-open Tyr.Modular
+open Tyr.Lib.Optim.Modular
 
 /-! Tests for modular LR budget compilation. -/
 

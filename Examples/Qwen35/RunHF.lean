@@ -4,7 +4,7 @@
   Text generation demo for Qwen3.5/Qwen3.6 models resolved by local path or
   HuggingFace repo id.
 -/
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.Qwen35.Config
 import Tyr.Model.Qwen35.ConfigIO
 import Tyr.Model.Qwen35.Model
@@ -14,8 +14,8 @@ import Tyr.Model.Qwen35.VLConfigIO
 import Tyr.Model.Qwen35.Multimodal
 import Tyr.Model.Qwen35.Media
 import Tyr.Model.Qwen35.VLWeights
-import Tyr.TensorStruct
-import Tyr.Tokenizer.Qwen35
+import Tyr.Core.TensorStruct
+import Tyr.Model.Qwen35.Tokenizer
 import Examples.ModelRunner
 
 open torch
@@ -126,7 +126,7 @@ private def encodePromptToIdsMultimodal
   let suffix := (tokenizer.qwen35.encodeText tok suffixText).map (fun t => t.toUInt64)
   return userPrefixIds ++ (visionPrefixIds cfg imageTokenCount videoTokenCount) ++ promptIds ++ suffix
 
-private def eosFromCfg (cfg : Config) : Array tokenizer.TokenId :=
+private def eosFromCfg (cfg : Config) : Array UInt32 :=
   match cfg.eos_token_id with
   | some id => #[id]
   | none => #[]

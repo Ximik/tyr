@@ -8,7 +8,7 @@
   and `logits` (`[1, steps, vocab]`) of feeding `forced` after the prompt.
 -/
 import Examples.Parity.Common
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 import Tyr.Model.Whisper.ConfigIO
 import Tyr.Model.Whisper.Weights
 import Tyr.Model.Qwen3ASR.Frontend

@@ -4,7 +4,7 @@
   diffusers `transformer/config.json` loader for the Flux2 transformer.
 -/
 import Tyr.Model.Flux.Config
-import Tyr.Model.ConfigJson
+import Tyr.IO.ConfigJson
 
 namespace torch.flux
 

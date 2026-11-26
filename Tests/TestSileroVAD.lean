@@ -1,6 +1,6 @@
-import Tyr.Typed
+import Tyr.Core.Typed
 import Tyr.Model.SileroVAD
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 import LeanTest
 
 open torch

@@ -16,13 +16,13 @@
   Input expected by `encode`:
   - mono waveform tensor `[batch, 1, samples]` at 24kHz.
 -/
-import Tyr.Typed.Neural
-import Tyr.SafeTensors.Source
+import Tyr.Core.Typed.Neural
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.SpeechTokenizerDTypes
-import Tyr.TensorStruct
+import Tyr.Core.TensorStruct
 import Tyr.Model.Qwen.RoPE
 import Tyr.Model.Qwen3TTS.SpeechTokenizer
-import Tyr.Util
+import Tyr.Core.Util
 
 namespace torch.qwen3tts
 

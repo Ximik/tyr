@@ -8,7 +8,7 @@
   - AdaIN decoder
   - lightweight generator configuration
  -/
-import Tyr.FFI.Basic
+import Tyr.Core.FFI.Basic
 
 namespace torch.kittentts
 

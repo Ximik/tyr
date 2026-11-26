@@ -7,8 +7,8 @@
   - talker code predictor
   - top-level TTS model
 -/
-import Tyr.FFI.Basic
-import Tyr.Tokenizer.Types
+import Tyr.Core.FFI.Basic
+import Tyr.Lib.Tokenizer.Types
 
 namespace torch.qwen3tts
 
@@ -97,14 +97,14 @@ structure TalkerConfig where
   numCodeGroups : Nat := 32
   textHiddenSize : Nat := 2048
   textVocabSize : Nat := 151936
-  codecEosTokenId : tokenizer.TokenId := 2150
-  codecThinkId : tokenizer.TokenId := 2154
-  codecNoThinkId : tokenizer.TokenId := 2155
-  codecThinkBosId : tokenizer.TokenId := 2156
-  codecThinkEosId : tokenizer.TokenId := 2157
-  codecPadId : tokenizer.TokenId := 2148
-  codecBosId : tokenizer.TokenId := 2149
-  codecLanguageId : Array (String × tokenizer.TokenId) := #[]
+  codecEosTokenId : UInt32 := 2150
+  codecThinkId : UInt32 := 2154
+  codecNoThinkId : UInt32 := 2155
+  codecThinkBosId : UInt32 := 2156
+  codecThinkEosId : UInt32 := 2157
+  codecPadId : UInt32 := 2148
+  codecBosId : UInt32 := 2149
+  codecLanguageId : Array (String × UInt32) := #[]
   /-- Every codec frame has codebook 0 plus at least one residual codebook the code predictor
       generates; checked when the config is loaded. -/
   residualCodeGroups : 1 < numCodeGroups := by decide
@@ -132,11 +132,11 @@ structure Qwen3TTSConfig where
   talkerConfig : TalkerConfig := {}
   speakerEncoderConfig : SpeakerEncoderConfig := {}
   ttsModelType : String := "base"  -- base / custom_voice / voice_design
-  imStartTokenId : tokenizer.TokenId := 151644
-  imEndTokenId : tokenizer.TokenId := 151645
-  ttsPadTokenId : tokenizer.TokenId := 151671
-  ttsBosTokenId : tokenizer.TokenId := 151672
-  ttsEosTokenId : tokenizer.TokenId := 151673
+  imStartTokenId : UInt32 := 151644
+  imEndTokenId : UInt32 := 151645
+  ttsPadTokenId : UInt32 := 151671
+  ttsBosTokenId : UInt32 := 151672
+  ttsEosTokenId : UInt32 := 151673
   /-- Prompt text ids index the talker text embedding; checked when the config is built. -/
   textIdsInVocab :
     imStartTokenId.toNat < talkerConfig.textVocabSize ∧ imEndTokenId.toNat < talkerConfig.textVocabSize ∧

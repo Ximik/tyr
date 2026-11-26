@@ -3,9 +3,9 @@
 
   Configuration types for the Lean4 Qwen3-ASR port.
 -/
-import Tyr.FFI.Basic
+import Tyr.Core.FFI.Basic
 import Tyr.Model.Qwen.Config
-import Tyr.Tokenizer.Types
+import Tyr.Lib.Tokenizer.Types
 
 namespace torch.qwen3asr
 
@@ -143,7 +143,7 @@ def isForcedAlignerType (modelType : String) : Bool :=
 structure ThinkerConfig where
   audioConfig : AudioEncoderConfig := {}
   textConfig : TextConfig := {}
-  audioTokenId : tokenizer.TokenId := 151646
+  audioTokenId : UInt32 := 151646
   modelType : String := "qwen3_asr_thinker"
   classifyNum : Nat := 0
   /-- Audio features replace text embeddings one-for-one; checked when the config is built. -/
@@ -186,7 +186,7 @@ structure Qwen3ASRConfig where
   thinkerConfig : ThinkerConfig := {}
   supportLanguages : Array String := defaultSupportedLanguages
   /-- Token ID used by forced-aligner prompt to mark timestamp slots. -/
-  timestampTokenId : tokenizer.TokenId := 0
+  timestampTokenId : UInt32 := 0
   /-- Milliseconds represented by one forced-aligner timestamp bin. -/
   timestampSegmentTime : Float := 1.0
   /-- Timestamp slots are text tokens; checked when the config is built. -/
@@ -195,7 +195,7 @@ structure Qwen3ASRConfig where
   timestampSegmentPos : 0 < timestampSegmentTime := by native_decide
   deriving Repr
 
-def defaultEosTokenIds : Array tokenizer.TokenId := #[151645, 151643]
+def defaultEosTokenIds : Array UInt32 := #[151645, 151643]
 
 namespace Qwen3ASRConfig
 

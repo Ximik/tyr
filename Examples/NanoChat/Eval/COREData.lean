@@ -14,8 +14,8 @@
 
   Each file contains evaluation examples in a task-specific format.
 -/
-import Tyr.Data.Download
-import Tyr.Data.HuggingFace
+import Tyr.IO.Download
+import Tyr.IO.HuggingFace
 import Examples.NanoChat.Eval.CORE
 import Lean.Data.Json
 

@@ -38,8 +38,8 @@
   - `x`/`topW` BF16, `topIdx` Int64, all on CUDA, all contiguous
   - `1 ≤ tokens * k ≤ 65535`
 -/
-import Tyr.Typed.Neural
-import Tyr.FFI.Laguna
+import Tyr.Core.Typed.Neural
+import Tyr.Core.FFI.Laguna
 
 namespace torch.laguna
 

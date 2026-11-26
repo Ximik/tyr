@@ -5,9 +5,9 @@
   (Laguna-S-2.1: 118B-A8B MoE, interleaved full/sliding-window attention,
   per-head softplus attention output gating, sigmoid token-choice router).
 -/
-import Tyr.FFI.Basic
-import Tyr.Tokenizer.Types
-import Tyr.TensorStruct
+import Tyr.Core.FFI.Basic
+import Tyr.Lib.Tokenizer.Types
+import Tyr.Core.TensorStruct
 
 namespace torch.laguna
 
@@ -93,7 +93,7 @@ structure LagunaConfig where
   mlp_only_layers : Array Nat := #[0]
   layer_types : Array LayerType := defaultLayerTypes num_hidden_layers
 
-  eos_token_ids : Array tokenizer.TokenId := #[2, 24]
+  eos_token_ids : Array UInt32 := #[2, 24]
 
   /-- Sliding layers keep a ring cache of `sliding_window` tokens; checked when the config is built. -/
   slidingWindowPos : 0 < sliding_window := by decide

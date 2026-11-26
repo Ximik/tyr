@@ -4,10 +4,10 @@
   Shared CLI parsing, batching, decoding, and streaming utilities for
   model RunHF examples.
 -/
-import Tyr.Torch
-import Tyr.Hub
-import Tyr.Model.Generation
-import Tyr.TensorStruct
+import Tyr.Core.Torch
+import Tyr.IO.Hub
+import Tyr.Lib.Inference.Generation
+import Tyr.Core.TensorStruct
 
 open torch
 

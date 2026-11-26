@@ -7,12 +7,12 @@
   - LSTM cell decoder
   - Final speech-probability head
 -/
-import Tyr.Typed
-import Tyr.SafeTensors.Source
-import Tyr.TensorStruct
-import Tyr.Module.Core
-import Tyr.Module.Derive
-import Tyr.Model.Utils
+import Tyr.Core.Typed
+import Tyr.IO.SafeTensors.Source
+import Tyr.Core.TensorStruct
+import Tyr.Lib.Module.Core
+import Tyr.Core.TensorStruct.Derive
+import Tyr.Lib.Module.Init
 
 namespace torch.silerovad
 

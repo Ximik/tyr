@@ -10,7 +10,7 @@
 
   Ground truth generator: Tests/fixtures/laguna/gen_moe_fixtures.py
 -/
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.MoE
 

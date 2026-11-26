@@ -3,8 +3,8 @@
 
   Apple-only image preprocessing helpers for Gemma 4 multimodal inputs.
 -/
-import Tyr.Typed.Neural
-import Tyr.FFI.Gemma4
+import Tyr.Core.Typed.Neural
+import Tyr.Core.FFI.Gemma4
 import Tyr.Model.Gemma4.VLConfig
 
 namespace torch.gemma4.media

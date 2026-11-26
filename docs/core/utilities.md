@@ -1,15 +1,15 @@
 # Supporting utilities
 
-Two small support modules: silent-by-default log handlers (`Tyr/Log.lean`) and VS Code infoview widgets for tensors and modules (`Tyr/Widget.lean`).
+Two small support modules: silent-by-default log handlers (`Tyr/IO/Log.lean`) and VS Code infoview widgets for tensors and modules (`Tyr/Lib/Widget.lean`).
 
 ## Purpose & when to use
 
-- Use `Tyr.Log` when writing library code that should report progress, warnings, or errors without doing console I/O itself. Handlers default to no-ops, so libraries stay silent unless the executable wires up sinks.
-- Use `Tyr.Widget` during development to inspect tensor values and module parameter trees directly in the Lean infoview, instead of printing arrays.
+- Use `Tyr.IO.Log` when writing library code that should report progress, warnings, or errors without doing console I/O itself. Handlers default to no-ops, so libraries stay silent unless the executable wires up sinks.
+- Use `Tyr.Lib.Widget` during development to inspect tensor values and module parameter trees directly in the Lean infoview, instead of printing arrays.
 
 ## Architecture & main abstractions
 
-### Log handlers (`Tyr/Log.lean`)
+### Log handlers (`Tyr/IO/Log.lean`)
 
 One record of three sinks in `namespace torch.Log`, no imports:
 
@@ -22,7 +22,7 @@ structure Handlers where
   onError : Sink := fun _ => pure ()
 ```
 
-All sinks default to no-ops, so the library-side pattern is to accept `(log : Handlers := {})` and call `log.onInfo ...` etc. — checkpointing is a typical example (`Tyr/Checkpoint.lean`):
+All sinks default to no-ops, so the library-side pattern is to accept `(log : Handlers := {})` and call `log.onInfo ...` etc. — checkpointing is a typical example (`Tyr/IO/Checkpoint.lean`):
 
 ```lean
 def saveParams [TensorStruct α]
@@ -33,11 +33,11 @@ def saveParams [TensorStruct α]
     : IO Unit
 ```
 
-`Handlers.combine` runs two handler sets in sequence, e.g. to tee output to both console and a log file. `Tyr.Log` is re-exported by the root `Tyr.lean` (`Tyr.lean`). Consumers include `Tyr/Checkpoint.lean`, the model weight loaders under `Tyr/Model/*/Weights.lean`, and the data/download code under `Tyr/Data/`.
+`Handlers.combine` runs two handler sets in sequence, e.g. to tee output to both console and a log file. `Tyr.IO.Log` is re-exported by the root `Tyr.lean` (`Tyr.lean`). Consumers include `Tyr/IO/Checkpoint.lean`, the model weight loaders under `Tyr/Model/*/Weights.lean`, and the data/download code under `Tyr/Lib/Data/`.
 
-### Infoview widgets (`Tyr/Widget.lean`)
+### Infoview widgets (`Tyr/Lib/Widget.lean`)
 
-Three RPC-encodable data types, one JavaScript frontend, two commands. The data model (`Tyr/Widget.lean`):
+Three RPC-encodable data types, one JavaScript frontend, two commands. The data model (`Tyr/Lib/Widget.lean`):
 
 ```lean
 structure TensorDisplayProps where
@@ -62,7 +62,7 @@ structure ModuleDisplayProps where
   root : ModuleNode
 ```
 
-`tensorToProps` snapshots a tensor for display: shape, dtype, device, summary stats, up to 10k values, and gradient values/stats when `requires_grad` is set (`Tyr/Widget.lean`). The single `@[widget_module] TensorWidget` JavaScript bundle (`Tyr/Widget.lean`) renders both views: a heatmap with diverging colormap, faceted layout for 3D+ tensors, hover tooltips, and theme awareness; and a collapsible module tree with a search box and per-group trainable-parameter counts.
+`tensorToProps` snapshots a tensor for display: shape, dtype, device, summary stats, up to 10k values, and gradient values/stats when `requires_grad` is set (`Tyr/Lib/Widget.lean`). The single `@[widget_module] TensorWidget` JavaScript bundle (`Tyr/Lib/Widget.lean`) renders both views: a heatmap with diverging colormap, faceted layout for 3D+ tensors, hover tooltips, and theme awareness; and a collapsible module tree with a search box and per-group trainable-parameter counts.
 
 For module trees there is a typeclass plus a deriving handler:
 
@@ -73,20 +73,20 @@ class ToModuleDisplay (α : Type) where
 def toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "root") : IO ModuleDisplayProps
 ```
 
-Instances exist for `Tensor σ`, `Option α`, `Array α`, `List α`, `α × β`, and `Static α` (rendered as a plain `name: value` label). The deriving handler (`Tyr/Widget.lean`) generates an instance for any structure, producing one `group` node whose children are the fields. The built-in modules already use it — e.g. `Linear` derives `TensorStruct, ToModuleDisplay` (`Tyr/Module/Linear.lean`), as do `RMSNorm` and `LayerNorm`.
+Instances exist for `Tensor σ`, `Option α`, `Array α`, `List α`, `α × β`, and `Static α` (rendered as a plain `name: value` label). The deriving handler (`Tyr/Lib/Widget.lean`) generates an instance for any structure, producing one `group` node whose children are the fields. `Tyr/Lib/Widget/Module.lean` derives it for `Linear`, `LayerNorm` and `RMSNorm`.
 
 The two elaboration commands:
 
 - `#tensor t` — accepts a pure `Tensor σ` term or an `IO (Tensor σ)` term (e.g. `Tensor.randn`, which is in `IO`).
 - `#module t` — accepts `ModuleDisplayProps` or `IO ModuleDisplayProps`.
 
-Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` (behind `unsafe`/`@[implemented_by]` wrappers, `Tyr/Widget.lean`), and pin the panel to the command line. Caveat: this runs the given `IO` in the compiler process at elaboration time, so treat `#tensor`/`#module` as development tools for trusted code, not as something to leave in library files.
+Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` (behind `unsafe`/`@[implemented_by]` wrappers, `Tyr/Lib/Widget.lean`), and pin the panel to the command line. Caveat: this runs the given `IO` in the compiler process at elaboration time, so treat `#tensor`/`#module` as development tools for trusted code, not as something to leave in library files.
 
-`Tyr.Widget` is not re-exported by the root `Tyr.lean`; import it directly. The import also registers the `deriving ToModuleDisplay` handler.
+`Tyr.Lib.Widget` is not re-exported by the root `Tyr.lean`; import it directly. The import also registers the `deriving ToModuleDisplay` handler. Import `Tyr.Lib.Widget.Module` for the layer instances.
 
 ## Key APIs
 
-### `Tyr/Log.lean` (`namespace torch.Log`)
+### `Tyr/IO/Log.lean` (`namespace torch.Log`)
 
 | Signature | Purpose |
 | --- | --- |
@@ -94,7 +94,7 @@ Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` 
 | `Handlers` | Record of `onInfo`/`onWarn`/`onError`, all defaulting to no-ops. |
 | `Handlers.combine (lhs rhs : Handlers) : Handlers` | Invoke both handler sets, in order. |
 
-### `Tyr/Widget.lean` (`namespace torch`)
+### `Tyr/Lib/Widget.lean` (`namespace torch`)
 
 | Signature | Purpose |
 | --- | --- |
@@ -109,10 +109,10 @@ Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` 
 
 ### Wiring log handlers
 
-Reconstructed example (from `Tyr/Checkpoint.lean` and `Examples/KittenTTSPretrained.lean`):
+Reconstructed example (from `Tyr/IO/Checkpoint.lean` and `Examples/KittenTTSPretrained.lean`):
 
 ```lean
--- Library side: accept handlers with a silent default (Tyr/Checkpoint.lean).
+-- Library side: accept handlers with a silent default (Tyr/IO/Checkpoint.lean).
 def saveCheckpoint [TensorStruct α]
     (params : α)
     (iteration : Nat)
@@ -137,8 +137,8 @@ let bundle ← Model.loadFromPretrained device source (log := log)
 Reconstructed example (from `Examples/TestGuard.lean`):
 
 ```lean
-import Tyr.Widget  -- also enables `deriving ToModuleDisplay`
-import Tyr.Module.Linear
+import Tyr.Lib.Widget  -- also enables `deriving ToModuleDisplay`
+import Tyr.Lib.Module.Linear
 
 open torch
 

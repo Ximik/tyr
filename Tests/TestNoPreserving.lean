@@ -1,4 +1,4 @@
-import Tyr.Typed.Neural
+import Tyr.Core.Typed.Neural
 
 open torch
 

@@ -13,6 +13,7 @@
 -/
 import Examples.Parity.LM
 import Tyr.Model.Qwen3ASR
+import Tyr.Model.Qwen.Tokenizer
 
 namespace Examples.Parity.Qwen3ASRAligner
 

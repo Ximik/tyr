@@ -4,14 +4,14 @@
   Thinker text weight loading for Qwen2.5-Omni checkpoints.
   Supports both single-file and sharded SafeTensors layouts.
 -/
-import Tyr.Typed
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Model.Utils
+import Tyr.Core.Typed
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
+import Tyr.Lib.Quantization.FP8
 import Tyr.Model.Qwen25Omni.Config
 import Tyr.Model.Qwen3.Model
 import Tyr.Model.Qwen.Model
-import Tyr.Util
+import Tyr.Core.Util
 
 namespace torch.qwen25omni
 

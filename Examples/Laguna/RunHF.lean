@@ -5,13 +5,13 @@
   local path or HuggingFace repo id. Includes a --bench mode measuring
   prefill/decode throughput (tokens/sec).
 -/
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.ConfigIO
 import Tyr.Model.Laguna.Model
 import Tyr.Model.Laguna.Weights
-import Tyr.TensorStruct
-import Tyr.Tokenizer.Laguna
+import Tyr.Core.TensorStruct
+import Tyr.Model.Laguna.Tokenizer
 import Examples.ModelRunner
 
 open torch
@@ -95,7 +95,7 @@ private def runBench
     (inputIds : Tensor { shape := #[b, seq], dtype := .Int64, device := device })
     (promptLen : Nat)
     (maxNewTokens : Nat)
-    (eos : Array tokenizer.TokenId)
+    (eos : Array UInt32)
     : IO Unit := do
   let firstMsRef ← IO.mkRef 0
   let tokenCount ← IO.mkRef 0

@@ -3,12 +3,11 @@
 
   Pretrained weight loading for the Gemma 4 multimodal wrapper.
 -/
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Model.Utils
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Gemma4.Weights
 import Tyr.Model.Gemma4.Multimodal
-import Tyr.Util
+import Tyr.Core.Util
 
 namespace torch.gemma4
 

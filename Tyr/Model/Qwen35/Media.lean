@@ -4,8 +4,8 @@
   Apple-only media preprocessing helpers for Qwen3.5-VL:
   - image/video file -> patchified tensor `[nPatches, patchDim]`
 -/
-import Tyr.Typed.Neural
-import Tyr.FFI.Qwen35
+import Tyr.Core.Typed.Neural
+import Tyr.Core.FFI.Qwen35
 import Tyr.Model.Qwen35.VLConfig
 
 namespace torch.qwen35.media

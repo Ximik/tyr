@@ -28,7 +28,7 @@ day one:
 A first program uses indexed tensors:
 
 ```lean
-import Tyr.Typed
+import Tyr.Core.Typed
 open torch
 
 def exampleTensor : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU } :=

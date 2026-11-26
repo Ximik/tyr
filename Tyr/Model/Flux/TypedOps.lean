@@ -1,7 +1,7 @@
 import Tyr.Model.Qwen35.TypedOps
-import Tyr.FFI.Neural
-import Tyr.Module.LayerNorm
-import Tyr.TensorStruct.DeriveCast
+import Tyr.Core.FFI.Neural
+import Tyr.Lib.Module.LayerNorm
+import Tyr.Core.TensorStruct.DeriveCast
 
 namespace torch.flux
 

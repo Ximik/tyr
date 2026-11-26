@@ -5,7 +5,7 @@
   Uses the same data format as nanoGPT.
 -/
 import Tyr
-import Tyr.Checkpoint
+import Tyr.IO.Checkpoint
 import Examples.GPT.GPT
 import Examples.GPT.Train
 import Examples.GPT.GPTDataLoader

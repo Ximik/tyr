@@ -1,5 +1,5 @@
-import Tyr.SafeTensors.Schema
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Schema
+import Tyr.IO.SafeTensors.Source
 /-
   Tyr/Model/KittenTTS/Pretrained.lean
 
@@ -7,10 +7,10 @@ import Tyr.SafeTensors.Source
   - a local model directory, or
   - a HuggingFace repo id (download + convert on demand).
 -/
-import Tyr.Hub
+import Tyr.IO.Hub
 import Tyr.Model.KittenTTS.ConfigIO
 import Tyr.Model.KittenTTS.Weights
-import Tyr.Log
+import Tyr.IO.Log
 
 namespace torch.kittentts.hub
 

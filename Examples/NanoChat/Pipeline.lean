@@ -12,18 +12,18 @@
 
   Based on nanochat's speedrun.sh orchestration.
 -/
-import Tyr.Pipeline
-import Tyr.Distributed
-import Tyr.DataLoader
-import Tyr.FFI.Parquet
-import Tyr.Data.Task
-import Tyr.Data.TaskClass
-import Tyr.Train.ChatSFT
-import Tyr.Train.RunLedger
-import Tyr.RL.GRPO
-import Tyr.Data.Download
-import Tyr.Data.HuggingFace
-import Tyr.Tokenizer
+import Tyr.Lib.Train.Pipeline
+import Tyr.Lib.Distributed
+import Tyr.Lib.Data.Loader
+import Tyr.Core.FFI.Parquet
+import Tyr.Lib.Data.Task
+import Tyr.Lib.Data.TaskClass
+import Tyr.Lib.Train.ChatSFT
+import Tyr.Lib.Train.RunLedger
+import Tyr.Lib.Train.GRPO
+import Tyr.IO.Download
+import Tyr.IO.HuggingFace
+import Tyr.Lib.Tokenizer
 import Examples.NanoChat.ModdedGPT
 import Examples.NanoChat.ModdedTrain
 import Examples.NanoChat.Eval.CORE

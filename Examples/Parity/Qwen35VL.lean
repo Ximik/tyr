@@ -10,7 +10,7 @@
 import Examples.Parity.LM
 import Tyr.Model.Qwen35.VLConfigIO
 import Tyr.Model.Qwen35.VLWeights
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 
 namespace Examples.Parity.Qwen35VL
 

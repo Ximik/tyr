@@ -12,7 +12,7 @@ import Examples.Parity.Common
 import Tyr.Model.Qwen
 import Tyr.Model.Qwen.Weights
 import Tyr.Model.Qwen3.ConfigIO
-import Tyr.Tokenizer.Qwen3
+import Tyr.Model.Qwen.Tokenizer
 
 namespace Examples.Parity.FluxText
 

@@ -1,5 +1,5 @@
-import Tyr.Typed.Neural
-import Tyr.Module.RMSNorm
+import Tyr.Core.Typed.Neural
+import Tyr.Lib.Module.RMSNorm
 import LeanTest
 
 open torch

@@ -7,14 +7,14 @@
   - Small benchmark smoke check
 -/
 import LeanTest
-import Tyr.Manifolds
-import Tyr.Optim.ManifoldMuon
+import Tyr.Lib.Optim.Manifolds
+import Tyr.Lib.Optim.ManifoldMuon
 
 namespace Tests.ManifoldMuon
 
 open LeanTest
-open Tyr.Manifolds
-open Tyr.Manifolds.DifferentiableManifold
+open Tyr.Lib.Optim.Manifolds
+open Tyr.Lib.Optim.Manifolds.DifferentiableManifold
 open torch
 open torch.Optim.ManifoldMuon
 

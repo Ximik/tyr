@@ -11,7 +11,7 @@
 import Examples.Parity.LM
 import Tyr.Model.Gemma4.VLConfigIO
 import Tyr.Model.Gemma4.VLWeights
-import Tyr.SafeTensors.Source
+import Tyr.IO.SafeTensors.Source
 
 namespace Examples.Parity.Gemma4VL
 

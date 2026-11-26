@@ -7,11 +7,10 @@
   - small-model per-layer input blocks (E2B/E4B)
   - dense and MoE feed-forward branches
 -/
-import Tyr.Log
-import Tyr.SafeTensors.Source
-import Tyr.Model.Utils
+import Tyr.IO.Log
+import Tyr.IO.SafeTensors.Source
 import Tyr.Model.Gemma4.Model
-import Tyr.Util
+import Tyr.Core.Util
 
 namespace torch.gemma4
 
