@@ -44,7 +44,7 @@ Two kinds of documentation exist:
 
 ### Training stack
 
-- [Serialization](serialization.md) — the `safetensors_type_provider` command,
+- [Serialization](serialization.md) — SafeTensors loading, generated weight records,
   HuggingFace Hub resolution, and training checkpoints.
 - [Data pipeline](data.md) — tokenizers, batch iterators (fixed-dim vs
   shape-erased), parquet/shard loading, task mixtures, streaming text.

@@ -10,6 +10,10 @@ structure Source where
   path : String
   tensors : Std.HashMap String Stored
 
+/-- `name` under the dotted tensor-name prefix `parent`. -/
+def childName (parent name : String) : String :=
+  if parent.isEmpty then name else parent ++ "." ++ name
+
 namespace Source
 
 /-- A single parsed `.safetensors` file. -/

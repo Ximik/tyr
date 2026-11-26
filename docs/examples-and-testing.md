@@ -162,16 +162,13 @@ FFI header, is covered in [ffi-and-build.md](ffi-and-build.md).
 
 ## Usage example
 
-Reconstructed example (from `Tests/TestSafeTensorsTypeProvider.lean`):
+Reconstructed example (from `Tests/TestSafeTensorsRecord.lean`):
 
 ```lean
 import Tyr.SafeTensors
 import LeanTest
 
 open torch
-
--- Elaboration-time type provider over a checked-in fixture:
-safetensors_type_provider "Tests/fixtures/safetensors/single.safetensors" as SingleSafe
 
 @[test]
 def testSafeTensorsIntrospectionSingle : IO Unit := do
