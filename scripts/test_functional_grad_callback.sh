@@ -16,7 +16,7 @@ modules=()
 pending=(Tests.Native.FunctionalGradCallback)
 while ((${#pending[@]})); do
   module=${pending[0]}; pending=("${pending[@]:1}")
-  [[ " ${modules[*]} " == *" $module "* ]] && continue
+  [[ " ${modules[*]-} " == *" $module "* ]] && continue
   modules+=("$module")
   while read -r _ import; do
     [[ $import == Tyr.* ]] && pending+=("$import")

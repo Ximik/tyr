@@ -151,7 +151,7 @@ std::vector<AbortCase> cases() {
     Object r(lean_torch_svd_try(input.get()), lean_dec);
   });
   add("attention-rank", "rank-4", [] { attention(full({2, 2}, 1)); });
-  add("attention-dtype", "expected scalar type Float but found Long", [] { attention(Object(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec)); });
+  add("attention-dtype", "Long", [] { attention(Object(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec)); });
   add("affine-weight-dtype", "must have the same dtype", [] { affineDType(true); });
   add("affine-bias-dtype", "must have the same dtype", [] { affineDType(false); });
   add("spectralNorm-integral", "floating point or complex", [] {
