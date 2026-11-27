@@ -10,6 +10,7 @@ import Tests.SafeTensorsRecords.Single
 import Tests.SafeTensorsRecords.Sharded
 import Tests.SafeTensorsRecords.Indexed
 import Tests.SafeTensorsRecords.IndexedDir
+import Tests.SafeTensorsRecords.Nested
 import Tests.SafeTensorsRecords.NonUniform
 import Tests.SafeTensorsRecords.Traversal
 import Tyr.IO.SafeTensors.Record
@@ -215,6 +216,13 @@ def testSafeTensorsRecordIndexedHierarchy : IO Unit := do
     "the array should hold the first indexed tensor"
   LeanTest.assertTrue (tensorValues layer1.weight.raw == tensorValues direct1.raw)
     "the array should hold later indexed tensors instead of repeating the first"
+
+@[test]
+def testSafeTensorsRecordNestedArrays : IO Unit := do
+  let weights ← NestedSafe.Weights.load (← safetensors.Source.open (fixture "nested.safetensors")) ""
+  let values ← weights.blocks.mapM fun row => row.mapM fun item => item.weight.toFloatArray
+  LeanTest.assertEqual values #[#[#[0.0], #[1.0], #[2.0]], #[#[10.0], #[11.0], #[12.0]]]
+    "blocks.i.j.weight holds 10 * i + j"
 
 @[test]
 def testSafeTensorsRecordShardedIndexJson : IO Unit := do
