@@ -14,11 +14,14 @@ private partial def typeExpr : FieldType → String
   | .record name => s!"{name} device"
   | .array elem _ => s!"Array ({typeExpr elem})"
 
-private partial def loadExpr (name : String) : FieldType → String
+/-- `depth` counts the enclosing arrays; each binds its own index. -/
+private partial def loadExpr (name : String) (depth : Nat := 0) : FieldType → String
   | .tensor dtype shape => s!"src.loadAs {name} ⟨{shapeLit shape}, .{dtype.canonicalName}⟩ device"
   | .record type => s!"{type}.load src {name} device"
   | .array elem count =>
-      s!"(Array.range {count}).mapM fun i => {loadExpr s!"(childName {name} (toString i))" elem}"
+      let index := if depth == 0 then "i" else s!"i{depth}"
+      s!"(Array.range {count}).mapM fun {index} => " ++
+        loadExpr s!"(childName {name} (toString {index}))" (depth + 1) elem
 
 private def fieldName (field : Field) : String :=
   match field.segment with
@@ -28,7 +31,7 @@ private def fieldName (field : Field) : String :=
 private def renderType (type : RecordType) : String :=
   let fields := type.fields.toList.map fun field => s!"  {field.name} : {typeExpr field.type}\n"
   let loads := type.fields.toList.map fun field =>
-    s!"    {field.name} := ← {loadExpr (fieldName field) field.type}"
+    s!"    {field.name} := ← {loadExpr (fieldName field) 0 field.type}"
   s!"structure {type.name} (device : Device := .CPU) where\n" ++ String.join fields ++
     "  deriving TensorStruct\n\n" ++
     s!"def {type.name}.load (src : Source) (name : String) (device : Device := .CPU) :\n" ++

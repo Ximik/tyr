@@ -223,14 +223,18 @@ private partial def buildType (node : PathNode) (path : List String) (used : Lis
   let typeName := freshName used (typeNameBase path)
   return (.record typeName, typeName :: used, types.push { name := typeName, fields })
 
-/-- The record of `tensors`. Fails on a duplicate or empty tensor name, and on
-numeric segments that are not `0, 1, …`. -/
+/-- The record of `tensors`. Fails on a duplicate tensor name, on an empty
+segment, on a numeric segment that is not written as `toString` writes it, and
+on numeric segments that are not `0, 1, …`. -/
 def Record.ofSchema (tensors : Array TensorSchema) : Except String Record := do
   let mut root : PathNode := {}
   for tensor in tensors do
-    let segments := (tensor.name.splitOn ".").filter (!·.isEmpty)
-    if segments.isEmpty then
-      throw s!"SafeTensors record: empty tensor name"
+    let segments := tensor.name.splitOn "."
+    for segment in segments do
+      if segment.isEmpty then
+        throw s!"SafeTensors record: empty segment in tensor name '{tensor.name}'"
+      if segment.toNat?.any (toString · != segment) then
+        throw s!"SafeTensors record: index '{segment}' in tensor name '{tensor.name}' is not in decimal form without leading zeros"
     root ← insertPath root segments { tensorName := tensor.name, dtype := tensor.dtype, shape := tensor.shape }
   match ← buildType root [] [] #[] with
   | (.record _, _, types) => return { types }
