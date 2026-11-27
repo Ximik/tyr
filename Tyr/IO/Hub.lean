@@ -6,6 +6,7 @@
 -/
 import Lean.Data.Json
 import Tyr.IO.SafeTensors.File
+import Tyr.IO.Path
 
 namespace torch.Hub
 
@@ -22,14 +23,6 @@ structure DownloadOptions where
   deriving Repr
 
 /-! ## File system helpers -/
-
-def expandHome (path : String) : IO String := do
-  if path.startsWith "~" then
-    match (← IO.getEnv "HOME") with
-    | some home => pure (path.replace "~" home)
-    | none => pure path
-  else
-    pure path
 
 def ensureParentDir (path : String) : IO Unit := do
   let p : System.FilePath := ⟨path⟩

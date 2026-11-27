@@ -14,6 +14,7 @@ import Tyr.Model.Qwen3TTS.SpeechTokenizerEncoder
 import Tyr.Model.Qwen3TTS.SpeechTokenizer25HzEncoder
 import Tyr.IO.Audio
 import Tyr.IO.Log
+import Tyr.IO.Path
 
 namespace Examples.Qwen3TTS
 
@@ -30,14 +31,6 @@ structure SpeechTokenizerBridgeConfig where
   decodeScript : String := "scripts/qwen3tts_decode_codes.py"
   deviceMap : Option String := none
   deriving Repr
-
-private def expandHome (path : String) : IO String := do
-  if path == "~" then
-    return (← IO.getEnv "HOME").getD path
-  else if path.startsWith "~/" then
-    return s!"{(← IO.getEnv "HOME").getD ""}/{path.drop 2}"
-  else
-    return path
 
 private def ensureParentDir (path : String) : IO Unit := do
   match System.FilePath.parent ⟨path⟩ with

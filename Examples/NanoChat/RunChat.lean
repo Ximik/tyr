@@ -10,6 +10,7 @@ import Tyr.Core.Torch
 import Tyr.Lib.Tokenizer
 import Examples.NanoChat.ModdedGPT
 import Examples.NanoChat.ModdedTrain
+import Tyr.IO.Path
 
 namespace torch.NanoChat.Chat
 
@@ -141,14 +142,6 @@ private def printUsage : IO Unit := do
   IO.println "  --vocab-size <n>        Vocab size used to load checkpoint (default: $VOCAB_SIZE or 65536)"
   IO.println "  --show-tokens           Print generated token IDs"
   IO.println "  --help                  Show this help"
-
-private def expandHome (path : String) : IO String := do
-  if path == "~" then
-    return (← IO.getEnv "HOME").getD path
-  else if path.startsWith "~/" then
-    return s!"{(← IO.getEnv "HOME").getD ""}/{path.drop 2}"
-  else
-    return path
 
 private def resolveCheckpointPath (args : Args) : IO String := do
   match args.checkpoint with

@@ -5,16 +5,9 @@
 -/
 import Tyr.Core.FFI.Runtime
 import Tyr.IO.Audio
+import Tyr.IO.Path
 
 namespace torch.audio
-
-private def expandHome (path : String) : IO String := do
-  if path == "~" then
-    return (← IO.getEnv "HOME").getD path
-  else if path.startsWith "~/" then
-    return s!"{(← IO.getEnv "HOME").getD ""}/{path.drop 2}"
-  else
-    return path
 
 private def clamp01 (x : Float) : Float :=
   if x > 1.0 then 1.0 else if x < (-1.0) then -1.0 else x

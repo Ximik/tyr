@@ -10,22 +10,13 @@
   - Progress tracking for long downloads
 -/
 import Tyr.IO.Log
+import Tyr.IO.Path
 
 namespace torch.Data.Download
 
 open torch.Log
 
 /-! ## Path Utilities -/
-
-/-- Expand ~ to home directory -/
-def expandHome (path : String) : IO String := do
-  if path.startsWith "~" then
-    let home ← IO.getEnv "HOME"
-    match home with
-    | some h => return path.replace "~" h
-    | none => return path
-  else
-    return path
 
 /-- Ensure a directory exists -/
 def ensureDir (path : String) : IO Unit := do
