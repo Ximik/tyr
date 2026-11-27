@@ -54,6 +54,31 @@ import Tyr.Lib.Train.RunLedger
 import Tyr.Lib.Train.ChatSFT
 import Tyr.Lib.Train.GRPO
 
+-- Building blocks shared by models
+import Tyr.Core.Typed.GatedDelta
+import Tyr.Lib.Attention
+import Tyr.Lib.RoPE
+import Tyr.Lib.Inference.KVCache
+import Tyr.Lib.Inference.StreamingConsensus
+
+-- Audio and text
+import Tyr.IO.Audio
+import Tyr.Lib.Audio.LogMel
+import Tyr.Lib.Audio.Waveform
+import Tyr.Lib.Text.Nfc
+import Tyr.Lib.Text.Unicode
+import Tyr.Lib.Tokenizer.ByteLevelBPE
+import Tyr.Lib.Tokenizer.ConfigJson
+import Tyr.Lib.Tokenizer.WordSplit
+
+-- Configuration and weight records
+import Tyr.IO.ConfigJson
+import Tyr.IO.SafeTensors.Record
+
+-- Widgets
+import Tyr.Lib.Widget
+import Tyr.Lib.Widget.Module
+
 
 /-!
 # Tyr

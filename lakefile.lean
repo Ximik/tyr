@@ -142,6 +142,7 @@ target libtyr pkg : Dynlib := do
 @[default_target]
 lean_lib Tyr where
   roots := #[`Tyr]
+  globs := #[.one `Tyr, .submodules `Tyr.Model]
   precompileModules := true
   -- Linked into every executable that imports a Tyr module and into the
   -- precompiled module libraries.
