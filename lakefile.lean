@@ -196,6 +196,11 @@ lean_exe CheckLayers where
 lean_exe GenerateSafeTensorsRecord where
   root := `Tools.GenerateSafeTensorsRecord
 
+/-- Print `Tyr/Lib/Text/NfcData.lean` or `Tyr/Lib/Text/UnicodeData.lean` from a
+    Unicode Character Database directory. -/
+lean_exe GenerateUnicodeTables where
+  root := `Tools.GenerateUnicodeTables
+
 /-- Write the C prototypes of `TyrFFI`'s extern declarations. Imports only
     `Lean`, so it does not link `libTyrC`. -/
 lean_exe GenerateFfiHeader where
