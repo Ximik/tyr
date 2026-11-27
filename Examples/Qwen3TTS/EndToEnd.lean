@@ -13,6 +13,7 @@ import Examples.Qwen3TTS.SpeechTokenizerBridge
 import Tyr.Lib.Tokenizer
 import Tyr.Core.Typed.Neural
 import Tyr.Model.Qwen.Tokenizer
+import Tyr.IO.Path
 
 namespace Examples.Qwen3TTS
 
@@ -291,14 +292,6 @@ private def printUsage : IO Unit := do
   IO.println "  --decode-chunk-size <n>       Codec-frame chunk size for --streaming-decode (default: 300)"
   IO.println "  --decode-left-context <n>     Left context codec frames for chunked decode (default: 25)"
   IO.println "  --help                        Show this help"
-
-private def expandHome (path : String) : IO String := do
-  if path == "~" then
-    return (← IO.getEnv "HOME").getD path
-  else if path.startsWith "~/" then
-    return s!"{(← IO.getEnv "HOME").getD ""}/{path.drop 2}"
-  else
-    return path
 
 private def ensureParentDir (path : String) : IO Unit := do
   match System.FilePath.parent ⟨path⟩ with

@@ -31,7 +31,7 @@ private theorem convLength_pointwise {f : Nat} (hf : 0 < f) : Shape.convLength f
 private theorem convLength_halve {f : Nat} (hf : 0 < f) : Shape.convLength (2 * f) 3 2 1 1 = f := by
   simp only [Shape.convLength]; omega
 
-private theorem convTransposeOutputSize_double {f : Nat} (hf : 0 < f) :
+private theorem convTransposeLength_double {f : Nat} (hf : 0 < f) :
     Shape.convTransposeLength f 3 2 1 1 1 = 2 * f := by
   simp only [Shape.convTransposeLength]; omega
 
@@ -880,7 +880,7 @@ def forward {frames inC outC styleDim : Nat}
   let h0 : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device } := m.norm1.forward x style
   let h1 : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device } := leakyRelu h0 0.2
   let h2 : Tensor { shape := #[1, inC, 2 * frames], dtype := .Float32, device := device } := (m.pool.forward h1).reshape #[1, inC, 2 * frames]
-    (by rw [convTransposeOutputSize_double hf])
+    (by rw [convTransposeLength_double hf])
   let h3 : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := (m.conv1.forward h2).reshape #[1, outC, 2 * frames]
     (by rw [convLength_same h2f (by decide)])
   let h4 : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := m.norm2.forward h3 style
@@ -991,7 +991,7 @@ private theorem convLength_noise {m S : Nat} (hm : 0 < m) (hS : 2 ≤ S) :
     rw [Nat.succ_mul]; omega
   rw [hN, Nat.mul_comm q S, Nat.mul_add_div (by omega), Nat.div_eq_of_lt hr]
 
-private theorem convTransposeOutputSize_upsample {L k r : Nat} (hL : 0 < L) (hr : 0 < r) (hrk : r ≤ k)
+private theorem convTransposeLength_upsample {L k r : Nat} (hL : 0 < L) (hr : 0 < r) (hrk : r ≤ k)
     (hpar : 2 ∣ k - r) : Shape.convTransposeLength L k r ((k - r) / 2) 0 1 = L * r := by
   simp only [Shape.convTransposeLength]
   obtain ⟨g, rfl⟩ : ∃ g, L = g + 1 := ⟨L - 1, by omega⟩
@@ -1066,7 +1066,7 @@ theorem up_frames (g : GeneratorConfig) {b : Nat} (hb : 0 < b) {i : Nat}
       ((g.upKernel i - g.rate i) / 2) 0 1 = g.stageUpsampledFrames b i := by
   have hv := g.stagesValid.2 i hi
   unfold upKernel rate
-  rw [convTransposeOutputSize_upsample (g.stageInFrames_pos hb i) (Nat.zero_lt_of_lt hv.1) hv.2.1 hv.2.2]
+  rw [convTransposeLength_upsample (g.stageInFrames_pos hb i) (Nat.zero_lt_of_lt hv.1) hv.2.1 hv.2.2]
   simp only [stageInFrames, stageUpsampledFrames, g.prefix_succ hi, rate, Nat.mul_assoc]
 
 theorem mid_frames (g : GeneratorConfig) (b : Nat) {i : Nat} (h : i + 1 < g.upsampleRates.size) :
